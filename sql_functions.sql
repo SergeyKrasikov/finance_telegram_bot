@@ -427,3 +427,36 @@ SELECT DISTINCT currency FROM cash_flow);
 	end
 $function$
 ;
+
+-- записывает расход при и меняет валюту если это не основная валюта
+CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange(_users_id bigint, _category_name_from character varying, _value numeric, _currency varchar, _description text DEFAULT NULL::text)
+RETURNS text
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _value_RUB NUMERIC(10,2);
+    _reserv_id int;
+    _category_id_from int;
+BEGIN 
+    _value_RUB := (SELECT _value / (er.rate / er2.rate) as value
+				    FROM exchange_rates er 
+				    JOIN exchange_rates er2 ON er.datetime = er2.datetime 
+				    WHERE er.currency = _currency 
+				    AND er2.currency = 'RUB'  
+				    AND er.datetime = (SELECT max(datetime) FROM exchange_rates er));
+    _reserv_id := (SELECT get_categories_id(_users_id, 9));
+    _category_id_from := (SELECT c.id
+			                from categories c
+			                join categories_category_groups ccg on c.id = ccg.categories_id
+			                where ccg.category_groyps_id = 14 and ccg.users_id = _users_id
+			                and c."name"=_category_name_from);
+
+    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
+    VALUES
+        (_users_id, _reserv_id, _category_id_from, _value, _currency, concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency, ' ', _description)),
+        (_users_id, _category_id_from, _reserv_id, _value_RUB, 'RUB', concat('auto exchange ', _value, ' ', _currency, ' to ', _value_RUB, ' RUB', ' ', _description)),
+        (_users_id, _category_id_from, NULL, _value, _currency, _description);
+
+    RETURN 'OK';
+END
+$function$;

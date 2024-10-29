@@ -17,6 +17,7 @@ eggs/
 lib/
 lib64/
 parts/
+service_account/
 sdist/
 var/
 wheels/

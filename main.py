@@ -307,6 +307,8 @@ async def write_value(message: Message, state: FSMContext) -> None:
     transaction_type = data.get('transaction_type')
     value = message.text.split(' ', 2)
     value[0] = float(value[0].replace(',', '.'))
+    value += ['RUB', '#ручная корректировка']
+    value = value[:3]
     if transaction_type == '+':
         await db_function('insert_revenue', message.chat.id, category, *value)
         kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
@@ -380,7 +382,10 @@ async def write_spend(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     value = data.get('value').split(' ', 2)
     value[0] = float(value[0].replace(',', '.'))
-    await db_function('insert_spend', message.chat.id, category, *value)
+    if len(value) > 1 and value[1] != 'RUB':
+        await db_function('insert_spend_with_exchange', message.chat.id, category, *value)
+    else:    
+        await db_function('insert_spend', message.chat.id, category, *value)
     balance = await db_function('get_remains', message.chat.id, category)
     kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
