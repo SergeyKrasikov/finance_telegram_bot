@@ -429,9 +429,10 @@ $function$
 ;
 
 -- записывает расход при и меняет валюту если это не основная валюта
-CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange(_users_id bigint, _category_name_from character varying, _value numeric, _currency varchar, _description text DEFAULT NULL::text)
-RETURNS text
-LANGUAGE plpgsql
+
+CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange(_users_id bigint, _category_name_from character varying, _value numeric, _currency character varying, _description text DEFAULT NULL::text)
+ RETURNS text
+ LANGUAGE plpgsql
 AS $function$
 DECLARE
     _value_RUB NUMERIC(10,2);
@@ -439,11 +440,17 @@ DECLARE
     _category_id_from int;
 BEGIN 
     _value_RUB := (SELECT _value / (er.rate / er2.rate) as value
-				    FROM exchange_rates er 
-				    JOIN exchange_rates er2 ON er.datetime = er2.datetime 
-				    WHERE er.currency = _currency 
-				    AND er2.currency = 'RUB'  
-				    AND er.datetime = (SELECT max(datetime) FROM exchange_rates er));
+FROM (SELECT
+		datetime,
+		currency,
+		rate,
+		ROW_NUMBER() OVER (PARTITION BY currency ORDER BY datetime DESC) AS rown
+	  FROM
+		exchange_rates) er
+JOIN exchange_rates er2 ON er.datetime = er2.datetime 
+WHERE er.currency = _currency 
+AND er2.currency = 'RUB'  
+AND rown = 1);
     _reserv_id := (SELECT get_categories_id(_users_id, 9));
     _category_id_from := (SELECT c.id
 			                from categories c
@@ -459,4 +466,5 @@ BEGIN
 
     RETURN 'OK';
 END
-$function$;
+$function$
+;

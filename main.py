@@ -14,8 +14,8 @@ from psycopg2 import Error
 from typing import Tuple
 
 
-import download_rates 
 
+import download_rates 
 
 load_dotenv()
 TOKEN = os.environ.get('TOKEN')
@@ -27,6 +27,8 @@ PG_DATABASE = os.environ.get('PG_DATABASE')
 
 bot = Bot(TOKEN)
 dp = Dispatcher()
+
+
 
 async def create_connection() -> object:
     connection = psycopg2.connect(user=PG_USER,
@@ -56,6 +58,7 @@ async def load_rate() -> None:
     currency = await db_function('get_currency')
     date = (today)
     result = download_rates.extract(date.strftime('%Y-%m-%d'), currency)
+    result += download_rates.extract_cripto(currency)
     download_rates.load(result)
 
 
@@ -382,7 +385,8 @@ async def write_spend(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     value = data.get('value').split(' ', 2)
     value[0] = float(value[0].replace(',', '.'))
-    if len(value) > 1 and value[1] != 'RUB':
+    if len(value) > 1 and value[1].upper() != 'RUB':
+        value[1] = value[1].upper()
         await db_function('insert_spend_with_exchange', message.chat.id, category, *value)
     else:    
         await db_function('insert_spend', message.chat.id, category, *value)
@@ -435,7 +439,7 @@ scheduler = AsyncIOScheduler()
 
 scheduler.add_job(monthly_task, 'cron', month='*')
 scheduler.add_job(daily_task, 'cron', hour='19')
-scheduler.add_job(load_rate, 'interval', hours=10)
+scheduler.add_job(load_rate, 'interval', hours=13)
 
         
 async def on_startup() -> None: 

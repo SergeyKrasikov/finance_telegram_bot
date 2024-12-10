@@ -15,7 +15,7 @@ PG_DATABASE = os.environ.get('PG_DATABASE')
 COINMARKETCAP_TOKEN = os.environ.get('COINMARKETCAP_TOKEN')
 
 
-def extract_cripto(currency: list) -> list:
+def extract(currency: list) -> dict:
     try:
         url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
         parameters = {
@@ -28,27 +28,13 @@ def extract_cripto(currency: list) -> list:
         }
         
         data =[]
-        r = 1 / requests.get(url, headers=headers, params=parameters).json().get('data')
+        r = requests.get(url, headers=headers, params=parameters).json().get('data')
         print(1)
         for i in currency:
             value = r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
             if value:
                 data.append({'timestamp': datetime.datetime.fromisoformat(r.get(i,{}).get('last_updated')).strftime('%Y-%m-%d %H:%M:%S'), 'currency': i, 'value': value})
-        return data
-    except Exception as error:
-        raise error
-
-
-def extract(report_date: str, currency: list) -> list:
-    try:
-        response_json = requests.get(f'https://openexchangerates.org/api/historical/{report_date}.json?app_id={OPEN_EXCHANGE_TOKEN}&symbols={",".join(currency)}').json()
-        data = []
-        for currency, value in response_json['rates'].items():
-            data_dict = {}
-            data_dict['timestamp'] = datetime.datetime.utcfromtimestamp(response_json['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
-            data_dict['currency'] = currency
-            data_dict['value'] = value
-            data.append(data_dict)
+        print(2)
         return data
     except Exception as error:
         raise error
@@ -80,12 +66,13 @@ def load(result: dict) -> None:
             connection.close()
             cur.close()
 
+
 def main():
     try:
         today = datetime.datetime.now()
 
         date = (today)
-        result = extract(date.strftime('%Y-%m-%d'),['BTC', 'ETH', 'TON', 'RUB', 'EUR'])
+        result = extract(['BTC', 'ETH', 'TON', 'RUB', 'EUR'])
         load(result)
     except Exception as error:
         print(error)
