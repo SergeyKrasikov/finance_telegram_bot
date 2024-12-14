@@ -36,7 +36,7 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ secrets.SERVER_PORT }}
         script: |
-          cd ~/finance_bot
+          cd ~/finance_telegram_bot
           docker-compose build
           docker-compose down
           docker-compose up -d
