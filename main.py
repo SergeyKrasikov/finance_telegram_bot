@@ -16,6 +16,7 @@ from typing import Tuple
 
 import download_rates 
 
+
 load_dotenv()
 TOKEN = os.environ.get('TOKEN')
 PG_USER = os.environ.get('POSTGRES_USER')
