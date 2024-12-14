@@ -14,7 +14,6 @@ from psycopg2 import Error
 from typing import Tuple
 
 
-
 import download_rates 
 
 load_dotenv()
