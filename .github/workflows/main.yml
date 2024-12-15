@@ -1,42 +1,78 @@
 name: CI/CD for Finance Telegram Bot
 
+# Триггеры для разных веток
 on:
   push:
     branches:
-      - main
+      - main      # Для продакшн-сборки
+      - test      # Для тестовой сборки
 
 jobs:
-  build_and_deploy:
+  # Тестовая сборка для ветки test
+  test_build:
+    if: github.ref == 'refs/heads/test'
     runs-on: ubuntu-latest
 
     steps:
-    # Шаг 1. Клонирование кода (локально для проверки)
-    - name: Checkout code
-      uses: actions/checkout@v2
+      # Шаг 1: Клонируем код
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-    # Шаг 2. Обновление кода на сервере
-    - name: Pull latest code on server
-      uses: appleboy/ssh-action@v0.1.5
-      with:
-        host: ${{ secrets.SERVER_IP }}
-        username: ${{ secrets.SERVER_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ secrets.SERVER_PORT }}
-        script: |
-          cd ~/finance_telegram_bot
-          git reset --hard
-          git pull origin main
+      # Шаг 2: Обновляем код на сервере и запускаем тестовую сборку
+      - name: Deploy test environment
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "Starting test environment deployment..."
+            TEST_DIR=~/finance_bot_test
 
-    # Шаг 3. Пересборка и перезапуск контейнеров
-    - name: Build and restart containers
-      uses: appleboy/ssh-action@v0.1.5
-      with:
-        host: ${{ secrets.SERVER_IP }}
-        username: ${{ secrets.SERVER_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ secrets.SERVER_PORT }}
-        script: |
-          cd ~/finance_telegram_bot
-          docker-compose build
-          docker-compose down
-          docker-compose up -d
+            # Создаем директорию для теста
+            mkdir -p $TEST_DIR
+
+            # Синхронизируем код
+            rsync -av --delete ~/finance_telegram_bot/ $TEST_DIR/
+
+            # Переходим в директорию теста
+            cd $TEST_DIR
+
+            # Сборка и перезапуск контейнеров
+            docker-compose -f docker-compose.yml build
+            docker-compose -f docker-compose.yml down
+            docker-compose -f docker-compose.yml up -d --force-recreate
+
+            echo "Test environment updated successfully."
+
+  # Продакшн сборка для ветки main
+  production_build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      # Шаг 1: Клонируем код
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Шаг 2: Обновляем основной код и пересобираем контейнеры
+      - name: Deploy production environment
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "Starting production environment deployment..."
+            cd ~/finance_telegram_bot
+
+            # Обновляем код и перезапускаем продакшн контейнеры
+            git reset --hard
+            git pull origin main
+            docker-compose build
+            docker-compose down
+            docker-compose up -d
+
+            echo "Production environment updated successfully."
