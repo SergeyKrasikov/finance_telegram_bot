@@ -28,6 +28,7 @@ bot = Bot(TOKEN)
 dp = Dispatcher()
 
 
+
 async def create_connection() -> object:
     connection = psycopg2.connect(user=PG_USER,
                                 password=PG_PASSWORD,
