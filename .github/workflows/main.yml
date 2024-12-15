@@ -30,11 +30,10 @@ jobs:
             echo "Starting test environment deployment..."
             TEST_DIR=~/finance_bot_test
 
-            # Создаем директорию для теста
-            mkdir -p $TEST_DIR
-
-            # Синхронизируем код
-            rsync -av --delete ~/finance_telegram_bot/ $TEST_DIR/
+            # Пуллим последние изменения из ветки test
+            git fetch origin test
+            git checkout test
+            git reset --hard origin/test
 
             # Переходим в директорию теста
             cd $TEST_DIR
