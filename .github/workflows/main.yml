@@ -1,11 +1,10 @@
 name: CI/CD for Finance Telegram Bot
 
-# Триггеры для разных веток
 on:
   push:
     branches:
-      - main      # Для продакшн-сборки
-      - test      # Для тестовой сборки
+      - main      # Production сборка
+      - test      # Тестовая сборка
 
 jobs:
   # Тестовая сборка для ветки test
@@ -14,11 +13,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Шаг 1: Клонируем код
       - name: Checkout code
         uses: actions/checkout@v2
 
-      # Шаг 2: Обновляем код на сервере и запускаем тестовую сборку
       - name: Deploy test environment
         uses: appleboy/ssh-action@v0.1.5
         with:
@@ -32,17 +29,23 @@ jobs:
 
             # Создаем директорию для теста
             mkdir -p $TEST_DIR
-
-            # Синхронизируем код
-            rsync -av --delete ~/finance_telegram_bot/ $TEST_DIR/
-
-            # Переходим в директорию теста
             cd $TEST_DIR
 
+            # Проверяем, инициализирован ли репозиторий
+            if [ ! -d ".git" ]; then
+              git init
+              git remote add origin https://github.com/${{ github.repository }}.git
+            fi
+
+            # Пуллим последние изменения из ветки test
+            git fetch origin test
+            git checkout test
+            git reset --hard origin/test
+
             # Сборка и перезапуск контейнеров
-            docker-compose -f docker-compose.yml build
-            docker-compose -f docker-compose.yml down
-            docker-compose -f docker-compose.yml up -d --force-recreate
+            docker-compose -f docker-compose.yml -f docker-compose.override.yml build
+            docker-compose -f docker-compose.yml -f docker-compose.override.yml down
+            docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate
 
             echo "Test environment updated successfully."
 
@@ -52,11 +55,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Шаг 1: Клонируем код
       - name: Checkout code
         uses: actions/checkout@v2
 
-      # Шаг 2: Обновляем основной код и пересобираем контейнеры
       - name: Deploy production environment
         uses: appleboy/ssh-action@v0.1.5
         with:
@@ -68,11 +69,13 @@ jobs:
             echo "Starting production environment deployment..."
             cd ~/finance_telegram_bot
 
-            # Обновляем код и перезапускаем продакшн контейнеры
+            # Пуллим последние изменения из ветки main
             git reset --hard
             git pull origin main
-            docker-compose build
-            docker-compose down
-            docker-compose up -d
+
+            # Сборка и перезапуск продакшн контейнеров
+            docker-compose --env-file .env -f docker-compose.yml build
+            docker-compose --env-file .env -f docker-compose.yml down
+            docker-compose --env-file .env -f docker-compose.yml up -d
 
             echo "Production environment updated successfully."
