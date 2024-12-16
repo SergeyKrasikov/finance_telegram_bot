@@ -1,24 +1,20 @@
 name: CI/CD for Finance Telegram Bot
 
-# Триггеры для разных веток
 on:
   push:
     branches:
-      - main      # Для продакшн-сборки
-      - test      # Для тестовой сборки
+      - main
+      - test
 
 jobs:
-  # Тестовая сборка для ветки test
   test_build:
     if: github.ref == 'refs/heads/test'
     runs-on: ubuntu-latest
 
     steps:
-      # Шаг 1: Клонируем код
       - name: Checkout code
         uses: actions/checkout@v2
 
-      # Шаг 2: Обновляем код на сервере и запускаем тестовую сборку
       - name: Deploy test environment
         uses: appleboy/ssh-action@v0.1.5
         with:
@@ -28,11 +24,7 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           script: |
             echo "Starting test environment deployment..."
-            
-            # Директория для тестовой сборки
             TEST_DIR=~/finance_bot_test
-
-            # Пуллим последние изменения из ветки test
             mkdir -p $TEST_DIR
             cd $TEST_DIR
             if [ ! -d ".git" ]; then
@@ -42,24 +34,20 @@ jobs:
               git pull origin test
             fi
 
-            # Сборка и перезапуск контейнеров для тестовой среды
+            # Сборка и перезапуск контейнеров
             docker-compose -f docker-compose.yml -f docker-compose.override.yml build
             docker-compose -f docker-compose.yml -f docker-compose.override.yml down
             docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate
-
             echo "Test environment updated successfully."
 
-  # Продакшн сборка для ветки main
   production_build:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
-      # Шаг 1: Клонируем код
       - name: Checkout code
         uses: actions/checkout@v2
 
-      # Шаг 2: Обновляем основной код и пересобираем контейнеры
       - name: Deploy production environment
         uses: appleboy/ssh-action@v0.1.5
         with:
@@ -70,12 +58,9 @@ jobs:
           script: |
             echo "Starting production environment deployment..."
             cd ~/finance_telegram_bot
-
-            # Обновляем код и перезапускаем продакшн контейнеры
             git reset --hard
             git pull origin main
             docker-compose build
             docker-compose down
             docker-compose up -d
-
             echo "Production environment updated successfully."
