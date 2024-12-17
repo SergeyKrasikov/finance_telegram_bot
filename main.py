@@ -437,8 +437,8 @@ async def write_value(message: Message, state: FSMContext) -> None:
 scheduler = AsyncIOScheduler()
 
 scheduler.add_job(monthly_task, 'cron', month='*')
-scheduler.add_job(daily_task, 'cron', hour='19')
-scheduler.add_job(load_rate, 'interval', hours=13)
+scheduler.add_job(daily_task, 'cron', hour='23', min='59')
+scheduler.add_job(load_rate, 'interval', hours=24)
 
         
 async def on_startup() -> None: 
