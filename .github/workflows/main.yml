@@ -49,6 +49,10 @@ jobs:
 
             echo "Test environment updated successfully."
 
+            # Удаление через 2 часа
+            sleep 7200 && docker-compose -f docker-compose.yml down --rmi all --volumes &
+            echo "Test environment updated successfully."
+
   # Продакшн сборка для ветки main
   production_build:
     if: github.ref == 'refs/heads/main'
