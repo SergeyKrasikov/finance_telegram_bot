@@ -9,10 +9,25 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import psycopg2
-from psycopg2 import Error
+import asyncpg
 from typing import Tuple
 
+import logging
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
+    filename='app.log',  # Файл, в который будут записываться логи
+    filemode='a'  # Режим записи в файл: 'a' для добавления, 'w' для перезаписи
+)
+
+# Пример использования
+logging.info("Приложение запущено.")
+logging.debug("Это сообщение для отладки.")
+logging.warning("Это предупреждение.")
+logging.error("Произошла ошибка.")
+logging.critical("Критическая ошибка.")
 
 import download_rates 
 
@@ -29,27 +44,36 @@ dp = Dispatcher()
 
 
 
-async def create_connection() -> object:
-    connection = psycopg2.connect(user=PG_USER,
-                                password=PG_PASSWORD,
-                                host=PG_HOST,
-                                port=PG_PORT,
-                                database=PG_DATABASE)
+async def create_connection() -> asyncpg.Connection:
+    connection = await asyncpg.connect(user=PG_USER,
+                                       password=PG_PASSWORD,
+                                       host=PG_HOST,
+                                       port=PG_PORT,
+                                       database=PG_DATABASE)
     return connection
 
 
-async def db_function(func: str, *args) -> list:    
+async def db_function(func: str, *args) -> list:
+    """
+    Calls a stored procedure in the database and returns the result.
+
+    Args:
+        func (str): The name of the stored procedure to call.
+        *args: The arguments to pass to the stored procedure.
+
+    Returns:
+        list: The result of the stored procedure call.
+    """
+    logging.info(f"Calling stored procedure {func} with arguments {args}")
     connection = await create_connection()
-    cur = connection.cursor()
-    cur.callproc(func, args)
-    response = cur.fetchall()
-    connection.commit()
-    cur.close()
-    if func == 'get_last_transaction':
-        return response
-    elif func == 'get_category_balance_with_currency':
-        return response
-    return [i[0] for i in response]
+    async with connection.transaction():
+        placeholders = ', '.join(f'${i+1}' for i in range(len(args)))
+        query = f"SELECT * FROM {func}({placeholders})"
+        result = await connection.fetch(query, *args)
+        logging.info(f"Stored procedure {func} returned {result}")
+        if func == 'get_category_balance_with_currency':
+            return result
+        return [i[0] for i in result]
 
 
 async def load_rate() -> None:
