@@ -43,10 +43,14 @@ jobs:
             git reset --hard origin/test
 
             # Сборка и перезапуск контейнеров
-            docker-compose -f docker-compose.yml -f docker-compose.override.yml build
-            docker-compose -f docker-compose.yml -f docker-compose.override.yml down
-            docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate
+            docker-compose -f docker-compose.yml build
+            docker-compose -f docker-compose.yml down
+            docker-compose -f docker-compose.yml up -d --force-recreate
 
+            echo "Test environment updated successfully."
+
+            # Удаление через 2 часа
+            sleep 7200 && docker-compose -f docker-compose.yml down --rmi local &
             echo "Test environment updated successfully."
 
   # Продакшн сборка для ветки main
