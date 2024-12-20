@@ -53,27 +53,16 @@ async def create_connection() -> asyncpg.Connection:
     return connection
 
 
-async def db_function(func: str, *args) -> list:
-    """
-    Calls a stored procedure in the database and returns the result.
-
-    Args:
-        func (str): The name of the stored procedure to call.
-        *args: The arguments to pass to the stored procedure.
-
-    Returns:
-        list: The result of the stored procedure call.
-    """
-    logging.info(f"Calling stored procedure {func} with arguments {args}")
+async def db_function(func: str, *args) -> list:    
     connection = await create_connection()
-    async with connection.transaction():
-        placeholders = ', '.join(f'${i+1}' for i in range(len(args)))
-        query = f"SELECT * FROM {func}({placeholders})"
-        result = await connection.fetch(query, *args)
-        logging.info(f"Stored procedure {func} returned {result}")
-        if func == 'get_category_balance_with_currency':
-            return result
-        return [i[0] for i in result]
+    async with create_connection() as connection:
+        with connection.cursor() as cur:
+            cur.callproc(func, args)
+            response = cur.fetchall()
+            connection.commit()
+            if func == 'get_category_balance_with_currency':
+                return response
+            return [i[0] for i in response]
 
 
 async def load_rate() -> None:
