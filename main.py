@@ -12,7 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import psycopg2
 from psycopg2 import Error
 from typing import Tuple
-
+import download_rates 
 import logging
 
 # Настройка логирования
@@ -30,7 +30,6 @@ logging.warning("Это предупреждение.")
 logging.error("Произошла ошибка.")
 logging.critical("Критическая ошибка.")
 
-import download_rates 
 
 load_dotenv()
 TOKEN = os.environ.get('TOKEN')
@@ -44,23 +43,14 @@ bot = Bot(TOKEN)
 dp = Dispatcher()
 
 
-print('start')
+
 async def create_connection() -> object:
-    try:
-        connection = psycopg2.connect(user=PG_USER,
-                                      password=PG_PASSWORD,
-                                      host=PG_HOST,
-                                      port=PG_PORT,
-                                      database=PG_DATABASE)
-        logging.info("Database connection established.")
-        return connection
-    except (Exception, Error) as error:
-        logging.error(f"Error while connecting to PostgreSQL: {error}")
-        raise
-    finally:
-        if connection:
-            connection.close()
-            logging.info("Database connection closed.")
+    connection = psycopg2.connect(user=PG_USER,
+                                password=PG_PASSWORD,
+                                host=PG_HOST,
+                                port=PG_PORT,
+                                database=PG_DATABASE)
+    return connection
 
 
 async def db_function(func: str, *args) -> list:    
