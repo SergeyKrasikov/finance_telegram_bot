@@ -12,9 +12,24 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import psycopg2
 from psycopg2 import Error
 from typing import Tuple
-
-
 import download_rates 
+import logging
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
+    filename='app.log',  # Файл, в который будут записываться логи
+    filemode='a'  # Режим записи в файл: 'a' для добавления, 'w' для перезаписи
+)
+
+# Пример использования
+logging.info("Приложение запущено.")
+logging.debug("Это сообщение для отладки.")
+logging.warning("Это предупреждение.")
+logging.error("Произошла ошибка.")
+logging.critical("Критическая ошибка.")
+
 
 load_dotenv()
 TOKEN = os.environ.get('TOKEN')
@@ -437,8 +452,8 @@ async def write_value(message: Message, state: FSMContext) -> None:
 scheduler = AsyncIOScheduler()
 
 scheduler.add_job(monthly_task, 'cron', month='*')
-scheduler.add_job(daily_task, 'cron', hour='19')
-scheduler.add_job(load_rate, 'interval', hours=13)
+scheduler.add_job(daily_task, 'cron', hour='23', minute='59')
+scheduler.add_job(load_rate, 'interval', hours=14)
 
         
 async def on_startup() -> None: 
