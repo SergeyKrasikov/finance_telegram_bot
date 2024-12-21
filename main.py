@@ -9,7 +9,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import asyncpg
+import psycopg2
+from psycopg2 import Error
 from typing import Tuple
 
 import logging
@@ -44,26 +45,27 @@ dp = Dispatcher()
 
 
 
-async def create_connection() -> asyncpg.Connection:
-    connection = await asyncpg.connect(user=PG_USER,
-                                       password=PG_PASSWORD,
-                                       host=PG_HOST,
-                                       port=PG_PORT,
-                                       database=PG_DATABASE)
+async def create_connection() -> object:
+    connection = psycopg2.connect(user=PG_USER,
+                                password=PG_PASSWORD,
+                                host=PG_HOST,
+                                port=PG_PORT,
+                                database=PG_DATABASE)
     return connection
 
 
-async def db_function(func: str, *args) -> list:
-    logging.info(f"Calling database function: {func} with arguments: {args}")
+async def db_function(func: str, *args) -> list:    
     connection = await create_connection()
-    async with connection.transaction():
-        try:
-            result = await connection.fetch(f"SELECT * FROM {func}($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)", *args)
-            logging.info(f"Database function {func} returned: {result}")
-            return result
-        except Exception as e:
-            logging.error(f"Error calling database function {func}: {e}")
-            raise
+    cur = connection.cursor()
+    cur.callproc(func, args)
+    response = cur.fetchall()
+    connection.commit()
+    cur.close()
+    if func == 'get_last_transaction':
+        return response
+    elif func == 'get_category_balance_with_currency':
+        return response
+    return [i[0] for i in response]
 
 
 async def load_rate() -> None:
