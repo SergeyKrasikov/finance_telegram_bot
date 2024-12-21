@@ -53,16 +53,17 @@ async def create_connection() -> asyncpg.Connection:
     return connection
 
 
-async def db_function(func: str, *args) -> list:    
+async def db_function(func: str, *args) -> list:
+    logging.info(f"Calling database function: {func} with arguments: {args}")
     connection = await create_connection()
-    async with create_connection() as connection:
-        with connection.cursor() as cur:
-            cur.callproc(func, args)
-            response = cur.fetchall()
-            connection.commit()
-            if func == 'get_category_balance_with_currency':
-                return response
-            return [i[0] for i in response]
+    async with connection.transaction():
+        try:
+            result = await connection.fetch(f"SELECT * FROM {func}($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)", *args)
+            logging.info(f"Database function {func} returned: {result}")
+            return result
+        except Exception as e:
+            logging.error(f"Error calling database function {func}: {e}")
+            raise
 
 
 async def load_rate() -> None:
