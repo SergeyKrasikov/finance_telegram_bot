@@ -59,7 +59,7 @@ services:
     restart: always
     depends_on:
       - postgres
-      - ./logs:/logs
+      - logs:logs
 
 
 volumes:
