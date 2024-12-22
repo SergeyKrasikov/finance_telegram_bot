@@ -16,7 +16,7 @@ import download_rates
 import logging
 
 # Настройка логирования
-log_directory = os.path.join(os.path.dirname(__file__), 'logs')
+log_directory = '/logs'  # Внутри контейнера
 os.makedirs(log_directory, exist_ok=True)
 log_file = os.path.join(log_directory, 'app.log')
 
