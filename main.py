@@ -19,7 +19,7 @@ import logging
 logging.basicConfig(
     level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
     format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
-    filename='app.log',  # Файл, в который будут записываться логи
+    filename='/logs/app.log',  # Файл, в который будут записываться логи
     filemode='a'  # Режим записи в файл: 'a' для добавления, 'w' для перезаписи
 )
 
