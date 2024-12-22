@@ -45,13 +45,15 @@ dp = Dispatcher()
 
 
 async def create_connection() -> object:
-    connection = psycopg2.connect(user=PG_USER,
-                                password=PG_PASSWORD,
-                                host=PG_HOST,
-                                port=PG_PORT,
-                                database=PG_DATABASE)
-    return connection
-
+    try:
+        connection = psycopg2.connect(user=PG_USER,
+                                    password=PG_PASSWORD,
+                                    host=PG_HOST,
+                                    port=PG_PORT,
+                                    database=PG_DATABASE)
+        return connection
+    except (Exception, Error) as error:
+        logging.error("Error while connecting to PostgreSQL", error)
 
 async def db_function(func: str, *args) -> list:    
     connection = await create_connection()
