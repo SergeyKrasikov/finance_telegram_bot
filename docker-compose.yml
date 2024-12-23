@@ -59,7 +59,8 @@ services:
     restart: always
     depends_on:
       - postgres
-       - ./logs:/logs
+    volumes:
+      - ./logs:/logs  # Монтируем директорию
 
 
 volumes:
