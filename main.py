@@ -57,20 +57,27 @@ async def create_connection() -> object:
                                     database=PG_DATABASE)
         return connection
     except (Exception, Error) as error:
-        logging.error("Error while connecting to PostgreSQL", error)
+        logging.error("Error while connecting to PostgreSQL", exc_info=True)
 
 async def db_function(func: str, *args) -> list:    
-    connection = await create_connection()
-    cur = connection.cursor()
-    cur.callproc(func, args)
-    response = cur.fetchall()
-    connection.commit()
-    cur.close()
-    if func == 'get_last_transaction':
-        return response
-    elif func == 'get_category_balance_with_currency':
-        return response
-    return [i[0] for i in response]
+    connection = None
+    try:
+        connection = await create_connection()
+        cur = connection.cursor()
+        cur.callproc(func, args)
+        response = cur.fetchall()
+        connection.commit()
+        cur.close()
+        if func == 'get_last_transaction':
+            return response
+        elif func == 'get_category_balance_with_currency':
+            return response
+        return [i[0] for i in response]
+    except (Exception, Error) as error:
+        logging.error("Error while function to PostgreSQL", exc_info=True)
+    finally:
+        if connection:
+            connection.close()
 
 
 async def load_rate() -> None:
