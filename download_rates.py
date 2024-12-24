@@ -28,10 +28,10 @@ def extract_cripto(currency: list) -> list:
         }
         
         data =[]
-        r = 1 / requests.get(url, headers=headers, params=parameters).json().get('data')
+        r = requests.get(url, headers=headers, params=parameters).json().get('data')
         print(1)
         for i in currency:
-            value = r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
+            value = 1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
             if value:
                 data.append({'timestamp': datetime.datetime.fromisoformat(r.get(i,{}).get('last_updated')).strftime('%Y-%m-%d %H:%M:%S'), 'currency': i, 'value': value})
         return data
