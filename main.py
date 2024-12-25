@@ -12,9 +12,28 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import psycopg2
 from psycopg2 import Error
 from typing import Tuple
-
-
 import download_rates 
+import logging
+
+# Настройка логирования
+log_directory = '/logs'  # Внутри контейнера
+os.makedirs(log_directory, exist_ok=True)
+log_file = os.path.join(log_directory, 'app.log')
+
+logging.basicConfig(
+    level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
+    filename=log_file,  # Файл, в который будут записываться логи
+    filemode='a'  # Режим записи в файл: 'a' для добавления, 'w' для перезаписи
+)
+
+# Пример использования
+logging.info("Приложение запущено.")
+logging.debug("Это сообщение для отладки.")
+logging.warning("Это предупреждение.")
+logging.error("Произошла ошибка.")
+logging.critical("Критическая ошибка.")
+
 
 load_dotenv()
 TOKEN = os.environ.get('TOKEN')
@@ -30,79 +49,97 @@ dp = Dispatcher()
 
 
 async def create_connection() -> object:
-    connection = psycopg2.connect(user=PG_USER,
-                                password=PG_PASSWORD,
-                                host=PG_HOST,
-                                port=PG_PORT,
-                                database=PG_DATABASE)
-    return connection
-
+    try:
+        connection = psycopg2.connect(user=PG_USER,
+                                    password=PG_PASSWORD,
+                                    host=PG_HOST,
+                                    port=PG_PORT,
+                                    database=PG_DATABASE)
+        return connection
+    except (Exception, Error) as error:
+        logging.error("Error while connecting to PostgreSQL", exc_info=True)
 
 async def db_function(func: str, *args) -> list:    
-    connection = await create_connection()
-    cur = connection.cursor()
-    cur.callproc(func, args)
-    response = cur.fetchall()
-    connection.commit()
-    cur.close()
-    if func == 'get_last_transaction':
-        return response
-    elif func == 'get_category_balance_with_currency':
-        return response
-    return [i[0] for i in response]
+    connection = None
+    try:
+        connection = await create_connection()
+        cur = connection.cursor()
+        cur.callproc(func, args)
+        response = cur.fetchall()
+        connection.commit()
+        cur.close()
+        if func == 'get_last_transaction':
+            return response
+        elif func == 'get_category_balance_with_currency':
+            return response
+        return [i[0] for i in response]
+    except (Exception, Error) as error:
+        logging.error("Error while function to PostgreSQL", exc_info=True)
+    finally:
+        if connection:
+            connection.close()
 
 
 async def load_rate() -> None:
-    today = datetime.datetime.now()
-    currency = await db_function('get_currency')
-    date = (today)
-    result = download_rates.extract(date.strftime('%Y-%m-%d'), currency)
-    result += download_rates.extract_cripto(currency)
-    download_rates.load(result)
-
+    try:
+        today = datetime.datetime.now()
+        currency = await db_function('get_currency')
+        date = (today)
+        result = download_rates.extract(date.strftime('%Y-%m-%d'), currency)
+        result += download_rates.extract_cripto(currency)
+        download_rates.load(result)
+    except (Exception, Error) as error:
+        logging.error("Error while loading rates", exc_info=True)
 
 async def daily_task() -> None:
-    users = await db_function('get_all_users_id')
-    for user in users:
-        transactions = await db_function('get_daily_transactions', user)
-        if transactions:
-            await bot.send_message(user, 'Транзакции за сегодня:\n'+'\n'.join([i.replace('00000000', '') for i in transactions]))
-        else:
-            await bot.send_message(user, 'Сегодня транзакций не было, или возможно стоит их внести')    
-
+    try:
+        users = await db_function('get_all_users_id')
+        for user in users:
+            transactions = await db_function('get_daily_transactions', user)
+            if transactions:
+                await bot.send_message(user, 'Транзакции за сегодня:\n'+'\n'.join([i.replace('00000000', '') for i in transactions]))
+            else:
+                await bot.send_message(user, 'Сегодня транзакций не было, или возможно стоит их внести')    
+    except (Exception, Error) as error:
+        logging.error("Error while daily task", exc_info=True)
 
 async def monthly_task() -> None:
-    result = await db_function('monthly')
-    response = {}
-    for i in result:
-        response[i['user_id']] = response.get(i['user_id'],{})
-        response[i['second_user_id']] = response.get(i['second_user_id'],{})
-        response[i['user_id']]['семейный_взнос'] = response[i['user_id']].get('семейный_взнос', 0) + i.get('семейный_взнос', 0)
-        response[i['user_id']]['общие_категории'] = response[i['user_id']].get('общие_категории', 0) + i.get('общие_категории', 0)
-        response[i['user_id']]['investition'] = response[i['user_id']].get('investition', 0) + i.get('investition', 0)
-        response[i['user_id']]['month_earnings'] = response[i['user_id']].get('month_earnings', 0) + i.get('month_earnings', 0)
-        response[i['user_id']]['month_spend'] = response[i['user_id']].get('month_spend', 0) + i.get('month_spend', 0)
-        response[i['second_user_id']]['общие_категории'] = response[i['second_user_id']].get('общие_категории', 0) + i.get('second_user_pay', 0)
-        response[i['second_user_id']]['investition'] = response[i['second_user_id']].get('investition', 0) + i.get('investition_second', 0)
+    try:
+        result = await db_function('monthly')
+        response = {}
+        for i in result:
+            response[i['user_id']] = response.get(i['user_id'],{})
+            response[i['second_user_id']] = response.get(i['second_user_id'],{})
+            response[i['user_id']]['семейный_взнос'] = response[i['user_id']].get('семейный_взнос', 0) + i.get('семейный_взнос', 0)
+            response[i['user_id']]['общие_категории'] = response[i['user_id']].get('общие_категории', 0) + i.get('общие_категории', 0)
+            response[i['user_id']]['investition'] = response[i['user_id']].get('investition', 0) + i.get('investition', 0)
+            response[i['user_id']]['month_earnings'] = response[i['user_id']].get('month_earnings', 0) + i.get('month_earnings', 0)
+            response[i['user_id']]['month_spend'] = response[i['user_id']].get('month_spend', 0) + i.get('month_spend', 0)
+            response[i['second_user_id']]['общие_категории'] = response[i['second_user_id']].get('общие_категории', 0) + i.get('second_user_pay', 0)
+            response[i['second_user_id']]['investition'] = response[i['second_user_id']].get('investition', 0) + i.get('investition_second', 0)
 
 
-    for user_id, values_dict in response.items():
-        await bot.send_message(user_id, f"""Всего пришло за месяц {values_dict['month_earnings']:,.2f}₽\nВсего потрачено за месяц {values_dict['month_spend']:,.2f}₽\nПереведи! \nна семейный взнос {values_dict['семейный_взнос']:,.2f}₽ \nна общие категории {values_dict['общие_категории']:,.2f}₽ \nна инвестиции {values_dict['investition']:,.2f}₽""" )
-
+        for user_id, values_dict in response.items():
+            await bot.send_message(user_id, f"""Всего пришло за месяц {values_dict['month_earnings']:,.2f}₽\nВсего потрачено за месяц {values_dict['month_spend']:,.2f}₽\nПереведи! \nна семейный взнос {values_dict['семейный_взнос']:,.2f}₽ \nна общие категории {values_dict['общие_категории']:,.2f}₽ \nна инвестиции {values_dict['investition']:,.2f}₽""" )
+    except (Exception, Error) as error:   
+        logging.error("Error while monthly task", exc_info=True)
+        
 async def get_last_transaction(user_id: str, num: int) -> Tuple[list, int]:
-    result = await db_function('get_last_transaction', user_id, num)
-    l = []
-    transaactions_id = []
-    for i in result:
-        if i[2] and i[3]:
-            l.append(f"{i[1].strftime('%Y-%m-%d %H:%M:%S')} \nc {i[2]} на {i[3]} {i[4]} {i[5]} \n\n".replace('"', ''))
-        elif i[2]:  
-            l.append(f"{i[1].strftime('%Y-%m-%d %H:%M:%S')} \nрасход {i[2]}  {i[4]} {i[5]} \n\n".replace('"', ''))  
-        elif i[3]:  
-            l.append(f"{i[1].strftime('%Y-%m-%d %H:%M:%S')} \nдоход {i[3]}  {i[4]} {i[5]} \n\n".replace('"', ''))      
-        transaactions_id.append(i[0])
-    return l, transaactions_id
-
+    try:
+        result = await db_function('get_last_transaction', user_id, num)
+        l = []
+        transaactions_id = []
+        for i in result:
+            if i[2] and i[3]:
+                l.append(f"{i[1].strftime('%Y-%m-%d %H:%M:%S')} \nc {i[2]} на {i[3]} {i[4]} {i[5]} \n\n".replace('"', ''))
+            elif i[2]:  
+                l.append(f"{i[1].strftime('%Y-%m-%d %H:%M:%S')} \nрасход {i[2]}  {i[4]} {i[5]} \n\n".replace('"', ''))  
+            elif i[3]:  
+                l.append(f"{i[1].strftime('%Y-%m-%d %H:%M:%S')} \nдоход {i[3]}  {i[4]} {i[5]} \n\n".replace('"', ''))      
+            transaactions_id.append(i[0])
+        return l, transaactions_id
+    except (Exception, Error) as error: 
+        logging.error("Error while getting last transaction", exc_info=True)
 
 class WriteEarnings (StatesGroup):
     choosing_category = State()
@@ -437,8 +474,8 @@ async def write_value(message: Message, state: FSMContext) -> None:
 scheduler = AsyncIOScheduler()
 
 scheduler.add_job(monthly_task, 'cron', month='*')
-scheduler.add_job(daily_task, 'cron', hour='19')
-scheduler.add_job(load_rate, 'interval', hours=13)
+scheduler.add_job(daily_task, 'cron', hour='23', minute='59')
+scheduler.add_job(load_rate, 'interval', hours=14)
 
         
 async def on_startup() -> None: 
