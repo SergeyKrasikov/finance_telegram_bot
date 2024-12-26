@@ -3,6 +3,19 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 import datetime
+import logging
+
+# Настройка логирования
+log_directory = '/logs'  # Внутри контейнера
+os.makedirs(log_directory, exist_ok=True)
+log_file = os.path.join(log_directory, 'download_rates.log')
+
+logging.basicConfig(
+    level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
+    filename=log_file,  # Файл, в который будут записываться логи
+    filemode='a'  # Режим записи в файл: 'a' для добавления, 'w' для перезаписи
+)
 
 
 load_dotenv()
@@ -31,7 +44,11 @@ def extract_cripto(currency: list) -> list:
         r = requests.get(url, headers=headers, params=parameters).json().get('data')
         print(1)
         for i in currency:
-            value = 1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
+            try:
+                value = 1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
+            except Exception as error:
+                value = None
+                logging.error(f'Error: {error} for currency: {i} value: {1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')}')    
             if value:
                 data.append({'timestamp': datetime.datetime.fromisoformat(r.get(i,{}).get('last_updated')).strftime('%Y-%m-%d %H:%M:%S'), 'currency': i, 'value': value})
         return data
