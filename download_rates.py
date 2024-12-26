@@ -48,7 +48,7 @@ def extract_cripto(currency: list) -> list:
                 value = 1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
             except Exception as error:
                 value = None
-                logging.error(f'Error: {error} for currency: {i} value: {1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')}')    
+                logging.error(f"Error: {error} for currency: {i} value: {1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')}")    
             if value:
                 data.append({'timestamp': datetime.datetime.fromisoformat(r.get(i,{}).get('last_updated')).strftime('%Y-%m-%d %H:%M:%S'), 'currency': i, 'value': value})
         return data
