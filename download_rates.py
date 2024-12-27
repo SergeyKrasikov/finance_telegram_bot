@@ -29,31 +29,66 @@ COINMARKETCAP_TOKEN = os.environ.get('COINMARKETCAP_TOKEN')
 
 
 def extract_cripto(currency: list) -> list:
+    """
+    Извлекает данные о криптовалютах с CoinMarketCap API.
+
+    Args:
+        currency (list): Список криптовалютных символов для запроса.
+
+    Returns:
+        list: Список словарей с timestamp, currency и value.
+    """
+    url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
+    headers = {
+        'Accepts': 'application/json',
+        'X-CMC_PRO_API_KEY': COINMARKETCAP_TOKEN
+    }
+    parameters = {
+        'symbol': ','.join(currency),
+        'convert': 'USD'
+    }
+
     try:
-        url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
-        parameters = {
-            'symbol': ','.join(currency),
-            'convert': 'USD'
-        }
-        headers = {
-            'Accepts': 'application/json',
-            'X-CMC_PRO_API_KEY': COINMARKETCAP_TOKEN
-        }
-        
-        data =[]
-        r = requests.get(url, headers=headers, params=parameters).json().get('data')
-        print(1)
-        for i in currency:
-            try:
-                value = 1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
-            except Exception as error:
-                value = None
-                logging.error(f"Error: {error} for currency: {i} value: {1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')}")    
-            if value:
-                data.append({'timestamp': datetime.datetime.fromisoformat(r.get(i,{}).get('last_updated')).strftime('%Y-%m-%d %H:%M:%S'), 'currency': i, 'value': value})
-        return data
-    except Exception as error:
-        raise error
+        response = requests.get(url, headers=headers, params=parameters)
+        response.raise_for_status()  # Выбрасывает исключение для HTTP ошибок
+        data = response.json().get('data', {})
+    except requests.RequestException as error:
+        logging.error(f"Ошибка запроса к API CoinMarketCap: {error}")
+        raise
+
+    result = []
+    for symbol in currency:
+        try:
+            crypto_data = data.get(symbol, {})
+            quote = crypto_data.get('quote', {}).get('USD', {})
+            price = quote.get('price')
+
+            # Проверка типа и инверсия значения
+            if isinstance(price, (float, int)) and price > 0:
+                inverted_price = 1 / price
+            else:
+                logging.warning(f"Некорректная цена для {symbol}: {price}")
+                continue
+
+            # Форматирование времени
+            timestamp = crypto_data.get('last_updated')
+            if timestamp:
+                timestamp = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                logging.warning(f"Отсутствует время обновления для {symbol}")
+                continue
+
+            # Добавление результата
+            result.append({
+                'timestamp': timestamp,
+                'currency': symbol,
+                'value': inverted_price
+            })
+
+        except Exception as error:
+            logging.error(f"Ошибка обработки данных для {symbol}: {error}")
+
+    return result
 
 
 def extract(report_date: str, currency: list) -> list:
