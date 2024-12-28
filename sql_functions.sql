@@ -20,7 +20,6 @@ AS $function$
 DECLARE
     result NUMERIC;
 BEGIN
-    -- Определяем курсы валют
     WITH _exchange_rates AS (
         SELECT DISTINCT ON (currency)
             currency,
@@ -30,7 +29,6 @@ BEGIN
         ORDER BY
             currency, datetime DESC
     ),
-    -- Оптимизируем выборку из cash_flow
     cash_flow_data AS (
         SELECT
             CASE
@@ -44,7 +42,6 @@ BEGIN
             (_category_id IN (category_id_to, category_id_from))
             AND users_id IN (SELECT get_users_id(_user_id))
     )
-    -- Финальный расчет
     SELECT
         SUM(cf.value / (src_rate.rate / target_rate.rate))
     INTO result
@@ -58,8 +55,6 @@ BEGIN
     RETURN result;
 END;
 $function$;
-
-
 
 
 -- принимает user_id, группу категорий по которым распределить и id категории откуда поступили деньги, распределяет деньги по указанной группе и cумму для распределения, возвращает остаток  

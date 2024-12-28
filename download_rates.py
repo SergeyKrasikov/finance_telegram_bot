@@ -48,37 +48,40 @@ def extract_cripto(currency: list) -> list:
         'convert': 'USD'
     }
 
+    # Запрос к API
     try:
         response = requests.get(url, headers=headers, params=parameters)
-        response.raise_for_status()  # Выбрасывает исключение для HTTP ошибок
+        response.raise_for_status()
         data = response.json().get('data', {})
     except requests.RequestException as error:
         logging.error(f"Ошибка запроса к API CoinMarketCap: {error}")
-        raise
+        return []
 
     result = []
     for symbol in currency:
         try:
             crypto_data = data.get(symbol, {})
+            if not crypto_data:
+                logging.warning(f"Данные для {symbol} отсутствуют в ответе API.")
+                continue
+
+            # Извлекаем цену и инвертируем
             quote = crypto_data.get('quote', {}).get('USD', {})
             price = quote.get('price')
-
-            # Проверка типа и инверсия значения
-            if isinstance(price, (float, int)) and price > 0:
-                inverted_price = 1 / price
-            else:
+            if not isinstance(price, (float, int)) or price <= 0:
                 logging.warning(f"Некорректная цена для {symbol}: {price}")
                 continue
+            inverted_price = 1 / price
 
-            # Форматирование времени
+            # Форматируем временную метку
             timestamp = crypto_data.get('last_updated')
-            if timestamp:
-                timestamp = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            if timestamp and timestamp.endswith('Z'):
+                timestamp = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M:%S')
             else:
-                logging.warning(f"Отсутствует время обновления для {symbol}")
+                logging.warning(f"Некорректное или отсутствующее время обновления для {symbol}: {timestamp}")
                 continue
 
-            # Добавление результата
+            # Добавляем результат
             result.append({
                 'timestamp': timestamp,
                 'currency': symbol,
