@@ -10,69 +10,51 @@ $function$;
 
 
 -- принимает user_id, id категории, валюту в которой вернуть баланс и возвращает остаток по ней  
-CREATE OR REPLACE
-FUNCTION public.get_category_balance(_user_id bigint,
-_category_id integer,
-_currency CHARACTER VARYING DEFAULT 'RUB'::CHARACTER VARYING)
- RETURNS NUMERIC
- LANGUAGE plpgsql
+CREATE OR REPLACE FUNCTION public.get_category_balance(
+    _user_id bigint,
+    _category_id integer,
+    _currency CHARACTER VARYING DEFAULT 'RUB'::CHARACTER VARYING
+) RETURNS NUMERIC
+LANGUAGE plpgsql
 AS $function$
+DECLARE
+    result NUMERIC;
 BEGIN
-RETURN (WITH _exchange_rates AS (
-SELECT
-	datetime,
-	currency,
-	rate
-FROM
-	(
-	SELECT
-		datetime,
-		currency,
-		rate,
-		ROW_NUMBER() OVER (PARTITION BY currency
-	ORDER BY
-		datetime DESC) AS rown
-	FROM
-		exchange_rates) sub
-WHERE
-	rown = 1)
-SELECT
-	sum(cf.value /(er.rate / er2.rate))
-FROM
-	(
-	SELECT
-		value,
-		currency
-	FROM
-		cash_flow
-	WHERE
-		category_id_to = _category_id
-		AND users_id IN (
-		SELECT
-			get_users_id(_user_id))
-UNION ALL
-	SELECT
-		-value,
-		currency
-	FROM
-		cash_flow
-	WHERE
-		category_id_from = _category_id
-		AND users_id IN (
-		SELECT
-			get_users_id(_user_id))
-			  ) cf,
-	_exchange_rates AS er,
-	_exchange_rates AS er2
-WHERE
-	er.currency = cf.currency
-	AND er2.currency = _currency )
-			  ;
-END
-$function$
-;
+    WITH _exchange_rates AS (
+        SELECT DISTINCT ON (currency)
+            currency,
+            rate
+        FROM
+            exchange_rates
+        ORDER BY
+            currency, datetime DESC
+    ),
+    cash_flow_data AS (
+        SELECT
+            CASE
+                WHEN category_id_to = _category_id THEN value
+                ELSE -value
+            END AS value,
+            currency
+        FROM
+            cash_flow
+        WHERE
+            (_category_id IN (category_id_to, category_id_from))
+            AND users_id IN (SELECT get_users_id(_user_id))
+    )
+    SELECT
+        SUM(cf.value / (src_rate.rate / target_rate.rate))
+    INTO result
+    FROM
+        cash_flow_data cf
+    JOIN _exchange_rates src_rate
+        ON src_rate.currency = cf.currency
+    JOIN _exchange_rates target_rate
+        ON target_rate.currency = _currency;
 
-
+    RETURN result;
+END;
+$function$;
 
 
 -- принимает user_id, группу категорий по которым распределить и id категории откуда поступили деньги, распределяет деньги по указанной группе и cумму для распределения, возвращает остаток  

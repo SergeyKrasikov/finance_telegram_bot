@@ -3,6 +3,19 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 import datetime
+import logging
+
+# Настройка логирования
+log_directory = '/logs'  # Внутри контейнера
+os.makedirs(log_directory, exist_ok=True)
+log_file = os.path.join(log_directory, 'download_rates.log')
+
+logging.basicConfig(
+    level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
+    filename=log_file,  # Файл, в который будут записываться логи
+    filemode='a'  # Режим записи в файл: 'a' для добавления, 'w' для перезаписи
+)
 
 
 load_dotenv()
@@ -16,27 +29,69 @@ COINMARKETCAP_TOKEN = os.environ.get('COINMARKETCAP_TOKEN')
 
 
 def extract_cripto(currency: list) -> list:
+    """
+    Извлекает данные о криптовалютах с CoinMarketCap API.
+
+    Args:
+        currency (list): Список криптовалютных символов для запроса.
+
+    Returns:
+        list: Список словарей с timestamp, currency и value.
+    """
+    url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
+    headers = {
+        'Accepts': 'application/json',
+        'X-CMC_PRO_API_KEY': COINMARKETCAP_TOKEN
+    }
+    parameters = {
+        'symbol': ','.join(currency),
+        'convert': 'USD'
+    }
+
+    # Запрос к API
     try:
-        url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
-        parameters = {
-            'symbol': ','.join(currency),
-            'convert': 'USD'
-        }
-        headers = {
-            'Accepts': 'application/json',
-            'X-CMC_PRO_API_KEY': COINMARKETCAP_TOKEN
-        }
-        
-        data =[]
-        r = requests.get(url, headers=headers, params=parameters).json().get('data')
-        print(1)
-        for i in currency:
-            value = 1/r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
-            if value:
-                data.append({'timestamp': datetime.datetime.fromisoformat(r.get(i,{}).get('last_updated')).strftime('%Y-%m-%d %H:%M:%S'), 'currency': i, 'value': value})
-        return data
-    except Exception as error:
-        raise error
+        response = requests.get(url, headers=headers, params=parameters)
+        response.raise_for_status()
+        data = response.json().get('data', {})
+    except requests.RequestException as error:
+        logging.error(f"Ошибка запроса к API CoinMarketCap: {error}")
+        return []
+
+    result = []
+    for symbol in currency:
+        try:
+            crypto_data = data.get(symbol, {})
+            if not crypto_data:
+                logging.warning(f"Данные для {symbol} отсутствуют в ответе API.")
+                continue
+
+            # Извлекаем цену и инвертируем
+            quote = crypto_data.get('quote', {}).get('USD', {})
+            price = quote.get('price')
+            if not isinstance(price, (float, int)) or price <= 0:
+                logging.warning(f"Некорректная цена для {symbol}: {price}")
+                continue
+            inverted_price = 1 / price
+
+            # Форматируем временную метку
+            timestamp = crypto_data.get('last_updated')
+            if timestamp and timestamp.endswith('Z'):
+                timestamp = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                logging.warning(f"Некорректное или отсутствующее время обновления для {symbol}: {timestamp}")
+                continue
+
+            # Добавляем результат
+            result.append({
+                'timestamp': timestamp,
+                'currency': symbol,
+                'value': inverted_price
+            })
+
+        except Exception as error:
+            logging.error(f"Ошибка обработки данных для {symbol}: {error}")
+
+    return result
 
 
 def extract(report_date: str, currency: list) -> list:
