@@ -76,7 +76,7 @@ def extract_cripto(currency: list) -> list:
             # Форматируем временную метку
             timestamp = crypto_data.get('last_updated')
             if timestamp and timestamp.endswith('Z'):
-                timestamp = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M:%S')
+                timestamp = datetime.datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M:%S')
             else:
                 logging.warning(f"Некорректное или отсутствующее время обновления для {symbol}: {timestamp}")
                 continue
