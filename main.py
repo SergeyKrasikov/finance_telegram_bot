@@ -1,5 +1,6 @@
 import datetime
 import asyncio
+import asyncpg
 import os
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
@@ -48,16 +49,19 @@ dp = Dispatcher()
 
 
 
-async def create_connection() -> object:
+async def create_connection() -> asyncpg.Connection:
     try:
-        connection = psycopg2.connect(user=PG_USER,
-                                    password=PG_PASSWORD,
-                                    host=PG_HOST,
-                                    port=PG_PORT,
-                                    database=PG_DATABASE)
+        connection = await asyncpg.connect(
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT,
+            database=PG_DATABASE
+        )
         return connection
-    except (Exception, Error) as error:
+    except Exception as error:
         logging.error("Error while connecting to PostgreSQL", exc_info=True)
+        raise
 
 async def db_function(func: str, *args) -> list:    
     connection = None
