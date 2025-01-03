@@ -1,5 +1,6 @@
 import datetime
 import asyncio
+import asyncpg
 import os
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
@@ -48,16 +49,19 @@ dp = Dispatcher()
 
 
 
-async def create_connection() -> object:
+async def create_connection() -> asyncpg.Connection:
     try:
-        connection = psycopg2.connect(user=PG_USER,
-                                    password=PG_PASSWORD,
-                                    host=PG_HOST,
-                                    port=PG_PORT,
-                                    database=PG_DATABASE)
+        connection = await asyncpg.connect(
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT,
+            database=PG_DATABASE
+        )
         return connection
-    except (Exception, Error) as error:
+    except Exception as error:
         logging.error("Error while connecting to PostgreSQL", exc_info=True)
+        raise
 
 async def db_function(func: str, *args) -> list:    
     connection = None
@@ -77,7 +81,7 @@ async def db_function(func: str, *args) -> list:
         logging.error("Error while function to PostgreSQL", exc_info=True)
     finally:
         if connection:
-            connection.close()
+            await connection.close()
 
 
 async def load_rate() -> None:
@@ -491,7 +495,6 @@ async def main() -> None:
     # в allowed_updates можно передать вызов метода resolve_used_update_types() от диспетчера, 
     # который пройдёт по всем роутерам, узнает, хэндлеры на какие типы есть в коде, 
     # и попросить Telegram присылать апдейты только про них
-    # короче просто делайте так же
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 if __name__ == '__main__':
