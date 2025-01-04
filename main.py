@@ -18,7 +18,7 @@ import logging
 # Настройка логирования
 log_directory = '/logs'  # Внутри контейнера
 os.makedirs(log_directory, exist_ok=True)
-log_file = os.path.join(log_directory, 'app.log')
+log_file = os.path.join(log_directory, 'bot.log')
 
 logging.basicConfig(
     level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
