@@ -48,16 +48,19 @@ dp = Dispatcher()
 
 
 
-async def create_connection() -> object:
+async def create_connection() -> asyncpg.Connection:
     try:
-        connection = asyncpg.connect(user=PG_USER,
-                                    password=PG_PASSWORD,
-                                    host=PG_HOST,
-                                    port=PG_PORT,
-                                    database=PG_DATABASE)
+        connection = await asyncpg.connect(
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT,
+            database=PG_DATABASE
+        )
         return connection
-    except (Exception, Error) as error:
+    except (Exception, asyncpg.PostgresError) as error:
         logging.error("Error while connecting to PostgreSQL", exc_info=True)
+        raise
 
 async def db_function(func: str, *args) -> list:
     connection = None
