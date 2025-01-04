@@ -87,7 +87,7 @@ async def db_function(func: str, *args) -> list:
         raise
     finally:
         if connection:
-            await connection.close()  # Не забываем использовать await для асинхронного метода close
+            await connection.close()
 
 
 async def load_rate() -> None:

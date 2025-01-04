@@ -5,19 +5,6 @@ from dotenv import load_dotenv
 import datetime
 import logging
 
-# Настройка логирования
-log_directory = '/logs'  # Внутри контейнера
-os.makedirs(log_directory, exist_ok=True)
-log_file = os.path.join(log_directory, 'download_rates.log')
-
-logging.basicConfig(
-    level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
-    filename=log_file,  # Файл, в который будут записываться логи
-    filemode='a'  # Режим записи в файл: 'a' для добавления, 'w' для перезаписи
-)
-
-
 load_dotenv()
 OPEN_EXCHANGE_TOKEN = os.environ.get('OPEN_EXCHANGE_TOKEN')
 PG_USER = os.environ.get('POSTGRES_USER')
