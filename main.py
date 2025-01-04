@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import psycopg2
+import asyncpg
 from psycopg2 import Error
 from typing import Tuple
 import download_rates 
@@ -50,7 +50,7 @@ dp = Dispatcher()
 
 async def create_connection() -> object:
     try:
-        connection = psycopg2.connect(user=PG_USER,
+        connection = asyncpg.connect(user=PG_USER,
                                     password=PG_PASSWORD,
                                     host=PG_HOST,
                                     port=PG_PORT,
