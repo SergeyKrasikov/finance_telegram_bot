@@ -49,6 +49,7 @@ dp = Dispatcher()
 
 
 async def create_connection() -> asyncpg.Connection:
+    """Создаёт подключение к базе данных PostgreSQL."""
     try:
         connection = await asyncpg.connect(
             user=PG_USER,
@@ -62,23 +63,31 @@ async def create_connection() -> asyncpg.Connection:
         logging.error("Error while connecting to PostgreSQL", exc_info=True)
         raise
 
+
 async def db_function(func: str, *args) -> list:
+    """Вызывает указанную функцию в PostgreSQL и возвращает результат."""
     connection = None
     try:
         connection = await create_connection()
+        
+        # Формируем запрос с плейсхолдерами
         placeholders = ", ".join([f"${i+1}" for i in range(len(args))])
         query = f"SELECT * FROM {func}({placeholders})"
+        
+        # Выполняем запрос и получаем ответ
         response = await connection.fetch(query, *args)
-
+        
+        # Возвращаем ответ в зависимости от функции
         if func in ['get_last_transaction', 'get_category_balance_with_currency']:
             return response
         return [record[0] for record in response]
-    except (Exception, Error) as error:
+    
+    except (Exception, asyncpg.PostgresError) as error:
         logging.error("Error while calling function in PostgreSQL", exc_info=True)
         raise
     finally:
         if connection:
-            connection.close()
+            await connection.close()  # Не забываем использовать await для асинхронного метода close
 
 
 async def load_rate() -> None:
