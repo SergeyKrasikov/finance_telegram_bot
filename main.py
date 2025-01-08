@@ -1,6 +1,7 @@
 import datetime
 import asyncio
 import os
+import re
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
 from aiogram import Router, F
@@ -415,7 +416,7 @@ async def getting_balance(message: Message, state: FSMContext) -> None:
         await state.clear()    
 
 
-@dp.message(lambda x: x.text.split()[0].replace('.', '').replace(',', '').isdigit(), StateFilter(None))
+@dp.message(lambda x: re.match(r'^\d+([.,]\d+)?(\s+[A-Za-z]{3})?(\s+.+)?$', x.text), StateFilter(None))
 async def choose_spend_category(message: Message, state: FSMContext) -> None:
     await state.update_data(value=message.text)
     categorys = await db_function('get_categories_name', message.chat.id, 8)
@@ -427,20 +428,37 @@ async def choose_spend_category(message: Message, state: FSMContext) -> None:
 
 @dp.message(WriteSold.choosing_category, CategoryNameFilter(8))
 async def write_spend(message: Message, state: FSMContext) -> None:
-    category = message.text
-    data = await state.get_data()
-    value = data.get('value').split(' ', 2)
-    value[0] = float(value[0].replace(',', '.'))
-    if len(value) > 1 and value[1].upper() != 'RUB':
-        value[1] = value[1].upper()
-        await db_function('insert_spend_with_exchange', message.chat.id, category, *value)
-    else:    
-        await db_function('insert_spend', message.chat.id, category, *value)
-    balance = await db_function('get_remains', message.chat.id, category)
-    kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-    keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-    await message.answer(f'остаток в {category}: {float(balance[0]):,.2f}₽', reply_markup=keyboard) 
-    await state.clear()
+    try:
+        # Получение данных из состояния
+        category = message.text
+        data = await state.get_data()
+        value_parts = data.get('value').split(' ', 2)
+
+        # Преобразование суммы в float
+        amount = float(value_parts[0].replace(',', '.'))
+        currency = value_parts[1].upper() if len(value_parts) > 1 else 'RUB'
+        comment = value_parts[2] if len(value_parts) > 2 else None
+
+        # Вызов соответствующей функции в зависимости от валюты
+        if currency != 'RUB':
+            await db_function('insert_spend_with_exchange', message.chat.id, category, amount, currency, comment)
+        else:
+            await db_function('insert_spend', message.chat.id, category, amount, currency, comment)
+
+        # Получение остатка и отправка пользователю
+        balance = await db_function('get_remains', message.chat.id, category)
+        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')]]
+        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
+
+        await message.answer(f'Остаток в {category}: {float(balance[0]):,.2f}₽', reply_markup=keyboard)
+    except ValueError as e:
+        logging.error(f"Ошибка преобразования суммы: {e}", exc_info=True)
+        await message.answer("Неверный формат суммы. Введите данные в формате: сумма валюта комментарий.")
+    except Exception as e:
+        logging.error(f"Ошибка при записи расходов: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при записи расходов. Попробуйте снова.")
+    finally:
+        await state.clear()
 
 
 @dp.message(F.text == 'Остаток', StateFilter(None))

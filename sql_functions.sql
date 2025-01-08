@@ -58,22 +58,54 @@ $function$;
 
 
 -- принимает user_id, группу категорий по которым распределить и id категории откуда поступили деньги, распределяет деньги по указанной группе и cумму для распределения, возвращает остаток  
-create or replace function distribute_to_group(_user_id bigint, _group_id int, _income_category_id int, _income_value numeric)
- returns numeric
- language plpgsql
- as $function$
- declare 
-		 _reminder numeric;
+create or replace function distribute_to_group(
+    _user_id bigint, 
+    _group_id int, 
+    _income_category_id int, 
+    _income_value numeric, 
+    _currency varchar default 'RUB'
+) returns numeric
+language plpgsql
+as $function$
+declare 
+    _reminder numeric;
 begin
-_reminder := (select  _income_value * (1 - sum("percent"))
-	from categories c join categories_category_groups ccg on c.id = ccg.categories_id 
-	where ccg.category_groyps_id = _group_id and users_id = _user_id);
-set search_path to 'public';	
-	insert into cash_flow (users_id, category_id_from, category_id_to, value, currency)
-	select ccg.users_id, _income_category_id, c.id, _income_value * "percent", 'RUB'
-	from categories c join categories_category_groups ccg on c.id = ccg.categories_id 
-	where ccg.category_groyps_id = _group_id and users_id = _user_id and _income_value > 0;
-return _reminder;
+    -- Проверка входных параметров
+    if _income_value <= 0 then
+        return 0;
+    end if;
+
+    -- Проверка существования группы для пользователя
+    if not exists (
+        select 1 
+        from categories_category_groups 
+        where category_groyps_id = _group_id and users_id = _user_id
+    ) then
+        raise exception 'Group ID % does not exist for user %', _group_id, _user_id;
+    end if;
+
+    -- Расчет остатка и вставка значений в одну операцию
+    with total_percent as (
+        select sum("percent") as total
+        from categories c 
+        join categories_category_groups ccg on c.id = ccg.categories_id
+        where ccg.category_groyps_id = _group_id and users_id = _user_id
+    )
+    insert into cash_flow (users_id, category_id_from, category_id_to, value, currency)
+    select ccg.users_id, _income_category_id, c.id, _income_value * c."percent", _currency
+    from categories c
+    join categories_category_groups ccg on c.id = ccg.categories_id
+    where ccg.category_groyps_id = _group_id and users_id = _user_id and _income_value > 0;
+    select _income_value * (1 - coalesce(total, 0)) into _reminder  -- Расчет остатка
+    from total_percent;
+    raise notice 'Distributed % to group % for user %', _income_value, _group_id, _user_id;
+
+    return _reminder;
+
+exception
+    when others then
+        raise notice 'Error occurred while distributing income for user %: %', _user_id, sqlerrm;
+        return null;
 end
 $function$;
 
@@ -84,55 +116,73 @@ CREATE OR REPLACE FUNCTION public.monthly_distribute(_user_id bigint, _income_ca
  RETURNS jsonb
  LANGUAGE plpgsql
 AS $function$
- declare _sum_value numeric(10,2);
-		 _sum_velue_second numeric(10,2);
-		_value_for_second_member numeric;
-		 _free_money numeric(10,2);
-		 _reminder_first numeric;
-		_second_member_id bigint;
-		_second_member_free_money numeric;
-		_sum_last numeric;
-		_general_categories numeric;
-		_general_categories_second numeric;
-		_sum_earnings NUMERIC;
-		_sum_spend NUMERIC;
-begin
-perform transact_from_group_to_category(_user_id, 11, (select get_categories_id(_user_id, 13))); -- переводим месячные доходы в одну категорию	
-perform transact_from_group_to_category(_user_id, 12, (select get_categories_id(_user_id, 7))); -- переводим другие доходы в категорию продарки себе
-_sum_last := (select get_category_balance(_user_id, (select get_categories_id(_user_id, 6)))); -- получение остатка свободных денег	
-perform distribute_to_group(_user_id, 7, (select c.id from categories c 
-join categories_category_groups ccg on c.id = ccg.categories_id
-where ccg.category_groyps_id = 6 and ccg.users_id = _user_id), _sum_last); -- перевод части остатка на подарки себе
-insert into cash_flow (users_id, category_id_from, category_id_to, value, currency)
-select _user_id, id, (select c.id from categories c join categories_category_groups ccg on c.id = ccg.categories_id
-where ccg.category_groyps_id = 9 and ccg.users_id = _user_id) , abs("sum") * 0.01, 'RUB' from (select c.id, get_category_balance(_user_id, c.id) as "sum" from categories c join
-categories_category_groups ccg on c.id = ccg.categories_id 
-where ccg.users_id = _user_id and ccg.category_groyps_id = 8) where "sum" < 0;-- если есть долги то увеличивает резерв на один процент за счет счета должника
-_sum_value := (select get_category_balance(_user_id, _income_category)); -- сумма дохода за месяц
-_value_for_second_member := (select _sum_value * ("percent") from categories where id = 15); -- сумма семейного взноса
-_sum_velue_second := (select distribute_to_group(_user_id, 1, _income_category, _sum_value)); -- перевод денег на нз и остаток после
-_free_money := (select distribute_to_group(_user_id, 2, _income_category, (_sum_value - _value_for_second_member ))); --распределение по категориям
-_second_member_id := (select * from get_users_id(_user_id) where get_users_id != _user_id); -- id второго пользователя
-_second_member_free_money := (select distribute_to_group(_second_member_id, 3, 15, _value_for_second_member)); -- распределение денег второго пользователя
-perform distribute_to_group(_user_id, 6, _income_category,  _free_money - _sum_value * 0.1); --внесение свободных денег
-perform distribute_to_group(_second_member_id, 6, 15, _second_member_free_money); -- внесение свободных денег второго пользователя
-_general_categories := (select sum((_sum_value - _value_for_second_member) * c."percent") from categories c join categories_category_groups ccg  on 	c.id = ccg.categories_id and ccg.category_groyps_id = 4 );
-_general_categories_second := (select sum(_value_for_second_member * c."percent") from categories c join categories_category_groups ccg  on c.id = ccg.categories_id and ccg.category_groyps_id = 4 );	
-_sum_earnings := (SELECT COALESCE(sum(value), 0) FROM cash_flow cf WHERE users_id = _user_id AND category_id_from IS NULL AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1' MONTH);
-_sum_spend := (SELECT COALESCE(sum(value), 0) FROM cash_flow cf WHERE users_id = _user_id AND category_id_to IS NULL AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1' MONTH);
-return 
-		jsonb_build_object('user_id', _user_id,
-						   'общие_категории', _general_categories,
-						   'second_user_id', _second_member_id,
-						   'семейный_взнос', _value_for_second_member,
-						   'second_user_pay',  _general_categories_second,
-						   'investition',  _sum_value * 0.1,
-						   'investition_second',  _value_for_second_member * 0.1,
-						   'month_earnings', _sum_earnings,
-						   'month_spend', _sum_spend
-						   )  ;
-end
-$function$
+DECLARE
+    _sum_value numeric(10,2);
+    _sum_value_second numeric(10,2);
+    _value_for_second_member numeric;
+    _free_money numeric(10,2);
+    _second_member_id bigint;
+    _second_member_free_money numeric;
+    _general_categories numeric;
+    _general_categories_second numeric;
+    _sum_earnings NUMERIC;
+    _sum_spend NUMERIC;
+BEGIN
+    PERFORM transact_from_group_to_category(_user_id, 11, (SELECT get_categories_id(_user_id, 13)));    -- Переводим месячные доходы в одну категорию
+    PERFORM transact_from_group_to_category(_user_id, 12, (SELECT get_categories_id(_user_id, 7)));    -- Переводим другие доходы в категорию "подарки себе"
+    _free_money := (SELECT get_category_balance(_user_id, (SELECT get_categories_id(_user_id, 6)), 'RUB'));    -- Получение остатка свободных денег
+    PERFORM distribute_to_group(_user_id, 7, (SELECT get_categories_id(_user_id, 6)), _free_money, 'RUB');    -- Перевод части остатка на подарки себе
+    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency)    -- Увеличение резерва на 1% за счет должников
+    SELECT _user_id, id, 
+           (SELECT get_categories_id(_user_id, 9)), 
+           ABS("sum") * 0.01, 'RUB'
+    FROM (
+        SELECT c.id, get_category_balance(_user_id, c.id, 'RUB') AS "sum"
+        FROM categories c
+        JOIN categories_category_groups ccg ON c.id = ccg.categories_id
+        WHERE ccg.users_id = _user_id AND ccg.category_groyps_id = 8
+    ) debts
+    WHERE "sum" < 0;
+    _sum_value := (SELECT get_category_balance(_user_id, _income_category, 'RUB'));    -- Сумма дохода за месяц
+    _value_for_second_member := _sum_value * (SELECT "percent" FROM categories WHERE id = 15);    -- Расчет семейного взноса
+    _sum_value_second := distribute_to_group(_user_id, 1, _income_category, _sum_value, 'RUB');    -- Перевод денег на НЗ 
+    _free_money := distribute_to_group(_user_id, 2, _income_category, _sum_value - _value_for_second_member, 'RUB');   -- Распределение свободных денег
+    _second_member_id := (SELECT id FROM get_users_id(_user_id) WHERE id != _user_id);    -- Получение ID второго пользователя
+    _second_member_free_money := distribute_to_group(_second_member_id, 3, 15, _value_for_second_member, 'RUB');    -- Распределение денег для второго пользователя
+    PERFORM distribute_to_group(_user_id, 6, _income_category, _free_money - _sum_value * 0.1, 'RUB');    -- Внесение свободных денег в резерв
+    PERFORM distribute_to_group(_second_member_id, 6, 15, _second_member_free_money, 'RUB');   -- Внесение свободных денег в резерв второго пользователя
+    _general_categories := (SELECT SUM((_sum_value - _value_for_second_member) * c."percent")    -- Подсчет общих категорий
+                            FROM categories c
+                            JOIN categories_category_groups ccg ON c.id = ccg.categories_id
+                            WHERE ccg.category_groyps_id = 4);
+
+    _general_categories_second := (SELECT SUM(_value_for_second_member * c."percent")
+                                   FROM categories c
+                                   JOIN categories_category_groups ccg ON c.id = ccg.categories_id
+                                   WHERE ccg.category_groyps_id = 4);
+    _sum_earnings := (SELECT COALESCE(SUM(value), 0)   -- Подсчет доходов за месяц
+                      FROM cash_flow
+                      WHERE users_id = _user_id
+                      AND category_id_from IS NULL
+                      AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month');
+	_sum_spend := (SELECT COALESCE(SUM(value), 0)  -- Подсчет расходов за месяц
+                   FROM cash_flow
+                   WHERE users_id = _user_id
+                   AND category_id_to IS NULL
+                   AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month');
+    RETURN jsonb_build_object(   -- Возвращение результата
+        'user_id', _user_id,
+        'общие_категории', _general_categories,
+        'second_user_id', _second_member_id,
+        'семейный_взнос', _value_for_second_member,
+        'second_user_pay', _general_categories_second,
+        'investition', _sum_value * 0.1,
+        'investition_second', _value_for_second_member * 0.1,
+        'month_earnings', _sum_earnings,
+        'month_spend', _sum_spend
+    );
+END;
+$function$;
 
 -- принимает user_id, id группы и id категории и переводит все деньги с группы на категорию 
 create or replace function transact_from_group_to_category(_user_id bigint, _group_id int, _category_id int)
