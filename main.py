@@ -146,7 +146,9 @@ async def reset_state_after_timeout(state: FSMContext, timeout: int, message: Me
     # Проверяем, что состояние соответствует указанным
     if current_state in ('GetingLasTransaction:transaction_history', 'GetingLasTransaction:delete_category'):
         await state.clear()
-        await message.answer("Состояние сброшено автоматически из-за отсутствия активности.")
+        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
+        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
+        await message.answer("Состояние сброшено автоматически из-за отсутствия активности.", reply_markup=keyboard)
         logging.info("Состояние сброшено автоматически после таймаута.")
         
               
