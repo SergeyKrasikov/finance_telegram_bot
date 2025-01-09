@@ -135,6 +135,22 @@ async def monthly_task() -> None:
     except (Exception, Error) as error:   
         logging.error("Error while monthly task", exc_info=True)
         
+
+
+async def reset_state_after_timeout(state: FSMContext, timeout: int, message: Message):
+    """Сбрасывает состояние через указанное время и отправляет сообщение."""
+    await asyncio.sleep(timeout)
+    
+    current_state = await state.get_state()
+    
+    # Проверяем, что состояние соответствует указанным
+    if current_state in ('GetingLasTransaction:transaction_history', 'GetingLasTransaction:delete_category'):
+        await state.clear()
+        await message.answer("Состояние сброшено автоматически из-за отсутствия активности.")
+        logging.info("Состояние сброшено автоматически после таймаута.")
+        
+              
+        
 async def get_last_transaction(user_id: str, num: int) -> Tuple[list, int]:
     try:
         result = await db_function('get_last_transaction', user_id, num)
@@ -249,8 +265,16 @@ async def cmd_history(message: Message, state: FSMContext) -> None:
     if datetime.datetime.now() <= datetime.datetime.strptime(' '.join(transaction[0].split(' ')[:2]), '%Y-%m-%d %H:%M:%S') + datetime.timedelta(hours=1):
         kb.append([types.KeyboardButton(text='Удалить')])
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True )
+    asyncio.create_task(reset_state_after_timeout(state, 30, message))  # Сброс через 5 минут
     await message.answer(''.join(transaction), reply_markup=keyboard)
     await message.delete()
+
+async def reset_state_after_timeout(state: FSMContext, timeout: int):
+    """Сбрасывает состояние через указанное время."""
+    await asyncio.sleep(timeout)
+    if await state.get_state():  # Проверяем, что состояние все еще активно
+        await state.clear()
+        logging.info("Состояние сброшено автоматически после таймаута.")
 
 
 @dp.message(ExchangeCurrency.choosing_category, CategoryNameFilter(14))         
@@ -433,23 +457,19 @@ async def write_spend(message: Message, state: FSMContext) -> None:
         category = message.text
         data = await state.get_data()
         value_parts = data.get('value').split(' ', 2)
-
         # Преобразование суммы в float
         amount = float(value_parts[0].replace(',', '.'))
         currency = value_parts[1].upper() if len(value_parts) > 1 else 'RUB'
         comment = value_parts[2] if len(value_parts) > 2 else None
-
         # Вызов соответствующей функции в зависимости от валюты
         if currency != 'RUB':
             await db_function('insert_spend_with_exchange', message.chat.id, category, amount, currency, comment)
         else:
             await db_function('insert_spend', message.chat.id, category, amount, currency, comment)
-
         # Получение остатка и отправка пользователю
         balance = await db_function('get_remains', message.chat.id, category)
         kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')]]
         keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-
         await message.answer(f'Остаток в {category}: {float(balance[0]):,.2f}₽', reply_markup=keyboard)
     except ValueError as e:
         logging.error(f"Ошибка преобразования суммы: {e}", exc_info=True)
