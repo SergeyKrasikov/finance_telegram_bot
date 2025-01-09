@@ -269,13 +269,6 @@ async def cmd_history(message: Message, state: FSMContext) -> None:
     await message.answer(''.join(transaction), reply_markup=keyboard)
     await message.delete()
 
-async def reset_state_after_timeout(state: FSMContext, timeout: int):
-    """Сбрасывает состояние через указанное время."""
-    await asyncio.sleep(timeout)
-    if await state.get_state():  # Проверяем, что состояние все еще активно
-        await state.clear()
-        logging.info("Состояние сброшено автоматически после таймаута.")
-
 
 @dp.message(ExchangeCurrency.choosing_category, CategoryNameFilter(14))         
 async def ask_value_out(message: Message, state: FSMContext) -> None:
