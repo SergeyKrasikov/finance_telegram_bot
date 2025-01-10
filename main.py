@@ -116,7 +116,7 @@ async def daily_task() -> None:
         
         user_transactions = {}
         for user_id, transaction in results:
-            user_transactions.setdefault(user_id, []).append(transaction.replace('00000000', ''))
+            user_transactions.setdefault(user_id, []).append("{:g}".format(transaction))
 
         tasks = []
         for user, transactions in user_transactions.items():
