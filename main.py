@@ -101,38 +101,62 @@ async def load_rate() -> None:
         download_rates.load(result)
     except (Exception, Error) as error:
         logging.error("Error while loading rates", exc_info=True)
+        
+
+async def send_message_with_logging(user: int, message: str) -> None:
+    """Отправляет сообщение и логирует ошибки, если они происходят."""
+    try:
+        await bot.send_message(user, message)
+    except Exception as error:
+        logging.error(f"Error while sending message to user {user}: {error}", exc_info=True)
 
 async def daily_task() -> None:
     try:
-        users = await db_function('get_all_users_id')
-        for user in users:
-            transactions = await db_function('get_daily_transactions', user)
-            if transactions:
-                await bot.send_message(user, 'Транзакции за сегодня:\n'+'\n'.join([i.replace('00000000', '') for i in transactions]))
-            else:
-                await bot.send_message(user, 'Сегодня транзакций не было, или возможно стоит их внести')    
-    except (Exception, Error) as error:
+        results = await db_function('get_all_daily_transactions')
+        
+        user_transactions = {}
+        for user_id, transaction in results:
+            user_transactions.setdefault(user_id, []).append(transaction.replace('00000000', ''))
+
+        tasks = []
+        for user, transactions in user_transactions.items():
+            message = (
+                'Транзакции за сегодня:\n' + '\n'.join(transactions)
+                if transactions
+                else 'Сегодня транзакций не было, или возможно стоит их внести'
+            )
+            tasks.append(send_message_with_logging(user, message))
+
+        await asyncio.gather(*tasks)
+    except Exception as error:
         logging.error("Error while daily task", exc_info=True)
 
 async def monthly_task() -> None:
     try:
         result = await db_function('monthly')
         response = {}
+        
         for i in result:
-            response[i['user_id']] = response.get(i['user_id'],{})
-            response[i['second_user_id']] = response.get(i['second_user_id'],{})
-            response[i['user_id']]['семейный_взнос'] = response[i['user_id']].get('семейный_взнос', 0) + i.get('семейный_взнос', 0)
-            response[i['user_id']]['общие_категории'] = response[i['user_id']].get('общие_категории', 0) + i.get('общие_категории', 0)
-            response[i['user_id']]['investition'] = response[i['user_id']].get('investition', 0) + i.get('investition', 0)
-            response[i['user_id']]['month_earnings'] = response[i['user_id']].get('month_earnings', 0) + i.get('month_earnings', 0)
-            response[i['user_id']]['month_spend'] = response[i['user_id']].get('month_spend', 0) + i.get('month_spend', 0)
-            response[i['second_user_id']]['общие_категории'] = response[i['second_user_id']].get('общие_категории', 0) + i.get('second_user_pay', 0)
-            response[i['second_user_id']]['investition'] = response[i['second_user_id']].get('investition', 0) + i.get('investition_second', 0)
-
+            for key, fields in [('user_id', ['семейный_взнос', 'общие_категории', 'investition', 'month_earnings', 'month_spend']),
+                                ('second_user_id', ['общие_категории', 'investition'])]:
+                user_id = i[key]
+                if user_id not in response:
+                    response[user_id] = {field: 0 for field in fields}
+                
+                for field in fields:
+                    response[user_id][field] += i.get(field, 0)
 
         for user_id, values_dict in response.items():
-            await bot.send_message(user_id, f"""Всего пришло за месяц {values_dict['month_earnings']:,.2f}₽\nВсего потрачено за месяц {values_dict['month_spend']:,.2f}₽\nПереведи! \nна семейный взнос {values_dict['семейный_взнос']:,.2f}₽ \nна общие категории {values_dict['общие_категории']:,.2f}₽ \nна инвестиции {values_dict['investition']:,.2f}₽""" )
-    except (Exception, Error) as error:   
+            await bot.send_message(
+                user_id,
+                f"""Всего пришло за месяц {values_dict['month_earnings']:,.2f}₽
+                    Всего потрачено за месяц {values_dict['month_spend']:,.2f}₽
+                    Переведи!
+                    На семейный взнос {values_dict['семейный_взнос']:,.2f}₽
+                    На общие категории {values_dict['общие_категории']:,.2f}₽
+                    На инвестиции {values_dict['investition']:,.2f}₽"""
+            )
+    except Exception as error:
         logging.error("Error while monthly task", exc_info=True)
         
 
@@ -267,7 +291,7 @@ async def cmd_history(message: Message, state: FSMContext) -> None:
     if datetime.datetime.now() <= datetime.datetime.strptime(' '.join(transaction[0].split(' ')[:2]), '%Y-%m-%d %H:%M:%S') + datetime.timedelta(hours=1):
         kb.append([types.KeyboardButton(text='Удалить')])
     keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True )
-    asyncio.create_task(reset_state_after_timeout(state, 30, message))  # Сброс через 5 минут
+    asyncio.create_task(reset_state_after_timeout(state, 300, message))  # Сброс через 5 минут
     await message.answer(''.join(transaction), reply_markup=keyboard)
     await message.delete()
 
