@@ -316,19 +316,26 @@ $function$
 
 -- принимает id пользователя и возвращает все операции за сегодня
 CREATE OR REPLACE FUNCTION public.get_daily_transactions(_user_id bigint)
- RETURNS TABLE(transact text)
- LANGUAGE plpgsql
+RETURNS TABLE(transact text)
+LANGUAGE plpgsql
 AS $function$
-begin
-return query (
-select concat(c."name", ' ', COALESCE(c2."name", '-'), ' ', cf.value, ' ', cf.currency) AS transact
-	from cash_flow cf
-	left join categories c on cf.category_id_from = c.id 
-	left join categories c2 on  cf.category_id_to = c2.id 
-	where date_trunc('day', cf.datetime) = date_trunc('day', now()) AND users_id = _user_id);
-	end
-$function$
-;	
+BEGIN
+    RETURN QUERY (
+        SELECT CONCAT(
+            c."name", ' ',
+            COALESCE(c2."name", '-'), ' ',
+            TRIM(TRAILING '0' FROM cf.value::text), ' ',
+            cf.currency
+        ) AS transact
+        FROM cash_flow cf
+        LEFT JOIN categories c ON cf.category_id_from = c.id
+        LEFT JOIN categories c2 ON cf.category_id_to = c2.id
+        WHERE date_trunc('day', cf.datetime) = date_trunc('day', now())
+          AND users_id = _user_id
+        ORDER BY cf.datetime
+    );
+END
+$function$;
 
 -- возвращает id всех пользователей
 CREATE OR REPLACE FUNCTION public.get_all_users_id()

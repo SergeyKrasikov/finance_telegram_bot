@@ -101,34 +101,17 @@ async def load_rate() -> None:
         download_rates.load(result)
     except (Exception, Error) as error:
         logging.error("Error while loading rates", exc_info=True)
-        
-
-async def send_message_with_logging(user: int, message: str) -> None:
-    """Отправляет сообщение и логирует ошибки, если они происходят."""
-    try:
-        await bot.send_message(user, message)
-    except Exception as error:
-        logging.error(f"Error while sending message to user {user}: {error}", exc_info=True)
 
 async def daily_task() -> None:
     try:
-        results = await db_function('get_all_daily_transactions')
-        
-        user_transactions = {}
-        for user_id, transaction in results:
-            user_transactions.setdefault(user_id, []).append("{:g}".format(transaction))
-
-        tasks = []
-        for user, transactions in user_transactions.items():
-            message = (
-                'Транзакции за сегодня:\n' + '\n'.join(transactions)
-                if transactions
-                else 'Сегодня транзакций не было, или возможно стоит их внести'
-            )
-            tasks.append(send_message_with_logging(user, message))
-
-        await asyncio.gather(*tasks)
-    except Exception as error:
+        users = await db_function('get_all_users_id')
+        for user in users:
+            transactions = await db_function('get_daily_transactions', user)
+            if transactions:
+                await bot.send_message(user, 'Транзакции за сегодня:\n'+'\n'.join([i.replace('00000000', '') for i in transactions]))
+            else:
+                await bot.send_message(user, 'Сегодня транзакций не было, или возможно стоит их внести')    
+    except (Exception, Error) as error:
         logging.error("Error while daily task", exc_info=True)
 
 async def monthly_task() -> None:
