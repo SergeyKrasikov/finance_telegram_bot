@@ -484,14 +484,18 @@ async def write_spend(message: Message, state: FSMContext) -> None:
 
 
 @dp.message(F.text == 'Остаток', StateFilter(None))
-async def get_ballances(message: Message) -> None:
-    balaces = []
-    for category in await db_function('get_categories_name', message.chat.id, 8):
-        balance = await db_function('get_remains', message.chat.id, category)
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        balaces.append(f'{category:<10}: {float(balance[0]):,.2f}₽\n')
-    await message.answer('Остаток: \n'+'\n'.join(balaces), reply_markup=keyboard) 
+async def get_balances(message: Message) -> None:
+    try:
+        # Получаем список категорий и их балансов одним запросом
+        balances = await db_function('get_all_balances', message.chat.id, 8)       
+        # Формируем ответное сообщение
+        balances_text = '\n'.join([f'{category:<10}: {float(balance):,.2f}₽' for category, balance in balances])       
+        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')]]
+        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')        
+        await message.answer(f'Остаток: \n{balances_text}', reply_markup=keyboard)    
+    except Exception as e:
+        logging.error(f"Ошибка при получении балансов: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при получении балансов.")
 
 @dp.message(F.text == 'Доход')        
 async def choose_category(message: Message, state: FSMContext) -> None:

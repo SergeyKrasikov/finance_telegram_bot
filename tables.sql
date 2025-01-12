@@ -48,3 +48,4 @@ rate numeric(20,10));
 
 CREATE INDEX idx_exchange_rates_currency_datetime ON exchange_rates (currency, datetime DESC);
 CREATE INDEX idx_cash_flow_category_users ON cash_flow (users_id, category_id_to, category_id_from, currency, value);
+CREATE INDEX idx_cash_flow_datetime ON public.cash_flow USING btree (datetime);

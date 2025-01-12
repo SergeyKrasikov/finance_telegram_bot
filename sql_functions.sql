@@ -376,6 +376,23 @@ return (select COALESCE (get_category_balance(_user_id,(select c.id from categor
 $function$
 ;   
 
+-- принимает id пользователя и id группы, возвращает сумму всех категорий группы
+CREATE OR REPLACE FUNCTION public.get_all_balances(_user_id bigint, _group_id integer)
+RETURNS TABLE(category_name varchar, balance numeric(20, 2))
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        c."name" AS category_name,
+        get_category_balance(_user_id, c.id, 'RUB') AS balance
+    FROM 
+        public.categories c
+    WHERE 
+        c.id IN (SELECT public.get_categories_id(_user_id, _group_id));
+END;
+$function$;
+
 -- запускает функции месячного распределения
 CREATE OR REPLACE FUNCTION public.monthly()
  RETURNS TABLE (get_remains jsonb)
