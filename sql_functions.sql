@@ -381,7 +381,7 @@ BEGIN
     RETURN QUERY
     SELECT 
         c."name" AS category_name,
-        get_category_balance(_user_id, c.id, 'RUB') AS balance
+        COALESCE(get_category_balance(_user_id, c.id, 'RUB'), 0) AS balance
     FROM 
         public.categories c
     WHERE 
