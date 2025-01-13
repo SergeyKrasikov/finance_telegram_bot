@@ -107,11 +107,13 @@ async def daily_task() -> None:
         users = await db_function('get_all_users_id')
         for user in users:
             transactions = await db_function('get_daily_transactions', user)
-            if transactions:
-                await bot.send_message(user, 'Транзакции за сегодня:\n'+'\n'.join([i.replace('00000000', '') for i in transactions]))
-            else:
-                await bot.send_message(user, 'Сегодня транзакций не было, или возможно стоит их внести')    
-    except (Exception, Error) as error:
+            message = (
+                'Транзакции за сегодня:\n' + '\n'.join(transactions)
+                if transactions
+                else 'Сегодня транзакций не было, или возможно стоит их внести'
+            )
+            await bot.send_message(user, message)
+    except Exception as error:
         logging.error("Error while daily task", exc_info=True)
 
 async def monthly_task() -> None:
