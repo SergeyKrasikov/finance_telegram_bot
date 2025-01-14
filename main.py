@@ -79,7 +79,7 @@ async def db_function(func: str, *args) -> list:
         response = await connection.fetch(query, *args)
         
         # Возвращаем ответ в зависимости от функции
-        if func in ['get_last_transaction', 'get_category_balance_with_currency']:
+        if func in ['get_last_transaction', 'get_category_balance_with_currency', 'get_all_balances']:
             return response
         return [record[0] for record in response]
     
