@@ -497,7 +497,7 @@ async def get_balances(message: Message) -> None:
         logging.info(f"Полученные данные balances: {balances}")
         
         # Формируем ответное сообщение
-        balances_text = '\n'.join([
+        balances_text = '\n\n'.join([
             f'{category:<20}: {float(balance):,.2f}₽'
             for category, balance in balances
         ])
