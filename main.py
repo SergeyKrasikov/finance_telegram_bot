@@ -79,8 +79,10 @@ async def db_function(func: str, *args) -> list:
         response = await connection.fetch(query, *args)
         
         # Возвращаем ответ в зависимости от функции
-        if func in ['get_last_transaction', 'get_category_balance_with_currency', 'get_all_balances']:
+        if func in ['get_last_transaction', 'get_category_balance_with_currency']:
             return response
+        elif func == 'get_all_balances':
+            return [(record['category_name'], record['balance']) for record in response]
         return [record[0] for record in response]
     
     except (Exception, asyncpg.PostgresError) as error:
@@ -489,22 +491,24 @@ async def write_spend(message: Message, state: FSMContext) -> None:
 async def get_balances(message: Message) -> None:
     try:
         # Получаем список категорий и их балансов одним запросом
-        balances = await db_function('get_all_balances', message.chat.id, 8)        
-        # Логируем для отладки, что именно возвращает db_function
-        logging.info(f"Полученные данные balances: {balances}")     
-        # Проверяем, что balances — это список кортежей с двумя элементами
-        if not balances or not all(isinstance(item, (list, tuple)) and len(item) == 2 for item in balances):
-            raise ValueError("Некорректный формат данных balances")
+        balances = await db_function('get_all_balances', message.chat.id, 8)
+        
+        # Логируем для отладки
+        logging.info(f"Полученные данные balances: {balances}")
+        
         # Формируем ответное сообщение
         balances_text = '\n'.join([
-            f'{category:<10}: {float(balance):,.2f}₽'
+            f'{category:<20}: {float(balance):,.2f}₽'
             for category, balance in balances
         ])
+        
         # Создаем клавиатуру
         kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')]]
         keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
+        
         # Отправляем сообщение пользователю
         await message.answer(f'Остаток: \n{balances_text}', reply_markup=keyboard)
+    
     except ValueError as e:
         logging.error(f"Ошибка при обработке балансов: {e}", exc_info=True)
         await message.answer("Получены некорректные данные о балансах.")    
