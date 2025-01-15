@@ -322,7 +322,12 @@ AS $function$
 SELECT CONCAT_WS(' ',
     c."name",
     COALESCE(c2."name", '-'),
-    TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM cf.value::text)),
+    CASE 
+        WHEN cf.value::text LIKE '%.%' THEN 
+            RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
+        ELSE 
+            cf.value::text
+    END,
     cf.currency
 ) AS transact
 FROM cash_flow cf
