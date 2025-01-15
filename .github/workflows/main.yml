@@ -45,7 +45,11 @@ jobs:
             # Сборка и перезапуск контейнеров
             docker-compose -f docker-compose.yml build
             docker-compose -f docker-compose.yml down
-            docker-compose -f docker-compose.yml up -d --force-recreate
+            # Удаление неиспользуемых volumes
+            docker volume prune -f
+
+            docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
+            echo "Environment updated successfully."
 
             echo "Test environment updated successfully."
 
