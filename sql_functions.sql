@@ -218,21 +218,55 @@ $function$
 
 
 -- принимает user_id и порядковый номер транзакции начиная с конца и возвращает транзакцию  
-create or replace function get_last_transaction(_user_id bigint, _num int)
- returns table (id bigint, datetime timestamp, "from" varchar(100), "to" varchar(100), value numeric, currency varchar(3), description text)
- language plpgsql
-as $function$
-begin
-return query (select cf.id, cf.datetime, c."name" as "from", c2."name" as "to", cf.value, cf.currency, cf.description  from 
-	(select cf_sub.id, cf_sub.datetime, cf_sub.category_id_from, cf_sub.category_id_to, cf_sub.value, cf_sub.currency, cf_sub.description, dense_rank() over(order by cf_sub.datetime desc)
-	as "rank"
-	from cash_flow cf_sub where users_id = _user_id) cf 
-	left join categories c on cf.category_id_from = c.id 
-	left join categories c2 on  cf.category_id_to = c2.id 
-	where "rank" = _num);
-		end
+CREATE OR REPLACE FUNCTION get_last_transaction(_user_id bigint, _num int)
+RETURNS TABLE (
+    id bigint,
+    datetime timestamp,
+    "from" varchar(100),
+    "to" varchar(100),
+    value varchar,  -- Изменён тип на varchar для представления форматированного значения
+    currency varchar(3),
+    description text
+)
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY (
+        SELECT 
+            cf.id,
+            cf.datetime,
+            c."name" AS "from",
+            c2."name" AS "to",
+            CASE 
+                WHEN cf.value::text LIKE '%.%' THEN 
+                    RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
+                ELSE 
+                    cf.value::text
+            END AS value,
+            cf.currency,
+            cf.description
+        FROM (
+            SELECT 
+                cf_sub.id,
+                cf_sub.datetime,
+                cf_sub.category_id_from,
+                cf_sub.category_id_to,
+                cf_sub.value,
+                cf_sub.currency,
+                cf_sub.description,
+                dense_rank() OVER (ORDER BY cf_sub.datetime DESC) AS "rank"
+            FROM 
+                cash_flow cf_sub 
+            WHERE 
+                users_id = _user_id
+        ) cf 
+        LEFT JOIN categories c ON cf.category_id_from = c.id 
+        LEFT JOIN categories c2 ON cf.category_id_to = c2.id 
+        WHERE 
+            "rank" = _num
+    );
+END;
 $function$;
-
 
 -- Принимает поля транзакции и записывает в таблицу cash_flow, обязательным полем является users_id
 CREATE OR REPLACE FUNCTION public.insert_in_cash_flow(_users_id bigint,
