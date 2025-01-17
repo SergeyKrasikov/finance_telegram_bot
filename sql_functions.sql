@@ -84,6 +84,7 @@ begin
         raise exception 'Group ID % does not exist for user %', _group_id, _user_id;
     end if;
 
+
     -- Расчет остатка и вставка значений в одну операцию
     with total_percent as (
         select sum("percent") as total
@@ -91,8 +92,8 @@ begin
         join categories_category_groups ccg on c.id = ccg.categories_id
         where ccg.category_groyps_id = _group_id and users_id = _user_id
     )
-    insert into cash_flow (users_id, category_id_from, category_id_to, value, currency)
-    select ccg.users_id, _income_category_id, c.id, _income_value * c."percent", _currency
+    insert into cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
+    select ccg.users_id, _income_category_id, c.id, _income_value * c."percent", _currency, 'monthly distribute'
     from categories c
     join categories_category_groups ccg on c.id = ccg.categories_id
     where ccg.category_groyps_id = _group_id and users_id = _user_id and _income_value > 0;
@@ -108,7 +109,6 @@ exception
         return null;
 end
 $function$;
-
 
 
 -- принимает id пользователя и id категории прихода и распределяет по всем категориям								
@@ -132,10 +132,10 @@ BEGIN
     PERFORM transact_from_group_to_category(_user_id, 12, (SELECT get_categories_id(_user_id, 7)));    -- Переводим другие доходы в категорию "подарки себе"
     _free_money := (SELECT get_category_balance(_user_id, (SELECT get_categories_id(_user_id, 6)), 'RUB'));    -- Получение остатка свободных денег
     PERFORM distribute_to_group(_user_id, 7, (SELECT get_categories_id(_user_id, 6)), _free_money, 'RUB');    -- Перевод части остатка на подарки себе
-    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency)    -- Увеличение резерва на 1% за счет должников
+    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)    -- Увеличение резерва на 1% за счет должников
     SELECT _user_id, id, 
            (SELECT get_categories_id(_user_id, 9)), 
-           ABS("sum") * 0.01, 'RUB'
+           ABS("sum") * 0.01, 'RUB', 'monthly distribute'
     FROM (
         SELECT c.id, get_category_balance(_user_id, c.id, 'RUB') AS "sum"
         FROM categories c
@@ -190,8 +190,8 @@ create or replace function transact_from_group_to_category(_user_id bigint, _gro
  language plpgsql
 as $function$
 begin
-	insert into cash_flow (users_id, category_id_from, category_id_to, value, currency)
-	select users_id, categories_id, _category_id, balance, 'RUB'  
+	insert into cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
+	select users_id, categories_id, _category_id, balance, 'RUB', 'monthly distribute'  
 	from 
 		(select users_id, categories_id, get_category_balance(_user_id, categories_id) as balance 
 		 from categories_category_groups ccg 

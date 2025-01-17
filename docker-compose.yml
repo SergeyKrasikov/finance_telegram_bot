@@ -51,6 +51,19 @@ services:
         limits:
           cpus: '1'
           memory: 4G
+
+  restore-db:
+    image: python:3.10-slim
+    container_name: restore-db
+    volumes:
+      - ./db_restore:/scripts  # Директория со скриптом восстановления
+      - /home/kras/db_backup/backups:/backups  # Директория с бэкапами
+    env_file:
+      - ./.env
+    entrypoint: ["python", "/scripts/restore_backup_on_start.py"]
+    depends_on:
+      - postgres
+
   bot:
     build: .
     command: sh -c "python -m main"
@@ -58,10 +71,9 @@ services:
       - ./.env
     restart: always
     depends_on:
-      - postgres
+      - restore-db
     volumes:
       - ./logs:/logs  # Монтируем директорию
-
 
 volumes:
   pgdb-data:
