@@ -56,7 +56,7 @@ services:
     image: python:3.10-slim
     container_name: restore-db
     volumes:
-      - ./db_restore:/scripts  # Директория со скриптом восстановления
+      - /home/kras/finance_bot_test/db_restore:/scripts  # Директория со скриптом восстановления
       - /home/kras/db_backup/backups:/backups  # Директория с бэкапами
     env_file:
       - ./.env
