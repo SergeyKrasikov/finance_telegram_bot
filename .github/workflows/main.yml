@@ -42,8 +42,14 @@ jobs:
             git checkout test
             git reset --hard origin/test
 
-            # Восстановление базы данных
-            echo "Restoring latest database backup..."
+            # Сборка и перезапуск контейнеров
+            docker-compose -f docker-compose.yml build
+            docker-compose -f docker-compose.yml down
+            docker volume prune -f
+
+            docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
+
+            echo "Restoring latest database backup for test environment..."
             LATEST_BACKUP=$(ls -t /home/kras/db_backup/backups/*.zip | head -n 1)
             if [ -z "$LATEST_BACKUP" ]; then
               echo "No backups found for restoration!"
@@ -52,15 +58,15 @@ jobs:
 
             # Распаковка и восстановление бэкапа
             unzip -o "$LATEST_BACKUP" -d /tmp/db_restore
-            docker exec -i postgres psql -U $PG_USER -d $PG_DATABASE < /tmp/db_restore/backup.sql
+            SQL_FILE=$(ls /tmp/db_restore/*.sql | head -n 1)
+            if [ -z "$SQL_FILE" ]; then
+              echo "No SQL file found in the backup archive!"
+              exit 1
+            fi
+
+            docker exec -i postgres psql -U $PG_USER -d $PG_DATABASE < "$SQL_FILE"
             echo "Database restored successfully."
 
-            # Сборка и перезапуск контейнеров
-            docker-compose -f docker-compose.yml build
-            docker-compose -f docker-compose.yml down
-            docker volume prune -f
-
-            docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
             echo "Test environment updated successfully."
 
   # Продакшн сборка для ветки main
