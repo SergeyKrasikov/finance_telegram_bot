@@ -29,34 +29,38 @@ jobs:
 
             # Создаем директорию для теста
             mkdir -p $TEST_DIR
-            
-            # Переходим в директорию тестового окружения
-            cd "$TEST_DIR"
+            cd $TEST_DIR
 
-            # Проверяем наличие последнего бэкапа
-            LATEST_BACKUP=$(ls -t "$BACKUP_DIR"/*.zip | head -n 1)
+            # Проверяем, инициализирован ли репозиторий
+            if [ ! -d ".git" ]; then
+              git init
+              git remote add origin https://github.com/${{ github.repository }}.git
+            fi
+
+            # Пуллим последние изменения из ветки test
+            git fetch origin test
+            git checkout test
+            git reset --hard origin/test
+
+            # Восстановление базы данных
+            echo "Restoring latest database backup..."
+            LATEST_BACKUP=$(ls -t /home/kras/db_backup/backups/*.zip | head -n 1)
             if [ -z "$LATEST_BACKUP" ]; then
               echo "No backups found for restoration!"
               exit 1
             fi
 
-            # Распаковка бэкапа
-            unzip -o "$LATEST_BACKUP" -d "$RESTORE_DIR"
-            SQL_FILE=$(ls "$RESTORE_DIR"/*.sql | head -n 1)
-            if [ -z "$SQL_FILE" ]; then
-              echo "No SQL file found in the backup archive!"
-              exit 1
-            fi
-
-            # Восстановление базы данных
-            docker exec -i finance_bot_test_postgres_1 psql -h localhost -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" < "$SQL_FILE"
-            if [ $? -ne 0 ]; then
-              echo "Error occurred during database restoration!"
-              exit 1
-            fi
-
+            # Распаковка и восстановление бэкапа
+            unzip -o "$LATEST_BACKUP" -d /tmp/db_restore
+            docker exec -i finance_bot_test_postgres_1 psql -p $PG_PORT -U $PG_USER -d $PG_DATABASE < "$LATEST_BACKUP"
             echo "Database restored successfully."
 
+            # Сборка и перезапуск контейнеров
+            docker-compose -f docker-compose.yml build
+            docker-compose -f docker-compose.yml down
+            docker volume prune -f
+
+            docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
             echo "Test environment updated successfully."
 
   # Продакшн сборка для ветки main
