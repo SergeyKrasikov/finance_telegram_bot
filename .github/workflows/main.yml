@@ -64,7 +64,7 @@ jobs:
               exit 1
             fi
 
-            docker exec -i postgres psql -U $PG_USER -d $PG_DATABASE < "$SQL_FILE"
+            docker exec -i finance_bot_test_postgres_1 psql -U $PG_USER -d $PG_DATABASE < "$SQL_FILE"
             echo "Database restored successfully."
 
             echo "Test environment updated successfully."
