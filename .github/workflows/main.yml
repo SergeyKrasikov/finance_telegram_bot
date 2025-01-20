@@ -64,9 +64,14 @@ jobs:
               exit 1
             fi
 
-            docker exec -i finance_bot_test_postgres_1 psql -U $PG_USER -d $PG_DATABASE < "$SQL_FILE"
-            echo "Database restored successfully."
+            # Восстанавливаем базу данных
+            docker exec -i finance_bot_test_postgres_1 psql -U "$PG_USER" -d "$PG_DATABASE" < "$SQL_FILE"
+            if [ $? -ne 0 ]; then
+              echo "Error occurred during database restoration!"
+              exit 1
+            fi
 
+            echo "Database restored successfully."
             echo "Test environment updated successfully."
 
   # Продакшн сборка для ветки main
