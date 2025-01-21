@@ -60,7 +60,7 @@ jobs:
 
             # Распаковка и восстановление бэкапа
             unzip -o "$LATEST_BACKUP" -d /tmp/db_restore
-            docker exec -i finance_bot_test_postgres_1 psql -p $PG_PORT -U $PG_USER -d $PG_DATABASE < "$LATEST_BACKUP"
+            docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" < "$LATEST_BACKUP"
             echo "Database restored successfully."
 
   # Продакшн сборка для ветки main
