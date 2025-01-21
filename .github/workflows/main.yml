@@ -72,13 +72,23 @@ jobs:
 
             # Ожидание запуска PostgreSQL
             echo "Waiting for PostgreSQL to be ready..."
-            until docker exec finance_bot_test_postgres_1 pg_isready -h localhost -p 5432 -U my_finance_bot > /dev/null 2>&1; do
+            until docker exec finance_bot_test_postgres_1 pg_isready -h localhost -p 5433 -U my_finance_bot > /dev/null 2>&1; do
               sleep 5
             done
             echo "PostgreSQL is ready."
 
+            # Очистка базы данных
+            echo "Clearing the existing database..."
+            docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+            if [ $? -ne 0 ]; then
+              echo "Error occurred while clearing the database!"
+              exit 1
+            fi
+            echo "Database cleared successfully."
+
             # Восстановление из SQL файла
-            docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" < "$SQL_FILE"
+            echo "Restoring the database from backup..."
+            docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" < "$SQL_FILE"
             if [ $? -ne 0 ]; then
               echo "Error occurred during database restoration!"
               exit 1
