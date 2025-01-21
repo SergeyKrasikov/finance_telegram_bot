@@ -42,6 +42,14 @@ jobs:
             git checkout test
             git reset --hard origin/test
 
+            # Сборка и перезапуск контейнеров
+            docker-compose -f docker-compose.yml build
+            docker-compose -f docker-compose.yml down
+            docker volume prune -f
+
+            docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
+            echo "Test environment updated successfully."
+
             # Восстановление базы данных
             echo "Restoring latest database backup..."
             LATEST_BACKUP=$(ls -t /home/kras/db_backup/backups/*.zip | head -n 1)
@@ -54,14 +62,6 @@ jobs:
             unzip -o "$LATEST_BACKUP" -d /tmp/db_restore
             docker exec -i finance_bot_test_postgres_1 psql -p $PG_PORT -U $PG_USER -d $PG_DATABASE < "$LATEST_BACKUP"
             echo "Database restored successfully."
-
-            # Сборка и перезапуск контейнеров
-            docker-compose -f docker-compose.yml build
-            docker-compose -f docker-compose.yml down
-            docker volume prune -f
-
-            docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
-            echo "Test environment updated successfully."
 
   # Продакшн сборка для ветки main
   production_build:
