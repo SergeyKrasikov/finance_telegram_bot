@@ -76,7 +76,7 @@ jobs:
 
             while true; do
                 # Проверяем соединение
-                if docker exec finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; then
+                if docker exec finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; then
                     echo "PostgreSQL is ready."
                     break
                 fi
@@ -94,14 +94,14 @@ jobs:
             done
 
             # Очистка базы данных
-            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
+            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
                 echo "Error occurred while clearing the database!"
                 exit 1
             fi
             echo "Database cleared successfully."
 
             # Восстановление из SQL файла
-            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" < "$SQL_FILE"; then
+            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" < "$SQL_FILE"; then
                 echo "Error occurred during database restoration!"
                 exit 1
             fi
