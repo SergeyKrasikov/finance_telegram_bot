@@ -50,12 +50,11 @@ jobs:
             docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
             echo "Test environment updated successfully."
 
-            # Восстановление базы данных
             echo "Restoring latest database backup..."
             LATEST_BACKUP=$(ls -t /home/kras/db_backup/backups/*.zip | head -n 1)
             if [ -z "$LATEST_BACKUP" ]; then
-              echo "No backups found for restoration!"
-              exit 1
+                echo "No backups found for restoration!"
+                exit 1
             fi
 
             # Распаковка архива
@@ -66,37 +65,38 @@ jobs:
             # Проверяем, что SQL файл существует
             SQL_FILE=$(ls "$RESTORE_DIR"/*.sql | head -n 1)
             if [ -z "$SQL_FILE" ]; then
-              echo "No SQL file found in the backup archive!"
-              exit 1
+                echo "No SQL file found in the backup archive!"
+                exit 1
             fi
 
-            # Ожидание запуска PostgreSQL
-            echo "Waiting for PostgreSQL to be ready..."
-            until docker exec finance_bot_test_postgres_1 pg_isready -h localhost -p 5433 -U my_finance_bot > /dev/null 2>&1; do
-              sleep 5
+            # Ожидание готовности PostgreSQL
+            until docker exec finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; do
+                echo "Waiting for PostgreSQL to be ready..."
+                sleep 5
             done
             echo "PostgreSQL is ready."
 
             # Очистка базы данных
-            echo "Clearing the existing database..."
-            docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
-            if [ $? -ne 0 ]; then
-              echo "Error occurred while clearing the database!"
-              exit 1
+            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
+                echo "Error occurred while clearing the database!"
+                exit 1
             fi
             echo "Database cleared successfully."
 
             # Восстановление из SQL файла
-            echo "Restoring the database from backup..."
-            docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" < "$SQL_FILE"
-            if [ $? -ne 0 ]; then
-              echo "Error occurred during database restoration!"
-              exit 1
+            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" < "$SQL_FILE"; then
+                echo "Error occurred during database restoration!"
+                exit 1
             fi
+            echo "Database restored successfully."
 
             # Удаление временных файлов
-            echo "Cleaning up temporary files..."
-            rm -rf "$RESTORE_DIR"
+            if [ -d "$RESTORE_DIR" ]; then
+                rm -rf "$RESTORE_DIR"
+                echo "Temporary files removed successfully."
+            else
+                echo "No temporary files to clean up."
+            fi
 
             echo "Database restored and temporary files removed successfully."
 
