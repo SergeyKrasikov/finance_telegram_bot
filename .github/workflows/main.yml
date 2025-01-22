@@ -107,6 +107,21 @@ jobs:
             fi
             echo "Database restored successfully."
 
+            # Выполнение sql_functions.sql
+            echo "Executing sql_functions.sql..."
+            SQL_FUNCTIONS_FILE="/path/to/sql_functions.sql"
+            if [ -f "$SQL_FUNCTIONS_FILE" ]; then
+              docker exec -i finance_bot_test_postgres_1 psql -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" < "$SQL_FUNCTIONS_FILE"
+              if [ $? -ne 0 ]; then
+                echo "Error occurred while executing sql_functions.sql!"
+                exit 1
+              fi
+              echo "sql_functions.sql executed successfully."
+            else
+              echo "sql_functions.sql file not found at $SQL_FUNCTIONS_FILE!"
+              exit 1
+            fi
+
             # Удаление временных файлов
             if [ -d "$RESTORE_DIR" ]; then
                 rm -rf "$RESTORE_DIR"
