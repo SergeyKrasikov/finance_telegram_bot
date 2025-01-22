@@ -109,9 +109,9 @@ jobs:
 
             # Выполнение sql_functions.sql
             echo "Executing sql_functions.sql..."
-            SQL_FUNCTIONS_FILE="/path/to/sql_functions.sql"
+            SQL_FUNCTIONS_FILE="/home/kras/finance_bot_test/sql_functions.sql"
             if [ -f "$SQL_FUNCTIONS_FILE" ]; then
-              docker exec -i finance_bot_test_postgres_1 psql -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" < "$SQL_FUNCTIONS_FILE"
+              docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" < "$SQL_FUNCTIONS_FILE"
               if [ $? -ne 0 ]; then
                 echo "Error occurred while executing sql_functions.sql!"
                 exit 1
