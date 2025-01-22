@@ -69,12 +69,29 @@ jobs:
                 exit 1
             fi
 
-            # Ожидание готовности PostgreSQL
-            until docker exec finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; do
-                echo "Waiting for PostgreSQL to be ready..."
+            # Ожидание готовности PostgreSQL с лимитом времени
+            echo "Waiting for PostgreSQL to be ready..."
+            MAX_WAIT=120  # Максимальное время ожидания в секундах
+            START_TIME=$(date +%s)
+
+            while true; do
+                # Проверяем соединение
+                if docker exec finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; then
+                    echo "PostgreSQL is ready."
+                    break
+                fi
+                
+                # Проверяем превышение лимита ожидания
+                CURRENT_TIME=$(date +%s)
+                ELAPSED=$((CURRENT_TIME - START_TIME))
+                if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+                    echo "Timeout waiting for PostgreSQL to be ready after $MAX_WAIT seconds!"
+                    exit 1
+                fi
+
+                echo "Still waiting for PostgreSQL to be ready... ($ELAPSED seconds elapsed)"
                 sleep 5
             done
-            echo "PostgreSQL is ready."
 
             # Очистка базы данных
             if ! docker exec -i finance_bot_test_postgres_1 psql -p "5433" -U "my_finance_bot" -d "my_finance_bot" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
