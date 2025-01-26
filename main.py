@@ -15,11 +15,15 @@ from psycopg2 import Error
 from typing import Tuple
 import download_rates 
 import logging
+from logging.handlers import RotatingFileHandler
+
 
 # Настройка логирования
 log_directory = '/logs'  # Внутри контейнера
 os.makedirs(log_directory, exist_ok=True)
 log_file = os.path.join(log_directory, 'bot.log')
+handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)  # 10 MB на файл, до 5 резервных файлов
+logging.getLogger().addHandler(handler)
 
 logging.basicConfig(
     level=logging.INFO,  # Уровень логирования: DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -48,6 +52,19 @@ PG_DATABASE = os.environ.get('PG_DATABASE')
 bot = Bot(TOKEN)
 dp = Dispatcher()
 
+
+def create_default_keyboard(buttons: list[str] = None, placeholder: str = 'сумма валюта комментарий') -> types.ReplyKeyboardMarkup:
+    """
+    Создает клавиатуру с заданными кнопками.
+
+    :param buttons: Список строк с названиями кнопок. По умолчанию ['Остаток', 'Доход'].
+    :param placeholder: Текст подсказки в поле ввода. По умолчанию 'сумма валюта комментарий'.
+    :return: Клавиатура (ReplyKeyboardMarkup).
+    """
+    if buttons is None:
+        buttons = ['Остаток', 'Доход']
+    kb = [[types.KeyboardButton(text=button) for button in buttons]]
+    return types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder=placeholder)
 
 
 async def create_connection() -> asyncpg.Connection:
@@ -158,9 +175,7 @@ async def reset_state_after_timeout(state: FSMContext, timeout: int, message: Me
     # Проверяем, что состояние соответствует указанным
     if current_state in ('GetingLasTransaction:transaction_history', 'GetingLasTransaction:delete_category'):
         await state.clear()
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer("Состояние сброшено автоматически из-за отсутствия активности.", reply_markup=keyboard)
+        await message.answer("Состояние сброшено автоматически из-за отсутствия активности.", reply_markup=create_default_keyboard())
         logging.info("Состояние сброшено автоматически после таймаута.")
         
               
@@ -262,9 +277,7 @@ async def cmd_home(message: Message, state: FSMContext) -> None:
 
 @dp.message(Command('home'))
 async def cmd_home(message: Message, state: FSMContext) -> None:
-    kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')]]
-    keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-    await message.answer('OK', reply_markup=keyboard)    
+    await message.answer('OK', reply_markup=create_default_keyboard())    
     await state.clear()
     await message.delete()
 
@@ -305,9 +318,7 @@ async def exchange_currenc_write(message: Message, state: FSMContext) -> None:
     value_out, currency_out = data.get('value_out').split()
     value_in, currency_in = message.text.split()
     await db_function('exchange', message.chat.id, category_id, float(value_out), currency_out.upper(), float(value_in), currency_in.upper())
-    kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-    keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-    await message.answer('OK', reply_markup=keyboard)   
+    await message.answer('OK', reply_markup=create_default_keyboard())   
     await state.clear()    
 
 @dp.message(GetingLasTransaction.transaction_history, F.text == 'Предыдущая')
@@ -354,14 +365,10 @@ async def delete_transaction(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         transactions_id = data.get('transactions_id')
         await db_function('delete_transaction', list(map(int,transactions_id)))
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer('Транзакция удалена', reply_markup=keyboard)   
+        await message.answer('Транзакция удалена', reply_markup=create_default_keyboard())   
         await state.clear()
     else:
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer('Транзакция не удалена', reply_markup=keyboard)   
+        await message.answer('Транзакция не удалена', reply_markup=create_default_keyboard())   
         await state.clear()
 
         
@@ -392,15 +399,11 @@ async def write_value(message: Message, state: FSMContext) -> None:
     value = value[:3]
     if transaction_type == '+':
         await db_function('insert_revenue', message.chat.id, category, *value)
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer('OK', reply_markup=keyboard) 
+        await message.answer('OK', reply_markup=create_default_keyboard()) 
         await state.clear()
     else:
         await db_function('insert_spend', message.chat.id, category, *value)
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer(f'OK', reply_markup=keyboard) 
+        await message.answer(f'OK', reply_markup=create_default_keyboard()) 
         await state.clear()     
     
 
@@ -409,24 +412,18 @@ async def write_value(message: Message, state: FSMContext) -> None:
 async def getting_balance(message: Message, state: FSMContext) -> None:
     if  message.text == 'Личные':
         balance = await db_function('get_group_balance', message.chat.id, 15)
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer(f'Остаток: {float(balance[0]):,.2f}₽', reply_markup=keyboard)   
+        await message.answer(f'Остаток: {float(balance[0]):,.2f}₽', reply_markup=create_default_keyboard())   
         await state.clear()
     elif  message.text == 'Общие':
         balance = await db_function('get_group_balance', message.chat.id, 4)
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer(f'Остаток: {float(balance[0]):,.2f}₽', reply_markup=keyboard)   
+        await message.answer(f'Остаток: {float(balance[0]):,.2f}₽', reply_markup=create_default_keyboard())   
         await state.clear() 
     elif  message.text == 'По категориям':
         balaces = []
         for category in await db_function('get_categories_name', message.chat.id, 14):
             balance = await db_function('get_remains', message.chat.id, category)
-            kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-            keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
             balaces.append(f'{category:<10}: {float(balance[0]):,.2f}₽\n')
-        await message.answer('Остаток: \n'+'\n'.join(balaces), reply_markup=keyboard)   
+        await message.answer('Остаток: \n'+'\n'.join(balaces), reply_markup=create_default_keyboard())   
         await state.clear()  
     elif  message.text == 'По категориям c валютами':
         balaces = []
@@ -434,16 +431,12 @@ async def getting_balance(message: Message, state: FSMContext) -> None:
             category_id = await db_function('get_category_id_from_name', category)
             balance = await db_function('get_category_balance_with_currency', message.chat.id, category_id[0])
             balance = [('\n' + str(i[0]) + ' ' + str(i[1])) for i in balance]
-            kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-            keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
             balaces.append(f'{category:<10}: {" ".join(balance)}\n')
-        await message.answer('Остаток: \n'+'\n'.join(balaces), reply_markup=keyboard)   
+        await message.answer('Остаток: \n'+'\n'.join(balaces), reply_markup=create_default_keyboard())   
         await state.clear()  
     else:
         balance = await db_function('get_group_balance', message.chat.id, 14)
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer(f'Остаток: {float(balance[0]):,.2f}₽', reply_markup=keyboard)   
+        await message.answer(f'Остаток: {float(balance[0]):,.2f}₽', reply_markup=create_default_keyboard())   
         await state.clear()    
 
 
@@ -475,9 +468,7 @@ async def write_spend(message: Message, state: FSMContext) -> None:
             await db_function('insert_spend', message.chat.id, category, amount, currency, comment)
         # Получение остатка и отправка пользователю
         balance = await db_function('get_remains', message.chat.id, category)
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')]]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        await message.answer(f'Остаток в {category}: {float(balance[0]):,.2f}₽', reply_markup=keyboard)
+        await message.answer(f'Остаток в {category}: {float(balance[0]):,.2f}₽', reply_markup=create_default_keyboard())
     except ValueError as e:
         logging.error(f"Ошибка преобразования суммы: {e}", exc_info=True)
         await message.answer("Неверный формат суммы. Введите данные в формате: сумма валюта комментарий.")
@@ -502,13 +493,9 @@ async def get_balances(message: Message) -> None:
             f'{category:<20}: {float(balance):,.2f}₽'
             for category, balance in balances
         ])
-        
-        # Создаем клавиатуру
-        kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')]]
-        keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-        
+         
         # Отправляем сообщение пользователю
-        await message.answer(f'Остаток: \n{balances_text}', reply_markup=keyboard)
+        await message.answer(f'Остаток: \n{balances_text}', reply_markup=create_default_keyboard())
     
     except ValueError as e:
         logging.error(f"Ошибка при обработке балансов: {e}", exc_info=True)
@@ -539,9 +526,7 @@ async def write_value(message: Message, state: FSMContext) -> None:
     value = message.text.split(' ', 2)
     value[0] = float(value[0].replace(',', '.'))
     await db_function('insert_revenue', message.chat.id, category, *value)
-    kb = [[types.KeyboardButton(text='Остаток'), types.KeyboardButton(text='Доход')],]
-    keyboard = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder='сумма валюта комментарий')
-    await message.answer('OK', reply_markup=keyboard) 
+    await message.answer('OK', reply_markup=create_default_keyboard()) 
     await state.clear()
 
 
