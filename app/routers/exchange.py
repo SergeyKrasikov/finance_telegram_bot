@@ -3,6 +3,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
+from app.config import GROUP_ALL
 from app.db.connection import db_function
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import ExchangeCurrency
@@ -13,7 +14,7 @@ router = Router()
 
 @router.message(Command('exchange'))
 async def cmd_exchange(message: Message, state: FSMContext) -> None:
-    categories = await db_function('get_categories_name', message.chat.id, 14)
+    categories = await db_function('get_categories_name', message.chat.id, GROUP_ALL)
     kb = [
         [types.KeyboardButton(text=f'{categories[j]}') for j in range(i, i + 2) if j < len(categories)]
         for i in range(0, len(categories), 2)
@@ -24,7 +25,7 @@ async def cmd_exchange(message: Message, state: FSMContext) -> None:
     await message.delete()
 
 
-@router.message(ExchangeCurrency.choosing_category, CategoryNameFilter(14))
+@router.message(ExchangeCurrency.choosing_category, CategoryNameFilter(GROUP_ALL))
 async def ask_value_out(message: Message, state: FSMContext) -> None:
     category_id = await db_function('get_category_id_from_name', message.text)
     await state.update_data(category=category_id)

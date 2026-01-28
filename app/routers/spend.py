@@ -5,6 +5,7 @@ from aiogram.filters import StateFilter
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
+from app.config import GROUP_SPEND
 from app.db.connection import db_function
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import WriteSold
@@ -16,7 +17,7 @@ router = Router()
 @router.message(lambda x: re.match(r'^\d+([.,]\d+)?(\s+[A-Za-z]{3})?(\s+.+)?$', x.text), StateFilter(None))
 async def choose_spend_category(message: Message, state: FSMContext) -> None:
     await state.update_data(value=message.text)
-    categories = await db_function('get_categories_name', message.chat.id, 8)
+    categories = await db_function('get_categories_name', message.chat.id, GROUP_SPEND)
     kb = [
         [types.KeyboardButton(text=f'{categories[j]}') for j in range(i, i + 2) if j < len(categories)]
         for i in range(0, len(categories), 2)
@@ -30,7 +31,7 @@ async def choose_spend_category(message: Message, state: FSMContext) -> None:
     await state.set_state(WriteSold.choosing_category)
 
 
-@router.message(WriteSold.choosing_category, CategoryNameFilter(8))
+@router.message(WriteSold.choosing_category, CategoryNameFilter(GROUP_SPEND))
 async def write_spend(message: Message, state: FSMContext) -> None:
     try:
         category = message.text

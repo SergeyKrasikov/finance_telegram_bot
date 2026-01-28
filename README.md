@@ -59,12 +59,12 @@ docker-compose up --build
 
 ## Переменные окружения
 ```
-TOKEN=
-POSTGRES_USER=
-POSTGRES_PASSWORD=
-PG_HOST=
-PG_PORT=
-PG_DATABASE=
+TOKEN=                # Токен Telegram-бота
+POSTGRES_USER=        # Пользователь БД
+POSTGRES_PASSWORD=    # Пароль пользователя БД
+PG_HOST=              # Хост PostgreSQL
+PG_PORT=              # Порт PostgreSQL
+PG_DATABASE=          # Название базы данных
 ```
 
 ## Заметки

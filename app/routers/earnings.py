@@ -3,6 +3,7 @@ from aiogram.filters import StateFilter
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
+from app.config import GROUP_EARNINGS
 from app.db.connection import db_function
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import WriteEarnings
@@ -13,7 +14,7 @@ router = Router()
 
 @router.message(lambda m: m.text == 'Доход', StateFilter(None))
 async def choose_category(message: Message, state: FSMContext) -> None:
-    categories = await db_function('get_categories_name', message.chat.id, 10)
+    categories = await db_function('get_categories_name', message.chat.id, GROUP_EARNINGS)
     await state.update_data(categorys=categories)
     kb = [
         [types.KeyboardButton(text=f'{categories[j]}') for j in range(i, i + 2) if j < len(categories)]
@@ -24,7 +25,7 @@ async def choose_category(message: Message, state: FSMContext) -> None:
     await state.set_state(WriteEarnings.choosing_category)
 
 
-@router.message(WriteEarnings.choosing_category, CategoryNameFilter(10))
+@router.message(WriteEarnings.choosing_category, CategoryNameFilter(GROUP_EARNINGS))
 async def ask_sum(message: Message, state: FSMContext) -> None:
     await state.update_data(category=message.text)
     await message.answer('Сколько?', reply_markup=types.ReplyKeyboardRemove())

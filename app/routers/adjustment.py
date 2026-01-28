@@ -3,6 +3,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
+from app.config import GROUP_ALL
 from app.db.connection import db_function
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import ManualAdjustment
@@ -23,7 +24,7 @@ async def cmd_adjustment(message: Message, state: FSMContext) -> None:
 @router.message(ManualAdjustment.choosing_type, F.text.in_(['-', '+']))
 async def choosing_category(message: Message, state: FSMContext) -> None:
     await state.update_data(transaction_type=message.text)
-    categories = await db_function('get_categories_name', message.chat.id, 14)
+    categories = await db_function('get_categories_name', message.chat.id, GROUP_ALL)
     kb = [
         [types.KeyboardButton(text=f'{categories[j]}') for j in range(i, i + 2) if j < len(categories)]
         for i in range(0, len(categories), 2)
@@ -33,7 +34,7 @@ async def choosing_category(message: Message, state: FSMContext) -> None:
     await state.set_state(ManualAdjustment.choosing_category)
 
 
-@router.message(ManualAdjustment.choosing_category, CategoryNameFilter(14))
+@router.message(ManualAdjustment.choosing_category, CategoryNameFilter(GROUP_ALL))
 async def ask_sum(message: Message, state: FSMContext) -> None:
     await state.update_data(category=message.text)
     await message.answer('Сколько?', reply_markup=types.ReplyKeyboardRemove())
