@@ -49,7 +49,7 @@ pip install -r requirements.txt
 ```
 3) Запусти:
 ```
-python -m app
+python app.py
 ```
 
 ### Через Docker

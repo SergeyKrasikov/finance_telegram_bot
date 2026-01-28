@@ -53,7 +53,7 @@ services:
           memory: 4G
   bot:
     build: .
-    command: sh -c "python -m app"
+    command: sh -c "python app.py"
     env_file:
       - ./.env
     restart: always
