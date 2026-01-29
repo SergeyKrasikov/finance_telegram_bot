@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
-from app.db.connection import db_function
+from app.db.transactions import delete_transactions
 from app.services.state import reset_state_after_timeout
 from app.services.transactions import get_last_transaction, is_recent_transaction
 from app.states.finance import GetingLasTransaction
@@ -71,7 +71,7 @@ async def delete_transaction(message: Message, state: FSMContext) -> None:
     if message.text == 'Да':
         data = await state.get_data()
         transactions_id = data.get('transactions_id')
-        await db_function('delete_transaction', list(map(int, transactions_id)))
+        await delete_transactions(list(map(int, transactions_id)))
         await message.answer('Транзакция удалена', reply_markup=create_default_keyboard())
         await state.clear()
     else:

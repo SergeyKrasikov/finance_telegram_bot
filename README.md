@@ -73,8 +73,46 @@ PG_DATABASE=          # Название базы данных
 - `app/logging_config.py` — настройки логирования.
 - `docker-compose.yml` — сервисы и параметры контейнеров.
 - `requirements.txt` — зависимости Python.
- - `tables.sql` — схема БД (создание таблиц).
- - `sql_functions.sql` — хранимые функции/процедуры для бота.
+- `tables.sql` — схема БД (создание таблиц).
+- `sql_functions.sql` — хранимые функции/процедуры для бота.
+
+Константы расписания: `DAILY_REPORT_HOUR`, `DAILY_REPORT_MINUTE`, `MONTHLY_REPORT_CRON`, `RATES_UPDATE_HOURS` (см. `app/config.py`).
+
+Пример: чтобы перенести ежедневный отчёт на 20:00, установи `DAILY_REPORT_HOUR = 20` и `DAILY_REPORT_MINUTE = 0` в `app/config.py`.
+
+## DB-модули
+- `app/db/connection.py` — базовое подключение и выполнение функций.
+- `app/db/transactions.py` — операции с транзакциями и дневной/месячной сводкой.
+- `app/db/balances.py` — остатки и балансы по группам/категориям.
+- `app/db/currency.py` — курсы/обмен валют.
+- `app/db/categories.py` — справочник категорий.
+- `app/db/users.py` — пользователи бота.
+
+## Потоки
+```
+Telegram update
+  → app/routers/*
+    → app/services/* (логика/валидация/планировщик)
+      → app/db/* (доменные функции)
+        → PostgreSQL (sql_functions.sql)
+```
+
+Примеры:
+- `/balance` → `app/routers/balance.py` → `app/db/balances.py`
+- `/history` → `app/routers/history.py` → `app/services/transactions.py` → `app/db/transactions.py`
+- Расход (сумма) → `app/routers/spend.py` → `app/parsers/input.py` → `app/db/transactions.py`
+
+Scheduler:
+- Ежедневный отчёт → `app/scheduler/jobs.py` → `app/db/transactions.py`
+- Месячный отчёт → `app/scheduler/jobs.py` → `app/db/transactions.py`
+- Загрузка курсов → `app/scheduler/jobs.py` → `app/services/rates.py` → `app/db/currency.py`
+
+Расписание задач (см. `app/scheduler/jobs.py`):
+- Ежедневный отчёт: каждый день в 23:59.
+- Месячный отчёт: каждый месяц (cron: `month='*'`).
+- Курсы валют: каждые 14 часов.
+
+Источник расписания: `app/config.py`
 
 ## Группы категорий
 - `GROUP_SPEND = 8` — категории расходов.

@@ -4,7 +4,8 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_ALL
-from app.db.connection import db_function
+from app.db.categories import get_categories_name
+from app.db.transactions import insert_revenue, insert_spend
 from app.parsers.input import is_number_input, parse_amount_parts
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import ManualAdjustment
@@ -25,7 +26,7 @@ async def cmd_adjustment(message: Message, state: FSMContext) -> None:
 @router.message(ManualAdjustment.choosing_type, F.text.in_(['-', '+']))
 async def choosing_category(message: Message, state: FSMContext) -> None:
     await state.update_data(transaction_type=message.text)
-    categories = await db_function('get_categories_name', message.chat.id, GROUP_ALL)
+    categories = await get_categories_name(message.chat.id, GROUP_ALL)
     kb = [
         [types.KeyboardButton(text=f'{categories[j]}') for j in range(i, i + 2) if j < len(categories)]
         for i in range(0, len(categories), 2)
@@ -51,10 +52,10 @@ async def write_value(message: Message, state: FSMContext) -> None:
     value += ['RUB', '#ручная корректировка']
     value = value[:3]
     if transaction_type == '+':
-        await db_function('insert_revenue', message.chat.id, category, *value)
+        await insert_revenue(message.chat.id, category, *value)
         await message.answer('OK', reply_markup=create_default_keyboard())
         await state.clear()
     else:
-        await db_function('insert_spend', message.chat.id, category, *value)
+        await insert_spend(message.chat.id, category, *value)
         await message.answer('OK', reply_markup=create_default_keyboard())
         await state.clear()

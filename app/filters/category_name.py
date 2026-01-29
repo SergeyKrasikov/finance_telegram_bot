@@ -1,7 +1,7 @@
 from aiogram.filters import BaseFilter
 from aiogram.types import Message
 
-from app.db.connection import db_function
+from app.db.categories import get_categories_name
 
 
 class CategoryNameFilter(BaseFilter):
@@ -9,5 +9,5 @@ class CategoryNameFilter(BaseFilter):
         self.group = group
 
     async def __call__(self, message: Message) -> bool:
-        categories = await db_function('get_categories_name', message.from_user.id, self.group)
+        categories = await get_categories_name(message.from_user.id, self.group)
         return message.text in categories

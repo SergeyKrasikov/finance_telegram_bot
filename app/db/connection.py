@@ -26,12 +26,7 @@ async def db_function(func: str, *args) -> list:
         placeholders = ", ".join([f"${i+1}" for i in range(len(args))])
         query = f"SELECT * FROM {func}({placeholders})"
         response = await connection.fetch(query, *args)
-
-        if func in ['get_last_transaction', 'get_category_balance_with_currency']:
-            return response
-        if func == 'get_all_balances':
-            return [(record['category_name'], record['balance']) for record in response]
-        return [record[0] for record in response]
+        return response
     except (Exception, asyncpg.PostgresError, Error):
         logging.error("Error while calling function in PostgreSQL", exc_info=True)
         raise

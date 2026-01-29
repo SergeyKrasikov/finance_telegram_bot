@@ -4,13 +4,13 @@ from psycopg2 import Error
 
 import download_rates
 
-from app.db.connection import db_function
+from app.db.currency import get_currency_list
 
 
 async def load_rate() -> None:
     try:
         today = datetime.datetime.now()
-        currency = await db_function('get_currency')
+        currency = await get_currency_list()
         result = download_rates.extract(today.strftime('%Y-%m-%d'), currency)
         result += download_rates.extract_cripto(currency)
         download_rates.load(result)

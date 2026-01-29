@@ -4,7 +4,8 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_EARNINGS
-from app.db.connection import db_function
+from app.db.categories import get_categories_name
+from app.db.transactions import insert_revenue
 from app.parsers.input import is_number_input, parse_amount_parts
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import WriteEarnings
@@ -15,7 +16,7 @@ router = Router()
 
 @router.message(lambda m: m.text == 'Доход', StateFilter(None))
 async def choose_category(message: Message, state: FSMContext) -> None:
-    categories = await db_function('get_categories_name', message.chat.id, GROUP_EARNINGS)
+    categories = await get_categories_name(message.chat.id, GROUP_EARNINGS)
     await state.update_data(categorys=categories)
     kb = [
         [types.KeyboardButton(text=f'{categories[j]}') for j in range(i, i + 2) if j < len(categories)]
@@ -38,6 +39,6 @@ async def write_value(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     category = data.get('category')
     value = parse_amount_parts(message.text)
-    await db_function('insert_revenue', message.chat.id, category, *value)
+    await insert_revenue(message.chat.id, category, *value)
     await message.answer('OK', reply_markup=create_default_keyboard())
     await state.clear()

@@ -1,15 +1,22 @@
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from app.db.connection import db_function
+from app.db.transactions import get_daily_transactions, monthly_summary
+from app.db.users import get_all_users_id
+from app.config import (
+    DAILY_REPORT_HOUR,
+    DAILY_REPORT_MINUTE,
+    MONTHLY_REPORT_CRON,
+    RATES_UPDATE_HOURS,
+)
 from app.services.rates import load_rate
 
 
 async def daily_task(bot) -> None:
     try:
-        users = await db_function('get_all_users_id')
+        users = await get_all_users_id()
         for user in users:
-            transactions = await db_function('get_daily_transactions', user)
+            transactions = await get_daily_transactions(user)
             message = (
                 'Транзакции за сегодня:\n' + '\n'.join(transactions)
                 if transactions
@@ -22,7 +29,7 @@ async def daily_task(bot) -> None:
 
 async def monthly_task(bot) -> None:
     try:
-        result = await db_function('monthly')
+        result = await monthly_summary()
         response: dict[int, dict[str, float]] = {}
 
         for i in result:
@@ -52,7 +59,7 @@ async def monthly_task(bot) -> None:
 
 def setup_scheduler(bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: monthly_task(bot), 'cron', month='*')
-    scheduler.add_job(lambda: daily_task(bot), 'cron', hour='23', minute='59')
-    scheduler.add_job(load_rate, 'interval', hours=14)
+    scheduler.add_job(lambda: monthly_task(bot), 'cron', **MONTHLY_REPORT_CRON)
+    scheduler.add_job(lambda: daily_task(bot), 'cron', hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE)
+    scheduler.add_job(load_rate, 'interval', hours=RATES_UPDATE_HOURS)
     return scheduler
