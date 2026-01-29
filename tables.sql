@@ -45,6 +45,13 @@ create table if not exists public.exchange_rates (
 currency varchar(3),
 rate numeric(20,10));
 
+-- Base USD rate (anchor) for a fresh database
+INSERT INTO exchange_rates ("datetime", currency, rate)
+SELECT now(), 'USD', 1
+WHERE NOT EXISTS (
+    SELECT 1 FROM exchange_rates WHERE currency = 'USD'
+);
+
 
 CREATE INDEX IF NOT EXISTS idx_exchange_rates_currency_datetime ON exchange_rates (currency, datetime DESC);
 CREATE INDEX IF NOT EXISTS idx_cash_flow_user_categories ON cash_flow (users_id, category_id_from, category_id_to);

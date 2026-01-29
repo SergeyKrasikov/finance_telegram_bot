@@ -48,6 +48,21 @@ async def exchange_currency_write(message: Message, state: FSMContext) -> None:
     category_id = data.get('category')
     value_out, currency_out = parse_amount_currency(data.get('value_out'))
     value_in, currency_in = parse_amount_currency(message.text)
-    await exchange_currency(message.chat.id, category_id, value_out, currency_out, value_in, currency_in)
-    await message.answer('OK', reply_markup=create_default_keyboard())
-    await state.clear()
+    try:
+        result = await exchange_currency(message.chat.id, category_id, value_out, currency_out, value_in, currency_in)
+        await message.answer(result, reply_markup=create_default_keyboard())
+        await state.clear()
+    except Exception as error:
+        error_text = str(error)
+        if 'USDT rate is unknown' in error_text:
+            msg = 'Нужен курс USDT. Сначала обменяй USD↔USDT.'
+        elif 'Stablecoin rate is unknown' in error_text:
+            msg = 'Нет курса стейбла. Сначала обменяй стейбл → USD.'
+        elif 'Rates for' in error_text:
+            msg = 'Нет курсов для выбранной пары. Сначала обменяй через USD.'
+        elif 'Exchange values must be greater than zero' in error_text:
+            msg = 'Суммы должны быть больше нуля.'
+        else:
+            msg = 'Не удалось выполнить обмен. Проверь формат и попробуй снова.'
+        await message.answer(msg, reply_markup=create_default_keyboard())
+        await state.clear()

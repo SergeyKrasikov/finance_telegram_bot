@@ -7,9 +7,7 @@ from app.config import (
     DAILY_REPORT_HOUR,
     DAILY_REPORT_MINUTE,
     MONTHLY_REPORT_CRON,
-    RATES_UPDATE_HOURS,
 )
-from app.services.rates import load_rate
 
 
 async def daily_task(bot) -> None:
@@ -61,5 +59,4 @@ def setup_scheduler(bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(lambda: monthly_task(bot), 'cron', **MONTHLY_REPORT_CRON)
     scheduler.add_job(lambda: daily_task(bot), 'cron', hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE)
-    scheduler.add_job(load_rate, 'interval', hours=RATES_UPDATE_HOURS)
     return scheduler

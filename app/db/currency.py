@@ -13,5 +13,6 @@ async def exchange_currency(
     currency_out: str,
     value_in: float,
     currency_in: str,
-) -> None:
-    await db_function('exchange', user_id, category_id, value_out, currency_out, value_in, currency_in)
+) -> str:
+    records = await db_function('exchange', user_id, category_id, value_out, currency_out, value_in, currency_in)
+    return records[0][0] if records else 'OK'

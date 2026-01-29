@@ -76,7 +76,7 @@ PG_DATABASE=          # Название базы данных
 - `tables.sql` — схема БД (создание таблиц).
 - `sql_functions.sql` — хранимые функции/процедуры для бота.
 
-Константы расписания: `DAILY_REPORT_HOUR`, `DAILY_REPORT_MINUTE`, `MONTHLY_REPORT_CRON`, `RATES_UPDATE_HOURS` (см. `app/config.py`).
+Константы расписания: `DAILY_REPORT_HOUR`, `DAILY_REPORT_MINUTE`, `MONTHLY_REPORT_CRON` (см. `app/config.py`).
 
 Пример: чтобы перенести ежедневный отчёт на 20:00, установи `DAILY_REPORT_HOUR = 20` и `DAILY_REPORT_MINUTE = 0` в `app/config.py`.
 
@@ -105,12 +105,26 @@ Telegram update
 Scheduler:
 - Ежедневный отчёт → `app/scheduler/jobs.py` → `app/db/transactions.py`
 - Месячный отчёт → `app/scheduler/jobs.py` → `app/db/transactions.py`
-- Загрузка курсов → `app/scheduler/jobs.py` → `app/services/rates.py` → `app/db/currency.py`
 
 Расписание задач (см. `app/scheduler/jobs.py`):
 - Ежедневный отчёт: каждый день в 23:59.
 - Месячный отчёт: каждый месяц (cron: `month='*'`).
-- Курсы валют: каждые 14 часов.
+
+## Курсы валют (без API)
+- Все курсы хранятся в `exchange_rates` как количество валюты за 1 USD (USD = 1).
+- При обмене с **USD** всегда обновляется другая валюта (USD не меняется).
+- Стейблы (USDT/USDC/DAI/…) **обновляются только при обмене с USD**.
+- Другие валюты обновляются при обмене с USD или со стейблами.
+- Если обмен без USD/стейблов — курс **получаемой** валюты считается по курсу **отдаваемой**.
+- Если для пары нет курсов, обмен запрещён — сначала обменяй через USD.
+
+### Примеры
+- **RUB → USDT**: обновляется курс **RUB** (USDT не меняется).  
+- **USD → USDT**: обновляется курс **USDT**.  
+- **USDT → USD**: обновляется курс **USDT**.  
+- **USDT → ETH**: обновляется курс **ETH**, курс USDT не меняется.  
+- **RUB → ETH**: курс ETH обновляется на основе курса RUB.  
+- **ETH → RUB**: курс RUB обновляется на основе курса ETH.  
 
 Источник расписания: `app/config.py`
 

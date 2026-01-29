@@ -447,12 +447,103 @@ CREATE OR REPLACE FUNCTION public.exchange(_users_id bigint, _category_id int, _
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
+declare
+    _rate_out numeric;
+    _rate_in numeric;
+    _rate_out_current numeric;
+    _rate_in_current numeric;
+    _stable_currencies text[] := array[
+        'USDT','USDC','DAI','BUSD','TUSD','USDP','GUSD','USDN','FRAX','USDD','FDUSD','USDE','SUSD','PYUSD'
+    ];
+    _is_stable_out boolean;
+    _is_stable_in boolean;
+    _ts timestamp := now();
 begin 
+    if _value_out <= 0 or _value_in <= 0 then
+        raise exception 'Exchange values must be greater than zero';
+    end if;
+
+    select rate into _rate_out
+    from exchange_rates
+    where currency = _currency_out
+    order by datetime desc
+    limit 1;
+
+    select rate into _rate_in
+    from exchange_rates
+    where currency = _currency_in
+    order by datetime desc
+    limit 1;
+
+    if _currency_out = 'USD' then
+        _rate_out := 1;
+    end if;
+    if _currency_in = 'USD' then
+        _rate_in := 1;
+    end if;
+
+    _is_stable_out := _currency_out = ANY(_stable_currencies);
+    _is_stable_in := _currency_in = ANY(_stable_currencies);
+
+    if _rate_out is null and _rate_in is null then
+        raise exception 'Rates for % and % are unknown. Exchange via USD first', _currency_out, _currency_in;
+    end if;
+
+    -- USD is anchor: update the other currency
+    if _currency_out = 'USD' then
+        _rate_out := 1;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in, _rate_in);
+    elsif _currency_in = 'USD' then
+        _rate_in := 1;
+        _rate_out := _rate_in * (_value_out / _value_in);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_out, _rate_out);
+    -- Stablecoin updates only when exchanged with USD
+    elsif _is_stable_out then
+        if _rate_out is null then
+            raise exception 'Stablecoin rate is unknown. Exchange stablecoin with USD first';
+        end if;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in, _rate_in);
+    elsif _is_stable_in then
+        if _rate_in is null then
+            raise exception 'Stablecoin rate is unknown. Exchange stablecoin with USD first';
+        end if;
+        _rate_out := _rate_in * (_value_out / _value_in);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_out, _rate_out);
+    else
+        if _rate_out is null then
+            raise exception 'Rate for % is unknown. Exchange via USD or stablecoin first', _currency_out;
+        end if;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in, _rate_in);
+    end if;
+
 	insert into cash_flow(users_id, category_id_from, value, currency, description)
 		   values(_users_id, _category_id, _value_out, _currency_out, concat('exchange to ', _value_in, ' ',  _currency_in));
 	insert into cash_flow(users_id, category_id_to, value, currency, description)
 		   values(_users_id, _category_id, _value_in, _currency_in, concat('exchange from ', _value_out, ' ',  _currency_out));
-return 'OK';
+
+    if _currency_out = 'USD' then
+        _rate_out_current := 1;
+    else
+        _rate_out_current := coalesce(_rate_out, (select rate from exchange_rates where currency = _currency_out order by datetime desc limit 1));
+    end if;
+
+    if _currency_in = 'USD' then
+        _rate_in_current := 1;
+    else
+        _rate_in_current := coalesce(_rate_in, (select rate from exchange_rates where currency = _currency_in order by datetime desc limit 1));
+    end if;
+
+return format('Курс: %s=%s, %s=%s (за 1 USD)',
+              _currency_out, _rate_out_current,
+              _currency_in, _rate_in_current);
 		end
 $function$
 ;
@@ -471,7 +562,7 @@ $function$
 
 -- получить баланс категории с разбивкой по валютам
 CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency(_user_id bigint, _category_id integer)
- RETURNS TABLE (value numeric, currensy varchar)
+ RETURNS TABLE (value numeric, currency varchar)
  LANGUAGE plpgsql
 AS $function$
 BEGIN
