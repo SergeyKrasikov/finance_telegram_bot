@@ -1,5 +1,4 @@
 import logging
-import re
 from aiogram import Router, types
 from aiogram.filters import StateFilter
 from aiogram.types import Message
@@ -7,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_SPEND
 from app.db.connection import db_function
+from app.parsers.input import is_amount_input, parse_amount_with_defaults
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import WriteSold
 from app.utils.keyboards import create_default_keyboard
@@ -14,7 +14,7 @@ from app.utils.keyboards import create_default_keyboard
 router = Router()
 
 
-@router.message(lambda x: re.match(r'^\d+([.,]\d+)?(\s+[A-Za-z]{3})?(\s+.+)?$', x.text), StateFilter(None))
+@router.message(lambda x: is_amount_input(x.text), StateFilter(None))
 async def choose_spend_category(message: Message, state: FSMContext) -> None:
     await state.update_data(value=message.text)
     categories = await db_function('get_categories_name', message.chat.id, GROUP_SPEND)
@@ -36,10 +36,7 @@ async def write_spend(message: Message, state: FSMContext) -> None:
     try:
         category = message.text
         data = await state.get_data()
-        value_parts = data.get('value').split(' ', 2)
-        amount = float(value_parts[0].replace(',', '.'))
-        currency = value_parts[1].upper() if len(value_parts) > 1 else 'RUB'
-        comment = value_parts[2] if len(value_parts) > 2 else None
+        amount, currency, comment = parse_amount_with_defaults(data.get('value'))
 
         if currency != 'RUB':
             await db_function('insert_spend_with_exchange', message.chat.id, category, amount, currency, comment)

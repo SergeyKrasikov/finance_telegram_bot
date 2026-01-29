@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_ALL
 from app.db.connection import db_function
+from app.parsers.input import is_number_input, parse_amount_parts
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import ManualAdjustment
 from app.utils.keyboards import create_default_keyboard
@@ -41,13 +42,12 @@ async def ask_sum(message: Message, state: FSMContext) -> None:
     await state.set_state(ManualAdjustment.writing_value)
 
 
-@router.message(lambda x: x.text.split()[0].replace('.', '').replace(',', '').isdigit(), ManualAdjustment.writing_value)
+@router.message(lambda x: is_number_input(x.text), ManualAdjustment.writing_value)
 async def write_value(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     category = data.get('category')
     transaction_type = data.get('transaction_type')
-    value = message.text.split(' ', 2)
-    value[0] = float(value[0].replace(',', '.'))
+    value = parse_amount_parts(message.text)
     value += ['RUB', '#ручная корректировка']
     value = value[:3]
     if transaction_type == '+':

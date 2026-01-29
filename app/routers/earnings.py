@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_EARNINGS
 from app.db.connection import db_function
+from app.parsers.input import is_number_input, parse_amount_parts
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import WriteEarnings
 from app.utils.keyboards import create_default_keyboard
@@ -32,12 +33,11 @@ async def ask_sum(message: Message, state: FSMContext) -> None:
     await state.set_state(WriteEarnings.writing_value)
 
 
-@router.message(lambda x: x.text.split()[0].replace('.', '').replace(',', '').isdigit(), WriteEarnings.writing_value)
+@router.message(lambda x: is_number_input(x.text), WriteEarnings.writing_value)
 async def write_value(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     category = data.get('category')
-    value = message.text.split(' ', 2)
-    value[0] = float(value[0].replace(',', '.'))
+    value = parse_amount_parts(message.text)
     await db_function('insert_revenue', message.chat.id, category, *value)
     await message.answer('OK', reply_markup=create_default_keyboard())
     await state.clear()

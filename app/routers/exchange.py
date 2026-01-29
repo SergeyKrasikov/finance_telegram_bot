@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_ALL
 from app.db.connection import db_function
+from app.parsers.input import parse_amount_currency
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import ExchangeCurrency
 from app.utils.keyboards import create_default_keyboard
@@ -44,16 +45,16 @@ async def ask_value_in(message: Message, state: FSMContext) -> None:
 async def exchange_currency_write(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     category_id = data.get('category')[0]
-    value_out, currency_out = data.get('value_out').split()
-    value_in, currency_in = message.text.split()
+    value_out, currency_out = parse_amount_currency(data.get('value_out'))
+    value_in, currency_in = parse_amount_currency(message.text)
     await db_function(
         'exchange',
         message.chat.id,
         category_id,
-        float(value_out),
-        currency_out.upper(),
-        float(value_in),
-        currency_in.upper(),
+        value_out,
+        currency_out,
+        value_in,
+        currency_in,
     )
     await message.answer('OK', reply_markup=create_default_keyboard())
     await state.clear()

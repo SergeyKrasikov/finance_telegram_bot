@@ -58,6 +58,7 @@ docker-compose up --build
 ```
 
 ## Переменные окружения
+Файл: `.env` (располагается рядом с `app.py`). Пример: `.env.example`.
 ```
 TOKEN=                # Токен Telegram-бота
 POSTGRES_USER=        # Пользователь БД
@@ -66,6 +67,23 @@ PG_HOST=              # Хост PostgreSQL
 PG_PORT=              # Порт PostgreSQL
 PG_DATABASE=          # Название базы данных
 ```
+
+## Конфиги (единый список)
+- `app/config.py` — переменные окружения и группы категорий.
+- `app/logging_config.py` — настройки логирования.
+- `docker-compose.yml` — сервисы и параметры контейнеров.
+- `requirements.txt` — зависимости Python.
+ - `tables.sql` — схема БД (создание таблиц).
+ - `sql_functions.sql` — хранимые функции/процедуры для бота.
+
+## Группы категорий
+- `GROUP_SPEND = 8` — категории расходов.
+- `GROUP_EARNINGS = 10` — категории доходов.
+- `GROUP_ALL = 14` — все категории (общий набор для операций).
+- `GROUP_COMMON = 4` — общие/семейные категории.
+- `GROUP_PERSONAL = 15` — личные категории.
+  
+Источник: `app/config.py`
 
 ## Заметки
 - Основная точка входа: `app.py`.
