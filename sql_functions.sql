@@ -405,7 +405,7 @@ AS $function$
 begin
 return (select COALESCE (get_category_balance(_user_id,(select c.id from categories c join categories_category_groups ccg on c.id = ccg.categories_id
                     where ccg.category_groyps_id = 14 and ccg.users_id = _user_id
-                    and c.name=_category)), 0))
+                    and c."name"=_category)), 0))
 			  ;
 		end
 $function$

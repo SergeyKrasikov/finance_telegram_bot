@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from app.config import GROUP_EARNINGS
 from app.db.categories import get_categories_name
 from app.db.transactions import insert_revenue
-from app.parsers.input import is_number_input, parse_amount_parts
+from app.parsers.input import is_number_input, parse_amount_with_defaults
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import WriteEarnings
 from app.utils.keyboards import create_default_keyboard
@@ -38,7 +38,7 @@ async def ask_sum(message: Message, state: FSMContext) -> None:
 async def write_value(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     category = data.get('category')
-    value = parse_amount_parts(message.text)
-    await insert_revenue(message.chat.id, category, *value)
-    await message.answer('OK', reply_markup=create_default_keyboard())
+    amount, currency, comment = parse_amount_with_defaults(message.text)
+    await insert_revenue(message.chat.id, category, amount, currency, comment)
+    await message.answer('OK (валюта по умолчанию RUB)', reply_markup=create_default_keyboard())
     await state.clear()
