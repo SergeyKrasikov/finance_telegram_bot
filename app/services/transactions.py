@@ -3,12 +3,14 @@ import logging
 from typing import Tuple
 from psycopg2 import Error
 
-from app.db.transactions import get_last_transaction
+from app.db.transactions import get_last_transaction as db_get_last_transaction
 
 
 async def get_last_transaction(user_id: str, num: int) -> Tuple[list, int]:
     try:
-        result = await get_last_transaction(user_id, num)
+        result = await db_get_last_transaction(user_id, num)
+        if not result:
+            return [], []
         items = []
         transactions_id = []
         for i in result:

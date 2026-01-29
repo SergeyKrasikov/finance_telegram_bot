@@ -16,6 +16,9 @@ router = Router()
 @router.message(Command('history'))
 async def cmd_history(message: Message, state: FSMContext) -> None:
     transaction, transactions_id = await get_last_transaction(message.chat.id, 1)
+    if not transaction:
+        await message.answer('Транзакций пока нет.', reply_markup=create_default_keyboard())
+        return
     await state.update_data(transaction_number=1)
     await state.update_data(transactions_id=transactions_id)
     await state.set_state(GetingLasTransaction.transaction_history)
@@ -33,6 +36,9 @@ async def history_prev(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     transaction_number = data.get('transaction_number') + 1
     transaction, transactions_id = await get_last_transaction(message.chat.id, transaction_number)
+    if not transaction:
+        await message.answer('Больше транзакций нет.', reply_markup=create_default_keyboard())
+        return
     await state.update_data(transaction_number=transaction_number)
     await state.update_data(transactions_id=transactions_id)
     await state.set_state(GetingLasTransaction.transaction_history)
@@ -48,6 +54,9 @@ async def history_next(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     transaction_number = max(data.get('transaction_number') - 1, 1)
     transaction, transactions_id = await get_last_transaction(message.chat.id, transaction_number)
+    if not transaction:
+        await message.answer('Больше транзакций нет.', reply_markup=create_default_keyboard())
+        return
     await state.update_data(transaction_number=transaction_number)
     await state.update_data(transactions_id=transactions_id)
     await state.set_state(GetingLasTransaction.transaction_history)

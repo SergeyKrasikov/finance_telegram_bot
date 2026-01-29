@@ -46,7 +46,7 @@ async def write_spend(message: Message, state: FSMContext) -> None:
             await insert_spend(message.chat.id, category, amount, currency, comment)
 
         balance = await get_remains(message.chat.id, category)
-        await message.answer(f'Остаток в {category}: {float(balance[0]):,.2f}₽', reply_markup=create_default_keyboard())
+        await message.answer(f'Остаток в {category}: {balance:,.2f}₽', reply_markup=create_default_keyboard())
     except ValueError as e:
         logging.error(f"Ошибка преобразования суммы: {e}", exc_info=True)
         await message.answer("Неверный формат суммы. Введите данные в формате: сумма валюта комментарий.")
