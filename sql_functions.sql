@@ -237,11 +237,10 @@ BEGIN
             cf.datetime,
             c."name" AS "from",
             c2."name" AS "to",
-            CASE 
-                WHEN cf.value::text LIKE '%.%' THEN 
-                    RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
-                ELSE 
-                    cf.value::text
+            CASE
+                WHEN ABS(cf.value) >= 1 THEN REPLACE(TO_CHAR(cf.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+                WHEN cf.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
+                ELSE cf.value::text
             END AS value,
             cf.currency,
             cf.description
@@ -356,11 +355,10 @@ AS $function$
 SELECT CONCAT_WS(' ',
     c."name",
     COALESCE(c2."name", '-'),
-    CASE 
-        WHEN cf.value::text LIKE '%.%' THEN 
-            RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
-        ELSE 
-            cf.value::text
+    CASE
+        WHEN ABS(cf.value) >= 1 THEN REPLACE(TO_CHAR(cf.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        WHEN cf.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
+        ELSE cf.value::text
     END,
     cf.currency
 ) AS transact
@@ -452,6 +450,8 @@ declare
     _rate_in numeric;
     _rate_out_current numeric;
     _rate_in_current numeric;
+    _rate_out_text text;
+    _rate_in_text text;
     _stable_currencies text[] := array[
         'USDT','USDC','DAI','BUSD','TUSD','USDP','GUSD','USDN','FRAX','USDD','FDUSD','USDE','SUSD','PYUSD'
     ];
@@ -541,9 +541,20 @@ begin
         _rate_in_current := coalesce(_rate_in, (select rate from exchange_rates where currency = _currency_in order by datetime desc limit 1));
     end if;
 
+    _rate_out_text := case
+        when abs(_rate_out_current) >= 1 then replace(to_char(_rate_out_current, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        when _rate_out_current::text like '%.%' then rtrim(trim(trailing '0' from _rate_out_current::text), '.')
+        else _rate_out_current::text
+    end;
+    _rate_in_text := case
+        when abs(_rate_in_current) >= 1 then replace(to_char(_rate_in_current, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        when _rate_in_current::text like '%.%' then rtrim(trim(trailing '0' from _rate_in_current::text), '.')
+        else _rate_in_current::text
+    end;
+
 return format('Курс: %s=%s, %s=%s (за 1 USD)',
-              _currency_out, _rate_out_current,
-              _currency_in, _rate_in_current);
+              _currency_out, _rate_out_text,
+              _currency_in, _rate_in_text);
 		end
 $function$
 ;

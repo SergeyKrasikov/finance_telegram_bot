@@ -13,6 +13,7 @@ from app.db.balances import (
 )
 from app.db.categories import get_categories_name, get_category_id_from_name
 from app.states.finance import GettingBalance
+from app.utils.formatting import format_amount
 from app.utils.keyboards import create_default_keyboard
 
 router = Router()
@@ -38,17 +39,17 @@ async def cmd_balance(message: Message, state: FSMContext) -> None:
 async def getting_balance(message: Message, state: FSMContext) -> None:
     if message.text == 'Личные':
         balance = await get_group_balance(message.chat.id, GROUP_PERSONAL)
-        await message.answer(f'Остаток: {balance:,.2f}₽', reply_markup=create_default_keyboard())
+        await message.answer(f'Остаток: {format_amount(balance)}₽', reply_markup=create_default_keyboard())
         await state.clear()
     elif message.text == 'Общие':
         balance = await get_group_balance(message.chat.id, GROUP_COMMON)
-        await message.answer(f'Остаток: {balance:,.2f}₽', reply_markup=create_default_keyboard())
+        await message.answer(f'Остаток: {format_amount(balance)}₽', reply_markup=create_default_keyboard())
         await state.clear()
     elif message.text == 'По категориям':
         balances = []
         for category in await get_categories_name(message.chat.id, GROUP_ALL):
             balance = await get_remains(message.chat.id, category)
-            balances.append(f'{category:<10}: {balance:,.2f}₽\n')
+            balances.append(f'{category:<10}: {format_amount(balance)}₽\n')
         await message.answer('Остаток: \n' + '\n'.join(balances), reply_markup=create_default_keyboard())
         await state.clear()
     elif message.text == 'По категориям c валютами':
@@ -56,13 +57,13 @@ async def getting_balance(message: Message, state: FSMContext) -> None:
         for category in await get_categories_name(message.chat.id, GROUP_ALL):
             category_id = await get_category_id_from_name(category)
             balance = await get_category_balance_with_currency(message.chat.id, category_id)
-            balance = [('\n' + str(i[0]) + ' ' + str(i[1])) for i in balance]
+            balance = [('\n' + format_amount(i[0]) + ' ' + str(i[1])) for i in balance]
             balances.append(f'{category:<10}: {" ".join(balance)}\n')
         await message.answer('Остаток: \n' + '\n'.join(balances), reply_markup=create_default_keyboard())
         await state.clear()
     else:
         balance = await get_group_balance(message.chat.id, GROUP_ALL)
-        await message.answer(f'Остаток: {balance:,.2f}₽', reply_markup=create_default_keyboard())
+        await message.answer(f'Остаток: {format_amount(balance)}₽', reply_markup=create_default_keyboard())
         await state.clear()
 
 
@@ -72,7 +73,7 @@ async def get_balances(message: Message) -> None:
         balances = await get_all_balances(message.chat.id, GROUP_SPEND)
         logging.info(f"Полученные данные balances: {balances}")
         balances_text = '\n\n'.join([
-            f'{category:<20}: {float(balance):,.2f}₽'
+            f'{category:<20}: {format_amount(balance)}₽'
             for category, balance in balances
         ])
         await message.answer(f'Остаток: \n{balances_text}', reply_markup=create_default_keyboard())

@@ -8,6 +8,7 @@ from app.config import (
     DAILY_REPORT_MINUTE,
     MONTHLY_REPORT_CRON,
 )
+from app.utils.formatting import format_amount
 
 
 async def daily_task(bot) -> None:
@@ -44,12 +45,12 @@ async def monthly_task(bot) -> None:
         for user_id, values_dict in response.items():
             await bot.send_message(
                 user_id,
-                f"""Всего пришло за месяц {values_dict['month_earnings']:,.2f}₽
-                    Всего потрачено за месяц {values_dict['month_spend']:,.2f}₽
+                f"""Всего пришло за месяц {format_amount(values_dict['month_earnings'])}₽
+                    Всего потрачено за месяц {format_amount(values_dict['month_spend'])}₽
                     Переведи!
-                    На семейный взнос {values_dict['семейный_взнос']:,.2f}₽
-                    На общие категории {values_dict['общие_категории']:,.2f}₽
-                    На инвестиции {values_dict['investition']:,.2f}₽""",
+                    На семейный взнос {format_amount(values_dict['семейный_взнос'])}₽
+                    На общие категории {format_amount(values_dict['общие_категории'])}₽
+                    На инвестиции {format_amount(values_dict['investition'])}₽""",
             )
     except Exception:
         logging.error("Error while monthly task", exc_info=True)
