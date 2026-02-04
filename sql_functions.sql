@@ -621,38 +621,36 @@ $function$
 -- получить баланс категории с разбивкой по валютам
 CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency(_user_id bigint, _category_id integer)
  RETURNS TABLE (value numeric, currency varchar)
- LANGUAGE plpgsql
+ LANGUAGE sql
 AS $function$
-BEGIN
-RETURN query (
 SELECT
-	sum(cf.value) AS value, cf.currency
+    sum(cf.value) AS value,
+    cf.currency
 FROM
-	(
-	SELECT
-		cash_flow.value,
-		currency
-	FROM
-		cash_flow
-	WHERE
-		category_id_to = _category_id
-		AND users_id IN (
-		SELECT
-			get_users_id(_user_id))
+    (
+    SELECT
+        cash_flow.value,
+        cash_flow.currency
+    FROM
+        cash_flow
+    WHERE
+        category_id_to = _category_id
+        AND users_id IN (
+        SELECT
+            get_users_id(_user_id))
 UNION ALL
-	SELECT
-		-cash_flow.value,
-		currency
-	FROM
-		cash_flow
-	WHERE
-		category_id_from = _category_id
-		AND users_id IN (
-		SELECT
-			get_users_id(_user_id))
-			  ) cf
-GROUP BY cf.currency);
-END
+SELECT
+        -cash_flow.value,
+        cash_flow.currency
+    FROM
+        cash_flow
+    WHERE
+        category_id_from = _category_id
+        AND users_id IN (
+        SELECT
+            get_users_id(_user_id))
+              ) cf
+GROUP BY cf.currency;
 $function$
 ;
 
