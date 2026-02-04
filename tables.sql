@@ -36,14 +36,42 @@ users_id bigint references users(id),
 category_id_from int references categories(id),
 category_id_to int references categories(id),
 value numeric(20,10),
-currency varchar(3),
+currency varchar(16),
 description text);
 
 
 create table if not exists public.exchange_rates (
 "datetime" timestamp,
-currency varchar(3),
+currency varchar(16),
 rate numeric(20,10));
+
+-- Compatibility upgrade for existing databases with varchar(3) currency columns
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'cash_flow'
+          AND column_name = 'currency'
+          AND character_maximum_length = 3
+    ) THEN
+        ALTER TABLE public.cash_flow
+            ALTER COLUMN currency TYPE varchar(16);
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'exchange_rates'
+          AND column_name = 'currency'
+          AND character_maximum_length = 3
+    ) THEN
+        ALTER TABLE public.exchange_rates
+            ALTER COLUMN currency TYPE varchar(16);
+    END IF;
+END $$;
 
 -- Base USD rate (anchor) for a fresh database
 INSERT INTO exchange_rates ("datetime", currency, rate)

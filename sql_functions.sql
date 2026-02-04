@@ -272,7 +272,7 @@ RETURNS TABLE (
     "from" varchar(100),
     "to" varchar(100),
     value varchar,  -- Изменён тип на varchar для представления форматированного значения
-    currency varchar(3),
+    currency varchar(16),
     description text
 )
 LANGUAGE plpgsql
