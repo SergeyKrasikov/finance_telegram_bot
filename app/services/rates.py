@@ -11,7 +11,7 @@ async def load_rate() -> None:
     try:
         today = datetime.datetime.now()
         currency = await get_currency_list()
-        result = download_rates.extract(today.strftime('%Y-%m-%d'), currency)
+        result = download_rates.extract(today.strftime("%Y-%m-%d"), currency)
         result += download_rates.extract_cripto(currency)
         download_rates.load(result)
     except (Exception, Error):

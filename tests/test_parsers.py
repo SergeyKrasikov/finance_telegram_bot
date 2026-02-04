@@ -1,5 +1,6 @@
 import unittest
 import importlib.util
+from decimal import Decimal
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "app" / "parsers" / "input.py"
@@ -23,20 +24,22 @@ class ParserTests(unittest.TestCase):
         self.assertFalse(is_number_input("1,2.3"))
         self.assertFalse(is_number_input("abc"))
 
-    def test_is_amount_input_accepts_amount_with_optional_currency_comment(self) -> None:
+    def test_is_amount_input_accepts_amount_with_optional_currency_comment(
+        self,
+    ) -> None:
         self.assertTrue(is_amount_input("1000"))
         self.assertTrue(is_amount_input("1000,25 USD"))
         self.assertTrue(is_amount_input("1000.25 usd coffee"))
 
     def test_parse_amount_with_defaults(self) -> None:
         amount, currency, comment = parse_amount_with_defaults("1000,5")
-        self.assertEqual(amount, 1000.5)
+        self.assertEqual(amount, Decimal("1000.5"))
         self.assertEqual(currency, "RUB")
         self.assertIsNone(comment)
 
     def test_parse_amount_currency(self) -> None:
         amount, currency = parse_amount_currency("80,5 usdt")
-        self.assertEqual(amount, 80.5)
+        self.assertEqual(amount, Decimal("80.5"))
         self.assertEqual(currency, "USDT")
 
 

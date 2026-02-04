@@ -8,14 +8,14 @@ from app.utils.keyboards import create_default_keyboard
 router = Router()
 
 
-@router.message(Command('start'))
+@router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
-    await message.answer('Hello!!!')
+    await message.answer("Hello!!!")
     await message.delete()
 
 
-@router.message(Command('home'))
+@router.message(Command("home"))
 async def cmd_home(message: Message, state: FSMContext) -> None:
-    await message.answer('OK', reply_markup=create_default_keyboard())
+    await message.answer("OK", reply_markup=create_default_keyboard())
     await state.clear()
     await message.delete()

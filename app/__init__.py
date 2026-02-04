@@ -27,7 +27,7 @@ def setup_dispatcher(dp: Dispatcher) -> None:
 
 
 async def on_startup(bot: Bot) -> None:
-    print('START')
+    print("START")
     scheduler = setup_scheduler(bot)
     scheduler.start()
 

@@ -4,36 +4,40 @@ import os
 from dotenv import load_dotenv
 import datetime
 
-
 load_dotenv()
-OPEN_EXCHANGE_TOKEN = os.environ.get('OPEN_EXCHANGE_TOKEN')
-PG_USER = os.environ.get('POSTGRES_USER')
-PG_PASSWORD = os.environ.get('POSTGRES_PASSWORD')
-PG_HOST = os.environ.get('PG_HOST')
-PG_PORT = os.environ.get('PG_PORT')
-PG_DATABASE = os.environ.get('PG_DATABASE')
-COINMARKETCAP_TOKEN = os.environ.get('COINMARKETCAP_TOKEN')
+OPEN_EXCHANGE_TOKEN = os.environ.get("OPEN_EXCHANGE_TOKEN")
+PG_USER = os.environ.get("POSTGRES_USER")
+PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD")
+PG_HOST = os.environ.get("PG_HOST")
+PG_PORT = os.environ.get("PG_PORT")
+PG_DATABASE = os.environ.get("PG_DATABASE")
+COINMARKETCAP_TOKEN = os.environ.get("COINMARKETCAP_TOKEN")
 
 
 def extract(currency: list) -> dict:
     try:
-        url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
-        parameters = {
-            'symbol': ','.join(currency),
-            'convert': 'USD'
-        }
+        url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+        parameters = {"symbol": ",".join(currency), "convert": "USD"}
         headers = {
-            'Accepts': 'application/json',
-            'X-CMC_PRO_API_KEY': COINMARKETCAP_TOKEN
+            "Accepts": "application/json",
+            "X-CMC_PRO_API_KEY": COINMARKETCAP_TOKEN,
         }
-        
-        data =[]
-        r = requests.get(url, headers=headers, params=parameters).json().get('data')
+
+        data = []
+        r = requests.get(url, headers=headers, params=parameters).json().get("data")
         print(1)
         for i in currency:
-            value = r.get(i,{}).get('quote',{}).get('USD',{}).get('price')
+            value = r.get(i, {}).get("quote", {}).get("USD", {}).get("price")
             if value:
-                data.append({'timestamp': datetime.datetime.fromisoformat(r.get(i,{}).get('last_updated')).strftime('%Y-%m-%d %H:%M:%S'), 'currency': i, 'value': value})
+                data.append(
+                    {
+                        "timestamp": datetime.datetime.fromisoformat(
+                            r.get(i, {}).get("last_updated")
+                        ).strftime("%Y-%m-%d %H:%M:%S"),
+                        "currency": i,
+                        "value": value,
+                    }
+                )
         print(2)
         return data
     except Exception as error:
@@ -43,11 +47,13 @@ def extract(currency: list) -> dict:
 def load(result: dict) -> None:
     conn = None
     try:
-        connection = psycopg2.connect(user=PG_USER,
-                                    password=PG_PASSWORD,
-                                    host=PG_HOST,
-                                    port=PG_PORT,
-                                    database=PG_DATABASE)
+        connection = psycopg2.connect(
+            user=PG_USER,
+            password=PG_PASSWORD,
+            host=PG_HOST,
+            port=PG_PORT,
+            database=PG_DATABASE,
+        )
         cur = connection.cursor()
         print(3)
         print(result)
@@ -69,13 +75,11 @@ def load(result: dict) -> None:
 
 def main():
     try:
-        today = datetime.datetime.now()
-
-        date = (today)
-        result = extract(['BTC', 'ETH', 'TON', 'RUB', 'EUR'])
+        result = extract(["BTC", "ETH", "TON", "RUB", "EUR"])
         load(result)
     except Exception as error:
         print(error)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

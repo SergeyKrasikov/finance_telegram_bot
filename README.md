@@ -54,6 +54,31 @@ pip install -r requirements.txt
 python -m app
 ```
 
+### Быстрый запуск тестов
+```bash
+make test
+```
+
+Полный прогон (Python + SQL-проверки):
+```bash
+make test-all
+```
+
+Проверка стиля/качества:
+```bash
+make lint
+```
+
+Авто-исправление форматирования:
+```bash
+make fmt
+```
+
+Для SQL-проверок можно переопределить подключение:
+```bash
+PGPASSWORD=postgres PGHOST=localhost PGPORT=5432 PGUSER=postgres PGDATABASE=finance_test make test-sql
+```
+
 ### Через Docker
 ```
 docker-compose up --build

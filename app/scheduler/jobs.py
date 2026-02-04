@@ -18,9 +18,9 @@ async def daily_task(bot) -> None:
         for user in users:
             transactions = await get_daily_transactions(user)
             message = (
-                'Транзакции за сегодня:\n' + '\n'.join(transactions)
+                "Транзакции за сегодня:\n" + "\n".join(transactions)
                 if transactions
-                else 'Сегодня транзакций не было, или возможно стоит их внести'
+                else "Сегодня транзакций не было, или возможно стоит их внести"
             )
             await bot.send_message(user, message)
     except Exception:
@@ -41,6 +41,11 @@ async def monthly_task(bot) -> None:
 
 def setup_scheduler(bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: monthly_task(bot), 'cron', **MONTHLY_REPORT_CRON)
-    scheduler.add_job(lambda: daily_task(bot), 'cron', hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE)
+    scheduler.add_job(lambda: monthly_task(bot), "cron", **MONTHLY_REPORT_CRON)
+    scheduler.add_job(
+        lambda: daily_task(bot),
+        "cron",
+        hour=DAILY_REPORT_HOUR,
+        minute=DAILY_REPORT_MINUTE,
+    )
     return scheduler

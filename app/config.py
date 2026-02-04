@@ -4,14 +4,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Telegram bot token
-TOKEN = os.environ.get('TOKEN')
+TOKEN = os.environ.get("TOKEN")
 
 # PostgreSQL connection settings
-PG_USER = os.environ.get('POSTGRES_USER')
-PG_PASSWORD = os.environ.get('POSTGRES_PASSWORD')
-PG_HOST = os.environ.get('PG_HOST')
-PG_PORT = os.environ.get('PG_PORT')
-PG_DATABASE = os.environ.get('PG_DATABASE')
+PG_USER = os.environ.get("POSTGRES_USER")
+PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD")
+PG_HOST = os.environ.get("PG_HOST")
+PG_PORT = os.environ.get("PG_PORT")
+PG_DATABASE = os.environ.get("PG_DATABASE")
 
 # Category group IDs from DB
 GROUP_SPEND = 8

@@ -1,16 +1,25 @@
 import unittest
 import importlib.util
+from decimal import Decimal
 from pathlib import Path
 
-MONTHLY_LOGIC_PATH = Path(__file__).resolve().parents[1] / "app" / "services" / "monthly_logic.py"
-FORMATTING_PATH = Path(__file__).resolve().parents[1] / "app" / "utils" / "formatting.py"
+MONTHLY_LOGIC_PATH = (
+    Path(__file__).resolve().parents[1] / "app" / "services" / "monthly_logic.py"
+)
+FORMATTING_PATH = (
+    Path(__file__).resolve().parents[1] / "app" / "utils" / "formatting.py"
+)
 
-monthly_spec = importlib.util.spec_from_file_location("monthly_logic", MONTHLY_LOGIC_PATH)
+monthly_spec = importlib.util.spec_from_file_location(
+    "monthly_logic", MONTHLY_LOGIC_PATH
+)
 monthly_logic = importlib.util.module_from_spec(monthly_spec)
 assert monthly_spec and monthly_spec.loader
 monthly_spec.loader.exec_module(monthly_logic)
 
-format_spec = importlib.util.spec_from_file_location("utils_formatting", FORMATTING_PATH)
+format_spec = importlib.util.spec_from_file_location(
+    "utils_formatting", FORMATTING_PATH
+)
 utils_formatting = importlib.util.module_from_spec(format_spec)
 assert format_spec and format_spec.loader
 format_spec.loader.exec_module(utils_formatting)
@@ -66,11 +75,11 @@ class MonthlyLogicTests(unittest.TestCase):
 
     def test_build_monthly_message(self) -> None:
         values = {
-            "month_earnings": 12345.678,
-            "month_spend": 0.000123,
-            "семейный_взнос": 100,
-            "общие_категории": 25.5,
-            "investition": 2,
+            "month_earnings": Decimal("12345.678"),
+            "month_spend": Decimal("0.000123"),
+            "семейный_взнос": Decimal("100"),
+            "общие_категории": Decimal("25.5"),
+            "investition": Decimal("2"),
         }
         message = build_monthly_message(values, format_amount)
 
