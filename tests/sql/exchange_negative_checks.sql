@@ -8,7 +8,7 @@ DELETE FROM users WHERE id = 904001;
 DELETE FROM categories WHERE id = 904011;
 DELETE FROM exchange_rates WHERE currency IN ('AAA', 'BBB', 'USDT', 'ETH', 'RUB', 'USD');
 
-INSERT INTO users(id, nickname) VALUES (904001, 'neg_ex_user');
+INSERT INTO users(id, nickname) VALUES (904001, 'neg_ex_u');
 INSERT INTO categories(id, "name", "percent") VALUES (904011, 'NegExWallet', 0.00);
 
 DO $$

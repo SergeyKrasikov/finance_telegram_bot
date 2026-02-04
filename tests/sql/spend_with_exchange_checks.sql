@@ -12,7 +12,7 @@ DELETE FROM categories WHERE id IN (900211, 900212);
 DELETE FROM category_groups WHERE id IN (9, 14);
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
 
-INSERT INTO users(id, nickname) VALUES (900201, 'spend_fx_user');
+INSERT INTO users(id, nickname) VALUES (900201, 'spend_fx');
 INSERT INTO users_groups(users_id, users_groups) VALUES (900201, 8201);
 
 INSERT INTO category_groups(id, "name", description)
