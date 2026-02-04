@@ -626,7 +626,7 @@ AS $function$
 BEGIN
 RETURN query (
 SELECT
-	sum(cf.value) AS value, currency
+	sum(cf.value) AS value, cf.currency
 FROM
 	(
 	SELECT
@@ -651,7 +651,7 @@ UNION ALL
 		SELECT
 			get_users_id(_user_id))
 			  ) cf
-GROUP BY currency);
+GROUP BY cf.currency);
 END
 $function$
 ;
