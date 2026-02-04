@@ -2,6 +2,7 @@ import re
 from typing import List, Tuple, Optional
 
 _AMOUNT_RE = re.compile(r'^\d+([.,]\d+)?(\s+[A-Za-z]{3})?(\s+.+)?$')
+_NUMBER_RE = re.compile(r'^\d+([.,]\d+)?$')
 
 
 def is_amount_input(text: str) -> bool:
@@ -12,7 +13,7 @@ def is_number_input(text: str) -> bool:
     parts = text.strip().split()
     if not parts:
         return False
-    return parts[0].replace('.', '').replace(',', '').isdigit()
+    return bool(_NUMBER_RE.match(parts[0]))
 
 
 def parse_amount_parts(text: str) -> List:
