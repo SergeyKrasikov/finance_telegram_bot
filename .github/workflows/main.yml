@@ -87,6 +87,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
+            set -euo pipefail
             echo "Starting test environment deployment..."
             TEST_DIR=~/finance_bot_test
 
@@ -119,15 +120,21 @@ jobs:
                 echo "No backups found for restoration!"
                 exit 1
             fi
+            echo "Latest backup: $LATEST_BACKUP"
+            du -h "$LATEST_BACKUP" || true
+            echo "Disk usage before restore:"
+            df -h /tmp /home || true
 
-            # Распаковка архива
-            RESTORE_DIR="/tmp/db_restore"
-            mkdir -p "$RESTORE_DIR"
-            unzip -o "$LATEST_BACKUP" -d "$RESTORE_DIR"
+            # Быстрая проверка свободного места /tmp (на случай если unzip/pipe создаст буферы)
+            TMP_AVAILABLE_KB=$(df -Pk /tmp | awk 'NR==2 {print $4}')
+            if [ -z "$TMP_AVAILABLE_KB" ] || [ "$TMP_AVAILABLE_KB" -lt 524288 ]; then
+                echo "Not enough free space in /tmp (need at least 512MB). Available: ${TMP_AVAILABLE_KB:-unknown} KB"
+                exit 1
+            fi
 
-            # Проверяем, что SQL файл существует
-            SQL_FILE=$(ls "$RESTORE_DIR"/*.sql | head -n 1)
-            if [ -z "$SQL_FILE" ]; then
+            # Проверяем, что в архиве есть SQL-файл
+            SQL_FILE_IN_ZIP=$(zipinfo -1 "$LATEST_BACKUP" '*.sql' | head -n 1)
+            if [ -z "$SQL_FILE_IN_ZIP" ]; then
                 echo "No SQL file found in the backup archive!"
                 exit 1
             fi
@@ -164,7 +171,7 @@ jobs:
             echo "Database cleared successfully."
 
             # Восстановление из SQL файла
-            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" < "$SQL_FILE"; then
+            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" | docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot"; then
                 echo "Error occurred during database restoration!"
                 exit 1
             fi
@@ -177,15 +184,7 @@ jobs:
               my_finance_bot \
               /home/kras/finance_bot_test
 
-            # Удаление временных файлов
-            if [ -d "$RESTORE_DIR" ]; then
-                rm -rf "$RESTORE_DIR"
-                echo "Temporary files removed successfully."
-            else
-                echo "No temporary files to clean up."
-            fi
-
-            echo "Database restored and temporary files removed successfully."
+            echo "Database restored successfully."
 
   # Продакшн сборка для ветки main
   production_build:
