@@ -95,6 +95,7 @@ language plpgsql
 as $function$
 declare 
     _reminder numeric;
+    _total_percent numeric;
 begin
     -- Проверка входных параметров
     if _income_value <= 0 then
@@ -110,21 +111,22 @@ begin
         raise exception 'Group ID % does not exist for user %', _group_id, _user_id;
     end if;
 
+    -- Суммарный процент по группе для последующего расчета остатка
+    select coalesce(sum("percent"), 0)
+      into _total_percent
+    from categories c
+    join categories_category_groups ccg on c.id = ccg.categories_id
+    where ccg.category_groyps_id = _group_id and users_id = _user_id;
 
-    -- Расчет остатка и вставка значений в одну операцию
-    with total_percent as (
-        select sum("percent") as total
-        from categories c 
-        join categories_category_groups ccg on c.id = ccg.categories_id
-        where ccg.category_groyps_id = _group_id and users_id = _user_id
-    )
+    -- Вставка распределения
     insert into cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
     select ccg.users_id, _income_category_id, c.id, _income_value * c."percent", _currency, 'monthly distribute'
     from categories c
     join categories_category_groups ccg on c.id = ccg.categories_id
     where ccg.category_groyps_id = _group_id and users_id = _user_id and _income_value > 0;
-    select _income_value * (1 - coalesce(total, 0)) into _reminder  -- Расчет остатка
-    from total_percent;
+
+    -- Расчет остатка
+    _reminder := _income_value * (1 - _total_percent);
     raise notice 'Distributed % to group % for user %', _income_value, _group_id, _user_id;
 
     return _reminder;
@@ -192,7 +194,7 @@ BEGIN
     _value_for_second_member := _sum_value * (SELECT "percent" FROM categories WHERE id = 15);    -- Расчет семейного взноса
     _sum_value_second := distribute_to_group(_user_id, 1, _income_category, _sum_value, 'RUB');    -- Перевод денег на НЗ 
     _free_money := distribute_to_group(_user_id, 2, _income_category, _sum_value - _value_for_second_member, 'RUB');   -- Распределение свободных денег
-    _second_member_id := (SELECT id FROM get_users_id(_user_id) WHERE id != _user_id);    -- Получение ID второго пользователя
+    _second_member_id := (SELECT user_id FROM get_users_id(_user_id) WHERE user_id != _user_id);    -- Получение ID второго пользователя
     _second_member_free_money := distribute_to_group(_second_member_id, 3, 15, _value_for_second_member, 'RUB');    -- Распределение денег для второго пользователя
     PERFORM distribute_to_group(_user_id, 6, _income_category, _free_money - _sum_value * 0.1, 'RUB');    -- Внесение свободных денег в резерв
     PERFORM distribute_to_group(_second_member_id, 6, 15, _second_member_free_money, 'RUB');   -- Внесение свободных денег в резерв второго пользователя
