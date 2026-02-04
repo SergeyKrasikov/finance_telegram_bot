@@ -83,6 +83,25 @@ VALUES (900101, date_trunc('month', now()) - interval '1 month' + interval '1 da
 INSERT INTO cash_flow(users_id, "datetime", category_id_from, value, currency, description)
 VALUES (900101, date_trunc('month', now()) - interval '1 month' + interval '2 days', 13, 22, 'RUB', 'fixture month spend');
 
+-- Exchange rows from the previous month must NOT affect monthly earnings/spend totals
+INSERT INTO cash_flow(users_id, "datetime", category_id_from, value, currency, description)
+VALUES (900101, date_trunc('month', now()) - interval '1 month' + interval '3 days', 13, 500, 'RUB', 'exchange to 5 USDT');
+
+INSERT INTO cash_flow(users_id, "datetime", category_id_to, value, currency, description)
+VALUES (900101, date_trunc('month', now()) - interval '1 month' + interval '3 days', 13, 5, 'USDT', 'exchange from 500 RUB');
+
+INSERT INTO cash_flow(users_id, "datetime", category_id_to, value, currency, description)
+VALUES (900101, date_trunc('month', now()) - interval '1 month' + interval '4 days', 13, 9, 'USDT', 'auto exchange 900 RUB to 9 USDT');
+
+INSERT INTO cash_flow(users_id, "datetime", category_id_from, value, currency, description)
+VALUES (900101, date_trunc('month', now()) - interval '1 month' + interval '4 days', 13, 900, 'RUB', 'auto exchange 9 USDT to 900 RUB');
+
+INSERT INTO cash_flow(users_id, "datetime", category_id_to, value, currency, description)
+VALUES (900101, date_trunc('month', now()) - interval '1 month' + interval '5 days', 13, 77, 'RUB', 'monthly distribute');
+
+INSERT INTO cash_flow(users_id, "datetime", category_id_from, value, currency, description)
+VALUES (900101, date_trunc('month', now()) - interval '1 month' + interval '6 days', 13, 33, 'RUB', 'internal: reserve move');
+
 DO $$
 DECLARE
     out jsonb;

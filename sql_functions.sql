@@ -1,3 +1,29 @@
+-- Recreate strategy: drop old signatures first so signature changes are applied cleanly.
+DROP FUNCTION IF EXISTS public.monthly();
+DROP FUNCTION IF EXISTS public.monthly_distribute(bigint, integer);
+DROP FUNCTION IF EXISTS public.distribute_to_group(bigint, integer, integer, numeric, varchar);
+DROP FUNCTION IF EXISTS public.transact_from_group_to_category(bigint, integer, integer);
+DROP FUNCTION IF EXISTS public.exchange(bigint, integer, numeric, varchar, numeric, varchar);
+DROP FUNCTION IF EXISTS public.insert_spend_with_exchange(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_revenue(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_spend(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_in_cash_flow(bigint, timestamp, integer, integer, integer, varchar, text);
+DROP FUNCTION IF EXISTS public.get_daily_transactions(bigint);
+DROP FUNCTION IF EXISTS public.get_last_transaction(bigint, integer);
+DROP FUNCTION IF EXISTS public.delete_transaction(bigint[]);
+DROP FUNCTION IF EXISTS public.get_group_balance(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_all_balances(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_remains(bigint, character);
+DROP FUNCTION IF EXISTS public.get_category_balance_with_currency(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
+DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_category_id_from_name(varchar);
+DROP FUNCTION IF EXISTS public.get_categories_id(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_currency();
+DROP FUNCTION IF EXISTS public.get_all_users_id();
+DROP FUNCTION IF EXISTS public.is_technical_cashflow_description(text);
+DROP FUNCTION IF EXISTS public.get_users_id(bigint);
+
 -- принимает user_id и возвращает id всех пользьвателей из группы  
 create or replace function get_users_id(_user_id bigint)
  returns table (user_id bigint)
@@ -111,6 +137,25 @@ end
 $function$;
 
 
+-- Определяет внутренние тех.операции, которые не должны попадать в month_earnings/month_spend.
+-- Поддерживает как текущие префиксы, так и явный флаг в description: "internal:"
+CREATE OR REPLACE FUNCTION public.is_technical_cashflow_description(_description text)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+SELECT CASE
+    WHEN _description IS NULL THEN false
+    ELSE lower(_description) LIKE ANY (ARRAY[
+        'exchange %',
+        'auto exchange %',
+        'monthly distribute%',
+        'internal:%'
+    ])
+END;
+$function$;
+
+
 -- принимает id пользователя и id категории прихода и распределяет по всем категориям								
 CREATE OR REPLACE FUNCTION public.monthly_distribute(_user_id bigint, _income_category integer)
  RETURNS jsonb
@@ -164,11 +209,13 @@ BEGIN
                       FROM cash_flow
                       WHERE users_id = _user_id
                       AND category_id_from IS NULL
+                      AND NOT public.is_technical_cashflow_description(description)
                       AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month');
 	_sum_spend := (SELECT COALESCE(SUM(value), 0)  -- Подсчет расходов за месяц
                    FROM cash_flow
                    WHERE users_id = _user_id
                    AND category_id_to IS NULL
+                   AND NOT public.is_technical_cashflow_description(description)
                    AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month');
     RETURN jsonb_build_object(   -- Возвращение результата
         'user_id', _user_id,

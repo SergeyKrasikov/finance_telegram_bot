@@ -108,6 +108,7 @@ bash scripts/apply_db_schema.sh finance_telegram_bot_postgres_1 my_finance_bot m
   - `tests/test_exchange_error_mapping.py`
 - И SQL-контрактные проверки:
   - `tests/sql/predeploy_business_checks.sql`
+  - `tests/sql/technical_cashflow_description_checks.sql`
   - `tests/sql/exchange_negative_checks.sql`
   - `tests/sql/exchange_edge_case_checks.sql`
   - `tests/sql/spend_with_exchange_checks.sql`
@@ -125,6 +126,9 @@ POSTGRES_PASSWORD=    # Пароль пользователя БД
 PG_HOST=              # Хост PostgreSQL
 PG_PORT=              # Порт PostgreSQL
 PG_DATABASE=          # Название базы данных
+AUTO_APPLY_DB_SCHEMA= # true/false: автоматически применять tables.sql и sql_functions.sql при старте бота
+DB_BOOTSTRAP_MAX_ATTEMPTS=   # Количество попыток подключения к БД при старте (по умолчанию 20)
+DB_BOOTSTRAP_RETRY_DELAY_SEC=# Пауза между попытками в секундах (по умолчанию 2)
 ```
 
 ## Конфиги (единый список)

@@ -12,6 +12,15 @@ PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD")
 PG_HOST = os.environ.get("PG_HOST")
 PG_PORT = os.environ.get("PG_PORT")
 PG_DATABASE = os.environ.get("PG_DATABASE")
+AUTO_APPLY_DB_SCHEMA = os.environ.get("AUTO_APPLY_DB_SCHEMA", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+DB_BOOTSTRAP_MAX_ATTEMPTS = int(os.environ.get("DB_BOOTSTRAP_MAX_ATTEMPTS", "20"))
+DB_BOOTSTRAP_RETRY_DELAY_SEC = float(
+    os.environ.get("DB_BOOTSTRAP_RETRY_DELAY_SEC", "2")
+)
 
 # Category group IDs from DB
 GROUP_SPEND = 8
