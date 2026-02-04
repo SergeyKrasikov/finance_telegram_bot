@@ -11,6 +11,10 @@ DELETE FROM users WHERE id = 905001;
 DELETE FROM categories WHERE id = 905011;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'USDT', 'FDUSD');
 
+INSERT INTO category_groups(id, "name", description)
+VALUES (14, 'all_categories', 'fixture')
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO users(id, nickname) VALUES (905001, 'lenchk');
 INSERT INTO categories(id, "name", "percent") VALUES (905011, 'LenCheck', 1.00);
 INSERT INTO categories_category_groups(categories_id, category_groyps_id, users_id)
