@@ -8,6 +8,7 @@ from app.db.categories import get_categories_name, get_category_id_from_name
 from app.db.currency import exchange_currency
 from app.parsers.input import parse_amount_currency
 from app.filters.category_name import CategoryNameFilter
+from app.services.exchange_errors import map_exchange_error
 from app.states.finance import ExchangeCurrency
 from app.utils.keyboards import create_default_keyboard
 
@@ -53,16 +54,6 @@ async def exchange_currency_write(message: Message, state: FSMContext) -> None:
         await message.answer(result, reply_markup=create_default_keyboard())
         await state.clear()
     except Exception as error:
-        error_text = str(error)
-        if 'USDT rate is unknown' in error_text:
-            msg = 'Нужен курс USDT. Сначала обменяй USD↔USDT.'
-        elif 'Stablecoin rate is unknown' in error_text:
-            msg = 'Нет курса стейбла. Сначала обменяй стейбл → USD.'
-        elif 'Rates for' in error_text:
-            msg = 'Нет курсов для выбранной пары. Сначала обменяй через USD.'
-        elif 'Exchange values must be greater than zero' in error_text:
-            msg = 'Суммы должны быть больше нуля.'
-        else:
-            msg = 'Не удалось выполнить обмен. Проверь формат и попробуй снова.'
+        msg = map_exchange_error(str(error))
         await message.answer(msg, reply_markup=create_default_keyboard())
         await state.clear()

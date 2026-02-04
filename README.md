@@ -34,6 +34,8 @@ Telegram-бот для учета личных финансов с PostgreSQL и
 ├── download_rates.py
 ├── download_cripto_rates.py
 ├── docker-compose.yml
+├── scripts/
+│   └── apply_db_schema.sh
 ├── requirements.txt
 ├── sql_functions.sql
 └── tables.sql
@@ -56,6 +58,38 @@ python -m app
 ```
 docker-compose up --build
 ```
+
+## Деплой БД (универсально)
+- При каждом деплое применяются:
+  - `tables.sql` (создание таблиц/индексов, если их нет),
+  - `sql_functions.sql` (обновление функций).
+- Для этого используется скрипт `scripts/apply_db_schema.sh`.
+
+Ручной запуск:
+```
+bash scripts/apply_db_schema.sh <postgres_container> <db_user> <db_name> <project_dir>
+```
+
+Пример:
+```
+bash scripts/apply_db_schema.sh finance_telegram_bot_postgres_1 my_finance_bot my_finance_bot /home/kras/finance_telegram_bot
+```
+
+## Pre-deploy проверки
+- В CI перед деплоем запускаются Python unit-тесты:
+  - `tests/test_parsers.py`
+  - `tests/test_formatting.py`
+  - `tests/test_monthly_logic.py`
+  - `tests/test_exchange_error_mapping.py`
+- И SQL-контрактные проверки:
+  - `tests/sql/predeploy_business_checks.sql`
+  - `tests/sql/exchange_negative_checks.sql`
+  - `tests/sql/exchange_edge_case_checks.sql`
+  - `tests/sql/spend_with_exchange_checks.sql`
+  - `tests/sql/spend_with_exchange_negative_checks.sql`
+  - `tests/sql/balance_functions_checks.sql`
+  - `tests/sql/monthly_business_checks.sql`
+  - `tests/sql/monthly_distribute_golden.sql`
 
 ## Переменные окружения
 Файл: `.env` (располагается рядом с `app.py`). Пример: `.env.example`.

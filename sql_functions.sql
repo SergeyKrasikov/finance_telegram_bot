@@ -632,6 +632,10 @@ DECLARE
     _reserv_id int;
     _category_id_from int;
 BEGIN 
+    IF _value <= 0 THEN
+        RAISE EXCEPTION 'Spend value must be greater than zero';
+    END IF;
+
     _value_RUB := (SELECT _value / (er.rate / er2.rate) as value
 FROM (SELECT
 		datetime,
@@ -644,12 +648,24 @@ JOIN exchange_rates er2 ON er.datetime = er2.datetime
 WHERE er.currency = _currency 
 AND er2.currency = 'RUB'  
 AND rown = 1);
+
+    IF _value_RUB IS NULL THEN
+        RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency;
+    END IF;
+
     _reserv_id := (SELECT get_categories_id(_users_id, 9));
+    IF _reserv_id IS NULL THEN
+        RAISE EXCEPTION 'Reserve category (group 9) not found for user %', _users_id;
+    END IF;
+
     _category_id_from := (SELECT c.id
 			                from categories c
 			                join categories_category_groups ccg on c.id = ccg.categories_id
 			                where ccg.category_groyps_id = 14 and ccg.users_id = _users_id
 			                and c."name"=_category_name_from);
+    IF _category_id_from IS NULL THEN
+        RAISE EXCEPTION 'Category % not found in group 14 for user %', _category_name_from, _users_id;
+    END IF;
 
     INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
     VALUES
