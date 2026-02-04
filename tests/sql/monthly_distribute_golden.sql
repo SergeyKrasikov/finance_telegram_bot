@@ -116,16 +116,18 @@ BEGIN
         RAISE EXCEPTION 'Expected second_user_id=900102, got %', out->>'second_user_id';
     END IF;
 
-    IF abs((out->>'семейный_взнос')::numeric - 500) > 1e-9 THEN
-        RAISE EXCEPTION 'Expected семейный_взнос=500, got %', out->>'семейный_взнос';
+    -- monthly_distribute uses full category balance as source sum:
+    -- 1000 (fixture income) + 111 (last month income row) - 22 (last month spend row) = 1089
+    IF abs((out->>'семейный_взнос')::numeric - 544.5) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected семейный_взнос=544.5, got %', out->>'семейный_взнос';
     END IF;
 
-    IF abs((out->>'общие_категории')::numeric - 500) > 1e-9 THEN
-        RAISE EXCEPTION 'Expected общие_категории=500, got %', out->>'общие_категории';
+    IF abs((out->>'общие_категории')::numeric - 544.5) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected общие_категории=544.5, got %', out->>'общие_категории';
     END IF;
 
-    IF abs((out->>'investition')::numeric - 100) > 1e-9 THEN
-        RAISE EXCEPTION 'Expected investition=100, got %', out->>'investition';
+    IF abs((out->>'investition')::numeric - 108.9) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected investition=108.9, got %', out->>'investition';
     END IF;
 
     IF abs((out->>'month_earnings')::numeric - 111) > 1e-9 THEN
