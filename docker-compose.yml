@@ -7,11 +7,11 @@ services:
       - "-c"
       - "max_connections=50"
       - "-c"
-      - "shared_buffers=1GB"
+      - "shared_buffers=256MB"
       - "-c"
       - "effective_cache_size=4GB"
       - "-c"
-      - "work_mem=16MB"
+      - "work_mem=64MB"
       - "-c"
       - "maintenance_work_mem=512MB"
       - "-c"
@@ -49,11 +49,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: '2'
           memory: 4G
   bot:
     build: .
-    command: sh -c "python -m main"
+    command: sh -c "python -m app"
     env_file:
       - ./.env
     restart: always

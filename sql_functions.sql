@@ -1,3 +1,29 @@
+-- Recreate strategy: drop old signatures first so signature changes are applied cleanly.
+DROP FUNCTION IF EXISTS public.monthly();
+DROP FUNCTION IF EXISTS public.monthly_distribute(bigint, integer);
+DROP FUNCTION IF EXISTS public.distribute_to_group(bigint, integer, integer, numeric, varchar);
+DROP FUNCTION IF EXISTS public.transact_from_group_to_category(bigint, integer, integer);
+DROP FUNCTION IF EXISTS public.exchange(bigint, integer, numeric, varchar, numeric, varchar);
+DROP FUNCTION IF EXISTS public.insert_spend_with_exchange(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_revenue(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_spend(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_in_cash_flow(bigint, timestamp, integer, integer, integer, varchar, text);
+DROP FUNCTION IF EXISTS public.get_daily_transactions(bigint);
+DROP FUNCTION IF EXISTS public.get_last_transaction(bigint, integer);
+DROP FUNCTION IF EXISTS public.delete_transaction(bigint[]);
+DROP FUNCTION IF EXISTS public.get_group_balance(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_all_balances(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_remains(bigint, character);
+DROP FUNCTION IF EXISTS public.get_category_balance_with_currency(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
+DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_category_id_from_name(varchar);
+DROP FUNCTION IF EXISTS public.get_categories_id(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_currency();
+DROP FUNCTION IF EXISTS public.get_all_users_id();
+DROP FUNCTION IF EXISTS public.is_technical_cashflow_description(text);
+DROP FUNCTION IF EXISTS public.get_users_id(bigint);
+
 -- принимает user_id и возвращает id всех пользьвателей из группы  
 create or replace function get_users_id(_user_id bigint)
  returns table (user_id bigint)
@@ -58,25 +84,78 @@ $function$;
 
 
 -- принимает user_id, группу категорий по которым распределить и id категории откуда поступили деньги, распределяет деньги по указанной группе и cумму для распределения, возвращает остаток  
-create or replace function distribute_to_group(_user_id bigint, _group_id int, _income_category_id int, _income_value numeric)
- returns numeric
- language plpgsql
- as $function$
- declare 
-		 _reminder numeric;
+create or replace function distribute_to_group(
+    _user_id bigint, 
+    _group_id int, 
+    _income_category_id int, 
+    _income_value numeric, 
+    _currency varchar default 'RUB'
+) returns numeric
+language plpgsql
+as $function$
+declare 
+    _reminder numeric;
+    _total_percent numeric;
 begin
-_reminder := (select  _income_value * (1 - sum("percent"))
-	from categories c join categories_category_groups ccg on c.id = ccg.categories_id 
-	where ccg.category_groyps_id = _group_id and users_id = _user_id);
-set search_path to 'public';	
-	insert into cash_flow (users_id, category_id_from, category_id_to, value, currency)
-	select ccg.users_id, _income_category_id, c.id, _income_value * "percent", 'RUB'
-	from categories c join categories_category_groups ccg on c.id = ccg.categories_id 
-	where ccg.category_groyps_id = _group_id and users_id = _user_id and _income_value > 0;
-return _reminder;
+    -- Проверка входных параметров
+    if _income_value <= 0 then
+        return 0;
+    end if;
+
+    -- Проверка существования группы для пользователя
+    if not exists (
+        select 1 
+        from categories_category_groups 
+        where category_groyps_id = _group_id and users_id = _user_id
+    ) then
+        raise exception 'Group ID % does not exist for user %', _group_id, _user_id;
+    end if;
+
+    -- Суммарный процент по группе для последующего расчета остатка
+    select coalesce(sum("percent"), 0)
+      into _total_percent
+    from categories c
+    join categories_category_groups ccg on c.id = ccg.categories_id
+    where ccg.category_groyps_id = _group_id and users_id = _user_id;
+
+    -- Вставка распределения
+    insert into cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
+    select ccg.users_id, _income_category_id, c.id, _income_value * c."percent", _currency, 'monthly distribute'
+    from categories c
+    join categories_category_groups ccg on c.id = ccg.categories_id
+    where ccg.category_groyps_id = _group_id and users_id = _user_id and _income_value > 0;
+
+    -- Расчет остатка
+    _reminder := _income_value * (1 - _total_percent);
+    raise notice 'Distributed % to group % for user %', _income_value, _group_id, _user_id;
+
+    return _reminder;
+
+exception
+    when others then
+        raise notice 'Error occurred while distributing income for user %: %', _user_id, sqlerrm;
+        return null;
 end
 $function$;
 
+
+-- Определяет внутренние тех.операции, которые не должны попадать в month_earnings/month_spend.
+-- Поддерживает как текущие префиксы, так и явный флаг в description: "internal:"
+CREATE OR REPLACE FUNCTION public.is_technical_cashflow_description(_description text)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+SELECT CASE
+    WHEN _description IS NULL THEN false
+    ELSE lower(_description) LIKE ANY (ARRAY[
+        'exchange %',
+        'auto exchange %',
+        'monthly distribute%',
+        'internal:%'
+    ])
+END;
+$function$;
 
 
 -- принимает id пользователя и id категории прихода и распределяет по всем категориям								
@@ -84,55 +163,75 @@ CREATE OR REPLACE FUNCTION public.monthly_distribute(_user_id bigint, _income_ca
  RETURNS jsonb
  LANGUAGE plpgsql
 AS $function$
- declare _sum_value numeric(10,2);
-		 _sum_velue_second numeric(10,2);
-		_value_for_second_member numeric;
-		 _free_money numeric(10,2);
-		 _reminder_first numeric;
-		_second_member_id bigint;
-		_second_member_free_money numeric;
-		_sum_last numeric;
-		_general_categories numeric;
-		_general_categories_second numeric;
-		_sum_earnings NUMERIC;
-		_sum_spend NUMERIC;
-begin
-perform transact_from_group_to_category(_user_id, 11, (select get_categories_id(_user_id, 13))); -- переводим месячные доходы в одну категорию	
-perform transact_from_group_to_category(_user_id, 12, (select get_categories_id(_user_id, 7))); -- переводим другие доходы в категорию продарки себе
-_sum_last := (select get_category_balance(_user_id, (select get_categories_id(_user_id, 6)))); -- получение остатка свободных денег	
-perform distribute_to_group(_user_id, 7, (select c.id from categories c 
-join categories_category_groups ccg on c.id = ccg.categories_id
-where ccg.category_groyps_id = 6 and ccg.users_id = _user_id), _sum_last); -- перевод части остатка на подарки себе
-insert into cash_flow (users_id, category_id_from, category_id_to, value, currency)
-select _user_id, id, (select c.id from categories c join categories_category_groups ccg on c.id = ccg.categories_id
-where ccg.category_groyps_id = 9 and ccg.users_id = _user_id) , abs("sum") * 0.01, 'RUB' from (select c.id, get_category_balance(_user_id, c.id) as "sum" from categories c join
-categories_category_groups ccg on c.id = ccg.categories_id 
-where ccg.users_id = _user_id and ccg.category_groyps_id = 8) where "sum" < 0;-- если есть долги то увеличивает резерв на один процент за счет счета должника
-_sum_value := (select get_category_balance(_user_id, _income_category)); -- сумма дохода за месяц
-_value_for_second_member := (select _sum_value * ("percent") from categories where id = 15); -- сумма семейного взноса
-_sum_velue_second := (select distribute_to_group(_user_id, 1, _income_category, _sum_value)); -- перевод денег на нз и остаток после
-_free_money := (select distribute_to_group(_user_id, 2, _income_category, (_sum_value - _value_for_second_member ))); --распределение по категориям
-_second_member_id := (select * from get_users_id(_user_id) where get_users_id != _user_id); -- id второго пользователя
-_second_member_free_money := (select distribute_to_group(_second_member_id, 3, 15, _value_for_second_member)); -- распределение денег второго пользователя
-perform distribute_to_group(_user_id, 6, _income_category,  _free_money - _sum_value * 0.1); --внесение свободных денег
-perform distribute_to_group(_second_member_id, 6, 15, _second_member_free_money); -- внесение свободных денег второго пользователя
-_general_categories := (select sum((_sum_value - _value_for_second_member) * c."percent") from categories c join categories_category_groups ccg  on 	c.id = ccg.categories_id and ccg.category_groyps_id = 4 );
-_general_categories_second := (select sum(_value_for_second_member * c."percent") from categories c join categories_category_groups ccg  on c.id = ccg.categories_id and ccg.category_groyps_id = 4 );	
-_sum_earnings := (SELECT COALESCE(sum(value), 0) FROM cash_flow cf WHERE users_id = _user_id AND category_id_from IS NULL AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1' MONTH);
-_sum_spend := (SELECT COALESCE(sum(value), 0) FROM cash_flow cf WHERE users_id = _user_id AND category_id_to IS NULL AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1' MONTH);
-return 
-		jsonb_build_object('user_id', _user_id,
-						   'общие_категории', _general_categories,
-						   'second_user_id', _second_member_id,
-						   'семейный_взнос', _value_for_second_member,
-						   'second_user_pay',  _general_categories_second,
-						   'investition',  _sum_value * 0.1,
-						   'investition_second',  _value_for_second_member * 0.1,
-						   'month_earnings', _sum_earnings,
-						   'month_spend', _sum_spend
-						   )  ;
-end
-$function$
+DECLARE
+    _sum_value numeric(10,2);
+    _sum_value_second numeric(10,2);
+    _value_for_second_member numeric;
+    _free_money numeric(10,2);
+    _second_member_id bigint;
+    _second_member_free_money numeric;
+    _general_categories numeric;
+    _general_categories_second numeric;
+    _sum_earnings NUMERIC;
+    _sum_spend NUMERIC;
+BEGIN
+    PERFORM transact_from_group_to_category(_user_id, 11, (SELECT get_categories_id(_user_id, 13)));    -- Переводим месячные доходы в одну категорию
+    PERFORM transact_from_group_to_category(_user_id, 12, (SELECT get_categories_id(_user_id, 7)));    -- Переводим другие доходы в категорию "подарки себе"
+    _free_money := (SELECT get_category_balance(_user_id, (SELECT get_categories_id(_user_id, 6)), 'RUB'));    -- Получение остатка свободных денег
+    PERFORM distribute_to_group(_user_id, 7, (SELECT get_categories_id(_user_id, 6)), _free_money, 'RUB');    -- Перевод части остатка на подарки себе
+    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)    -- Увеличение резерва на 1% за счет должников
+    SELECT _user_id, id, 
+           (SELECT get_categories_id(_user_id, 9)), 
+           ABS("sum") * 0.01, 'RUB', 'monthly distribute'
+    FROM (
+        SELECT c.id, get_category_balance(_user_id, c.id, 'RUB') AS "sum"
+        FROM categories c
+        JOIN categories_category_groups ccg ON c.id = ccg.categories_id
+        WHERE ccg.users_id = _user_id AND ccg.category_groyps_id = 8
+    ) debts
+    WHERE "sum" < 0;
+    _sum_value := (SELECT get_category_balance(_user_id, _income_category, 'RUB'));    -- Сумма дохода за месяц
+    _value_for_second_member := _sum_value * (SELECT "percent" FROM categories WHERE id = 15);    -- Расчет семейного взноса
+    _sum_value_second := distribute_to_group(_user_id, 1, _income_category, _sum_value, 'RUB');    -- Перевод денег на НЗ 
+    _free_money := distribute_to_group(_user_id, 2, _income_category, _sum_value - _value_for_second_member, 'RUB');   -- Распределение свободных денег
+    _second_member_id := (SELECT user_id FROM get_users_id(_user_id) WHERE user_id != _user_id);    -- Получение ID второго пользователя
+    _second_member_free_money := distribute_to_group(_second_member_id, 3, 15, _value_for_second_member, 'RUB');    -- Распределение денег для второго пользователя
+    PERFORM distribute_to_group(_user_id, 6, _income_category, _free_money - _sum_value * 0.1, 'RUB');    -- Внесение свободных денег в резерв
+    PERFORM distribute_to_group(_second_member_id, 6, 15, _second_member_free_money, 'RUB');   -- Внесение свободных денег в резерв второго пользователя
+    _general_categories := (SELECT SUM((_sum_value - _value_for_second_member) * c."percent")    -- Подсчет общих категорий
+                            FROM categories c
+                            JOIN categories_category_groups ccg ON c.id = ccg.categories_id
+                            WHERE ccg.category_groyps_id = 4);
+
+    _general_categories_second := (SELECT SUM(_value_for_second_member * c."percent")
+                                   FROM categories c
+                                   JOIN categories_category_groups ccg ON c.id = ccg.categories_id
+                                   WHERE ccg.category_groyps_id = 4);
+    _sum_earnings := (SELECT COALESCE(SUM(value), 0)   -- Подсчет доходов за месяц
+                      FROM cash_flow
+                      WHERE users_id = _user_id
+                      AND category_id_from IS NULL
+                      AND NOT public.is_technical_cashflow_description(description)
+                      AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month');
+	_sum_spend := (SELECT COALESCE(SUM(value), 0)  -- Подсчет расходов за месяц
+                   FROM cash_flow
+                   WHERE users_id = _user_id
+                   AND category_id_to IS NULL
+                   AND NOT public.is_technical_cashflow_description(description)
+                   AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month');
+    RETURN jsonb_build_object(   -- Возвращение результата
+        'user_id', _user_id,
+        'общие_категории', _general_categories,
+        'second_user_id', _second_member_id,
+        'семейный_взнос', _value_for_second_member,
+        'second_user_pay', _general_categories_second,
+        'investition', _sum_value * 0.1,
+        'investition_second', _value_for_second_member * 0.1,
+        'month_earnings', _sum_earnings,
+        'month_spend', _sum_spend
+    );
+END;
+$function$;
 
 -- принимает user_id, id группы и id категории и переводит все деньги с группы на категорию 
 create or replace function transact_from_group_to_category(_user_id bigint, _group_id int, _category_id int)
@@ -140,8 +239,8 @@ create or replace function transact_from_group_to_category(_user_id bigint, _gro
  language plpgsql
 as $function$
 begin
-	insert into cash_flow (users_id, category_id_from, category_id_to, value, currency)
-	select users_id, categories_id, _category_id, balance, 'RUB'  
+	insert into cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
+	select users_id, categories_id, _category_id, balance, 'RUB', 'monthly distribute'  
 	from 
 		(select users_id, categories_id, get_category_balance(_user_id, categories_id) as balance 
 		 from categories_category_groups ccg 
@@ -168,21 +267,54 @@ $function$
 
 
 -- принимает user_id и порядковый номер транзакции начиная с конца и возвращает транзакцию  
-create or replace function get_last_transaction(_user_id bigint, _num int)
- returns table (id bigint, datetime timestamp, "from" varchar(100), "to" varchar(100), value numeric, currency varchar(3), description text)
- language plpgsql
-as $function$
-begin
-return query (select cf.id, cf.datetime, c."name" as "from", c2."name" as "to", cf.value, cf.currency, cf.description  from 
-	(select cf_sub.id, cf_sub.datetime, cf_sub.category_id_from, cf_sub.category_id_to, cf_sub.value, cf_sub.currency, cf_sub.description, dense_rank() over(order by cf_sub.datetime desc)
-	as "rank"
-	from cash_flow cf_sub where users_id = _user_id) cf 
-	left join categories c on cf.category_id_from = c.id 
-	left join categories c2 on  cf.category_id_to = c2.id 
-	where "rank" = _num);
-		end
+CREATE OR REPLACE FUNCTION get_last_transaction(_user_id bigint, _num int)
+RETURNS TABLE (
+    id bigint,
+    datetime timestamp,
+    "from" varchar(100),
+    "to" varchar(100),
+    value varchar,  -- Изменён тип на varchar для представления форматированного значения
+    currency varchar(16),
+    description text
+)
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY (
+        SELECT 
+            cf.id,
+            cf.datetime,
+            c."name" AS "from",
+            c2."name" AS "to",
+            CASE
+                WHEN ABS(cf.value) >= 1 THEN REPLACE(TO_CHAR(cf.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+                WHEN cf.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
+                ELSE cf.value::text
+            END AS value,
+            cf.currency,
+            cf.description
+        FROM (
+            SELECT 
+                cf_sub.id,
+                cf_sub.datetime,
+                cf_sub.category_id_from,
+                cf_sub.category_id_to,
+                cf_sub.value,
+                cf_sub.currency,
+                cf_sub.description,
+                dense_rank() OVER (ORDER BY cf_sub.datetime DESC) AS "rank"
+            FROM 
+                cash_flow cf_sub 
+            WHERE 
+                users_id = _user_id
+        ) cf 
+        LEFT JOIN categories c ON cf.category_id_from = c.id 
+        LEFT JOIN categories c2 ON cf.category_id_to = c2.id 
+        WHERE 
+            "rank" = _num
+    );
+END;
 $function$;
-
 
 -- Принимает поля транзакции и записывает в таблицу cash_flow, обязательным полем является users_id
 CREATE OR REPLACE FUNCTION public.insert_in_cash_flow(_users_id bigint,
@@ -266,19 +398,26 @@ $function$
 
 -- принимает id пользователя и возвращает все операции за сегодня
 CREATE OR REPLACE FUNCTION public.get_daily_transactions(_user_id bigint)
- RETURNS TABLE(transact text)
- LANGUAGE plpgsql
+RETURNS TABLE(transact text)
+LANGUAGE sql
 AS $function$
-begin
-return query (
-select concat(c."name", ' ', COALESCE(c2."name", '-'), ' ', cf.value, ' ', cf.currency) AS transact
-	from cash_flow cf
-	left join categories c on cf.category_id_from = c.id 
-	left join categories c2 on  cf.category_id_to = c2.id 
-	where date_trunc('day', cf.datetime) = date_trunc('day', now()) AND users_id = _user_id);
-	end
-$function$
-;	
+SELECT CONCAT_WS(' ',
+    c."name",
+    COALESCE(c2."name", '-'),
+    CASE
+        WHEN ABS(cf.value) >= 1 THEN REPLACE(TO_CHAR(cf.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        WHEN cf.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
+        ELSE cf.value::text
+    END,
+    cf.currency
+) AS transact
+FROM cash_flow cf
+LEFT JOIN categories c ON cf.category_id_from = c.id
+LEFT JOIN categories c2 ON cf.category_id_to = c2.id
+WHERE date_trunc('day', cf.datetime) = date_trunc('day', now())
+  AND users_id = _user_id
+ORDER BY cf.datetime;
+$function$;
 
 -- возвращает id всех пользователей
 CREATE OR REPLACE FUNCTION public.get_all_users_id()
@@ -313,11 +452,28 @@ AS $function$
 begin
 return (select COALESCE (get_category_balance(_user_id,(select c.id from categories c join categories_category_groups ccg on c.id = ccg.categories_id
                     where ccg.category_groyps_id = 14 and ccg.users_id = _user_id
-                    and c.name=_category)), 0))
+                    and c."name"=_category)), 0))
 			  ;
 		end
 $function$
 ;   
+
+-- принимает id пользователя и id группы, возвращает сумму всех категорий группы
+CREATE OR REPLACE FUNCTION public.get_all_balances(_user_id bigint, _group_id integer)
+RETURNS TABLE(category_name varchar, balance numeric(20, 2))
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        c."name" AS category_name,
+        COALESCE(get_category_balance(_user_id, c.id, 'RUB'), 0) AS balance
+    FROM 
+        public.categories c
+    WHERE 
+        c.id IN (SELECT public.get_categories_id(_user_id, _group_id));
+END;
+$function$;
 
 -- запускает функции месячного распределения
 CREATE OR REPLACE FUNCTION public.monthly()
@@ -338,12 +494,116 @@ CREATE OR REPLACE FUNCTION public.exchange(_users_id bigint, _category_id int, _
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
+declare
+    _rate_out numeric;
+    _rate_in numeric;
+    _rate_out_current numeric;
+    _rate_in_current numeric;
+    _rate_out_text text;
+    _rate_in_text text;
+    _stable_currencies text[] := array[
+        'USDT','USDC','DAI','BUSD','TUSD','USDP','GUSD','USDN','FRAX','USDD','FDUSD','USDE','SUSD','PYUSD'
+    ];
+    _is_stable_out boolean;
+    _is_stable_in boolean;
+    _ts timestamp := now();
 begin 
+    if _value_out <= 0 or _value_in <= 0 then
+        raise exception 'Exchange values must be greater than zero';
+    end if;
+
+    select rate into _rate_out
+    from exchange_rates
+    where currency = _currency_out
+    order by datetime desc
+    limit 1;
+
+    select rate into _rate_in
+    from exchange_rates
+    where currency = _currency_in
+    order by datetime desc
+    limit 1;
+
+    if _currency_out = 'USD' then
+        _rate_out := 1;
+    end if;
+    if _currency_in = 'USD' then
+        _rate_in := 1;
+    end if;
+
+    _is_stable_out := _currency_out = ANY(_stable_currencies);
+    _is_stable_in := _currency_in = ANY(_stable_currencies);
+
+    if _rate_out is null and _rate_in is null then
+        raise exception 'Rates for % and % are unknown. Exchange via USD first', _currency_out, _currency_in;
+    end if;
+
+    -- USD is anchor: update the other currency
+    if _currency_out = 'USD' then
+        _rate_out := 1;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in, _rate_in);
+    elsif _currency_in = 'USD' then
+        _rate_in := 1;
+        _rate_out := _rate_in * (_value_out / _value_in);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_out, _rate_out);
+    -- Stablecoin updates only when exchanged with USD
+    elsif _is_stable_out then
+        if _rate_out is null then
+            raise exception 'Stablecoin rate is unknown. Exchange stablecoin with USD first';
+        end if;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in, _rate_in);
+    elsif _is_stable_in then
+        if _rate_in is null then
+            raise exception 'Stablecoin rate is unknown. Exchange stablecoin with USD first';
+        end if;
+        _rate_out := _rate_in * (_value_out / _value_in);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_out, _rate_out);
+    else
+        if _rate_out is null then
+            raise exception 'Rate for % is unknown. Exchange via USD or stablecoin first', _currency_out;
+        end if;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in, _rate_in);
+    end if;
+
 	insert into cash_flow(users_id, category_id_from, value, currency, description)
 		   values(_users_id, _category_id, _value_out, _currency_out, concat('exchange to ', _value_in, ' ',  _currency_in));
 	insert into cash_flow(users_id, category_id_to, value, currency, description)
 		   values(_users_id, _category_id, _value_in, _currency_in, concat('exchange from ', _value_out, ' ',  _currency_out));
-return 'OK';
+
+    if _currency_out = 'USD' then
+        _rate_out_current := 1;
+    else
+        _rate_out_current := coalesce(_rate_out, (select rate from exchange_rates where currency = _currency_out order by datetime desc limit 1));
+    end if;
+
+    if _currency_in = 'USD' then
+        _rate_in_current := 1;
+    else
+        _rate_in_current := coalesce(_rate_in, (select rate from exchange_rates where currency = _currency_in order by datetime desc limit 1));
+    end if;
+
+    _rate_out_text := case
+        when abs(_rate_out_current) >= 1 then replace(to_char(_rate_out_current, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        when _rate_out_current::text like '%.%' then rtrim(trim(trailing '0' from _rate_out_current::text), '.')
+        else _rate_out_current::text
+    end;
+    _rate_in_text := case
+        when abs(_rate_in_current) >= 1 then replace(to_char(_rate_in_current, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        when _rate_in_current::text like '%.%' then rtrim(trim(trailing '0' from _rate_in_current::text), '.')
+        else _rate_in_current::text
+    end;
+
+return format('Курс: %s=%s, %s=%s (за 1 USD)',
+              _currency_out, _rate_out_text,
+              _currency_in, _rate_in_text);
 		end
 $function$
 ;
@@ -362,39 +622,37 @@ $function$
 
 -- получить баланс категории с разбивкой по валютам
 CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency(_user_id bigint, _category_id integer)
- RETURNS TABLE (value numeric, currensy varchar)
- LANGUAGE plpgsql
+ RETURNS TABLE (value numeric, currency varchar)
+ LANGUAGE sql
 AS $function$
-BEGIN
-RETURN query (
 SELECT
-	sum(cf.value) AS value, currency
+    sum(cf.value) AS value,
+    cf.currency
 FROM
-	(
-	SELECT
-		cash_flow.value,
-		currency
-	FROM
-		cash_flow
-	WHERE
-		category_id_to = _category_id
-		AND users_id IN (
-		SELECT
-			get_users_id(_user_id))
+    (
+    SELECT
+        cash_flow.value,
+        cash_flow.currency
+    FROM
+        cash_flow
+    WHERE
+        category_id_to = _category_id
+        AND users_id IN (
+        SELECT
+            get_users_id(_user_id))
 UNION ALL
-	SELECT
-		-cash_flow.value,
-		currency
-	FROM
-		cash_flow
-	WHERE
-		category_id_from = _category_id
-		AND users_id IN (
-		SELECT
-			get_users_id(_user_id))
-			  ) cf
-GROUP BY currency);
-END
+SELECT
+        -cash_flow.value,
+        cash_flow.currency
+    FROM
+        cash_flow
+    WHERE
+        category_id_from = _category_id
+        AND users_id IN (
+        SELECT
+            get_users_id(_user_id))
+              ) cf
+GROUP BY cf.currency;
 $function$
 ;
 
@@ -421,6 +679,10 @@ DECLARE
     _reserv_id int;
     _category_id_from int;
 BEGIN 
+    IF _value <= 0 THEN
+        RAISE EXCEPTION 'Spend value must be greater than zero';
+    END IF;
+
     _value_RUB := (SELECT _value / (er.rate / er2.rate) as value
 FROM (SELECT
 		datetime,
@@ -433,12 +695,24 @@ JOIN exchange_rates er2 ON er.datetime = er2.datetime
 WHERE er.currency = _currency 
 AND er2.currency = 'RUB'  
 AND rown = 1);
+
+    IF _value_RUB IS NULL THEN
+        RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency;
+    END IF;
+
     _reserv_id := (SELECT get_categories_id(_users_id, 9));
+    IF _reserv_id IS NULL THEN
+        RAISE EXCEPTION 'Reserve category (group 9) not found for user %', _users_id;
+    END IF;
+
     _category_id_from := (SELECT c.id
 			                from categories c
 			                join categories_category_groups ccg on c.id = ccg.categories_id
 			                where ccg.category_groyps_id = 14 and ccg.users_id = _users_id
 			                and c."name"=_category_name_from);
+    IF _category_id_from IS NULL THEN
+        RAISE EXCEPTION 'Category % not found in group 14 for user %', _category_name_from, _users_id;
+    END IF;
 
     INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
     VALUES

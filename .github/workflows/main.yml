@@ -7,9 +7,72 @@ on:
       - test      # Тестовая сборка
 
 jobs:
+  pre_deploy_checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.1-alpine3.19
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: finance_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d finance_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for PostgreSQL
+        env:
+          PGPASSWORD: postgres
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres -d finance_test; do
+            sleep 2
+          done
+
+      - name: Apply schema and functions
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tables.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f sql_functions.sql
+
+      - name: Run SQL business checks
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/predeploy_business_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/currency_code_length_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/technical_cashflow_description_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/exchange_negative_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/exchange_edge_case_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_negative_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/balance_functions_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/monthly_business_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/monthly_distribute_golden.sql
+
   # Тестовая сборка для ветки test
   test_build:
     if: github.ref == 'refs/heads/test'
+    needs: pre_deploy_checks
     runs-on: ubuntu-latest
 
     steps:
@@ -24,6 +87,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
+            set -euo pipefail
             echo "Starting test environment deployment..."
             TEST_DIR=~/finance_bot_test
 
@@ -43,15 +107,89 @@ jobs:
             git reset --hard origin/test
 
             # Сборка и перезапуск контейнеров
-            docker-compose -f docker-compose.yml build
+            docker-compose -f docker-compose.yml build --pull --no-cache
             docker-compose -f docker-compose.yml down
-            docker-compose -f docker-compose.yml up -d --force-recreate
+            docker volume prune -f
 
+            docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
             echo "Test environment updated successfully."
+
+            echo "Restoring latest database backup..."
+            LATEST_BACKUP=$(ls -t /home/kras/db_backup/backups/*.zip | head -n 1)
+            if [ -z "$LATEST_BACKUP" ]; then
+                echo "No backups found for restoration!"
+                exit 1
+            fi
+            echo "Latest backup: $LATEST_BACKUP"
+            du -h "$LATEST_BACKUP" || true
+            echo "Disk usage before restore:"
+            df -h /tmp /home || true
+
+            # Быстрая проверка свободного места /tmp (на случай если unzip/pipe создаст буферы)
+            TMP_AVAILABLE_KB=$(df -Pk /tmp | awk 'NR==2 {print $4}')
+            if [ -z "$TMP_AVAILABLE_KB" ] || [ "$TMP_AVAILABLE_KB" -lt 524288 ]; then
+                echo "Not enough free space in /tmp (need at least 512MB). Available: ${TMP_AVAILABLE_KB:-unknown} KB"
+                exit 1
+            fi
+
+            # Проверяем, что в архиве есть SQL-файл
+            SQL_FILE_IN_ZIP=$(zipinfo -1 "$LATEST_BACKUP" '*.sql' | head -n 1)
+            if [ -z "$SQL_FILE_IN_ZIP" ]; then
+                echo "No SQL file found in the backup archive!"
+                exit 1
+            fi
+
+            # Ожидание готовности PostgreSQL с лимитом времени
+            echo "Waiting for PostgreSQL to be ready..."
+            MAX_WAIT=120  # Максимальное время ожидания в секундах
+            START_TIME=$(date +%s)
+
+            while true; do
+                # Проверяем соединение
+                if docker exec finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; then
+                    echo "PostgreSQL is ready."
+                    break
+                fi
+                
+                # Проверяем превышение лимита ожидания
+                CURRENT_TIME=$(date +%s)
+                ELAPSED=$((CURRENT_TIME - START_TIME))
+                if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+                    echo "Timeout waiting for PostgreSQL to be ready after $MAX_WAIT seconds!"
+                    exit 1
+                fi
+
+                echo "Still waiting for PostgreSQL to be ready... ($ELAPSED seconds elapsed)"
+                sleep 5
+            done
+
+            # Очистка базы данных
+            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
+                echo "Error occurred while clearing the database!"
+                exit 1
+            fi
+            echo "Database cleared successfully."
+
+            # Восстановление из SQL файла
+            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" | docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot"; then
+                echo "Error occurred during database restoration!"
+                exit 1
+            fi
+            echo "Database restored successfully."
+
+            # Универсальное применение схемы и функций при каждом деплое
+            bash /home/kras/finance_bot_test/scripts/apply_db_schema.sh \
+              finance_bot_test_postgres_1 \
+              my_finance_bot \
+              my_finance_bot \
+              /home/kras/finance_bot_test
+
+            echo "Database restored successfully."
 
   # Продакшн сборка для ветки main
   production_build:
     if: github.ref == 'refs/heads/main'
+    needs: pre_deploy_checks
     runs-on: ubuntu-latest
 
     steps:
@@ -74,8 +212,34 @@ jobs:
             git pull origin main
 
             # Сборка и перезапуск продакшн контейнеров
-            docker-compose --env-file .env -f docker-compose.yml build
+            docker-compose --env-file .env -f docker-compose.yml build --pull --no-cache
             docker-compose --env-file .env -f docker-compose.yml down
-            docker-compose --env-file .env -f docker-compose.yml up -d
+            docker-compose --env-file .env -f docker-compose.yml up -d --force-recreate --remove-orphans
+
+            # Ожидание готовности PostgreSQL
+            echo "Waiting for PostgreSQL to be ready..."
+            MAX_WAIT=120
+            START_TIME=$(date +%s)
+            while true; do
+                if docker exec finance_telegram_bot_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; then
+                    echo "PostgreSQL is ready."
+                    break
+                fi
+
+                CURRENT_TIME=$(date +%s)
+                ELAPSED=$((CURRENT_TIME - START_TIME))
+                if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+                    echo "Timeout waiting for PostgreSQL to be ready after $MAX_WAIT seconds!"
+                    exit 1
+                fi
+                sleep 5
+            done
+
+            # Универсальное применение схемы и функций при каждом деплое
+            bash /home/kras/finance_telegram_bot/scripts/apply_db_schema.sh \
+              finance_telegram_bot_postgres_1 \
+              my_finance_bot \
+              my_finance_bot \
+              /home/kras/finance_telegram_bot
 
             echo "Production environment updated successfully."
