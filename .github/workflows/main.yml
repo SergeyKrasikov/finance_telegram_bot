@@ -125,9 +125,6 @@ jobs:
             if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
             if [ -z "$DB_NAME" ]; then DB_NAME="postgres"; fi
 
-            # Test uses different host port for Postgres
-            export PG_PORT=5433
-
             # Сборка и перезапуск контейнеров
             docker-compose -f docker-compose.yml build --pull --no-cache
             docker-compose -f docker-compose.yml down
@@ -193,6 +190,16 @@ jobs:
                   "CREATE DATABASE \"$DB_NAME\";"
             fi
 
+            # Safety guard: require explicit flag to allow destructive restore
+            TEST_RESTORE="$(extract_env TEST_RESTORE)"
+            if [ "${TEST_RESTORE:-}" != "1" ]; then
+                echo "Refusing to drop schema without TEST_RESTORE=1"
+                exit 1
+            fi
+
+            # Stop bot during restore to avoid connect errors
+            docker-compose -f docker-compose.yml stop bot || true
+
             # Очистка базы данных
             if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
                 echo "Error occurred while clearing the database!"
@@ -213,6 +220,16 @@ jobs:
               "$DB_USER" \
               "$DB_NAME" \
               /home/kras/finance_bot_test
+
+            # Sanity check (non-fatal)
+            USERS_COUNT=$(docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -Atc "select count(*) from users;")
+            CASHFLOW_COUNT=$(docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -Atc "select count(*) from cash_flow;")
+            if [ "${USERS_COUNT:-0}" -eq 0 ] && [ "${CASHFLOW_COUNT:-0}" -eq 0 ]; then
+                echo "Warning: restore completed but users and cash_flow are empty."
+            fi
+
+            # Start bot after restore
+            docker-compose -f docker-compose.yml up -d bot
 
             echo "Database restored successfully."
 
