@@ -106,6 +106,17 @@ jobs:
             git checkout test
             git reset --hard origin/test
 
+            # Load local env (do not delete .env; test/prod are different)
+            if [ ! -f ".env" ]; then
+              echo "Missing .env in $TEST_DIR"
+              exit 1
+            fi
+            set -a
+            source .env
+            set +a
+            DB_USER="${POSTGRES_USER:-postgres}"
+            DB_NAME="${PG_DATABASE:-${POSTGRES_DB:-postgres}}"
+
             # Test uses different host port for Postgres
             export PG_PORT=5433
 
@@ -149,7 +160,7 @@ jobs:
 
             while true; do
                 # Проверяем соединение
-                if docker exec finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; then
+                if docker exec finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "\q" > /dev/null 2>&1; then
                     echo "PostgreSQL is ready."
                     break
                 fi
@@ -167,14 +178,14 @@ jobs:
             done
 
             # Очистка базы данных
-            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
+            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
                 echo "Error occurred while clearing the database!"
                 exit 1
             fi
             echo "Database cleared successfully."
 
             # Восстановление из SQL файла
-            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" | docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot"; then
+            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" | docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME"; then
                 echo "Error occurred during database restoration!"
                 exit 1
             fi
@@ -183,8 +194,8 @@ jobs:
             # Универсальное применение схемы и функций при каждом деплое
             bash /home/kras/finance_bot_test/scripts/apply_db_schema.sh \
               finance_bot_test_postgres_1 \
-              my_finance_bot \
-              my_finance_bot \
+              "$DB_USER" \
+              "$DB_NAME" \
               /home/kras/finance_bot_test
 
             echo "Database restored successfully."
@@ -214,6 +225,17 @@ jobs:
             git reset --hard
             git pull origin main
 
+            if [ -f ".env" ]; then
+              set -a
+              source .env
+              set +a
+              DB_USER="${POSTGRES_USER:-postgres}"
+              DB_NAME="${PG_DATABASE:-${POSTGRES_DB:-postgres}}"
+            else
+              DB_USER="my_finance_bot"
+              DB_NAME="my_finance_bot"
+            fi
+
             # Сборка и перезапуск продакшн контейнеров
             docker-compose --env-file .env -f docker-compose.yml build --pull --no-cache
             docker-compose --env-file .env -f docker-compose.yml down
@@ -224,7 +246,7 @@ jobs:
             MAX_WAIT=120
             START_TIME=$(date +%s)
             while true; do
-                if docker exec finance_telegram_bot_postgres_1 psql -p "5432" -U "my_finance_bot" -d "my_finance_bot" -c "\q" > /dev/null 2>&1; then
+                if docker exec finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "\q" > /dev/null 2>&1; then
                     echo "PostgreSQL is ready."
                     break
                 fi
@@ -241,8 +263,8 @@ jobs:
             # Универсальное применение схемы и функций при каждом деплое
             bash /home/kras/finance_telegram_bot/scripts/apply_db_schema.sh \
               finance_telegram_bot_postgres_1 \
-              my_finance_bot \
-              my_finance_bot \
+              "$DB_USER" \
+              "$DB_NAME" \
               /home/kras/finance_telegram_bot
 
             echo "Production environment updated successfully."
