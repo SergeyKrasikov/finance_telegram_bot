@@ -167,8 +167,8 @@ jobs:
             START_TIME=$(date +%s)
 
             while true; do
-                # Проверяем соединение
-                if docker exec finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "\q" > /dev/null 2>&1; then
+                # Проверяем соединение (используем postgres, чтобы не зависеть от наличия DB_NAME)
+                if docker exec finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -c "\q" > /dev/null 2>&1; then
                     echo "PostgreSQL is ready."
                     break
                 fi
@@ -184,6 +184,14 @@ jobs:
                 echo "Still waiting for PostgreSQL to be ready... ($ELAPSED seconds elapsed)"
                 sleep 5
             done
+
+            # Ensure target database exists
+            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -tc \
+              "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME';" | grep -q 1; then
+                echo "Creating database $DB_NAME..."
+                docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -c \
+                  "CREATE DATABASE \"$DB_NAME\";"
+            fi
 
             # Очистка базы данных
             if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
@@ -261,7 +269,7 @@ jobs:
             MAX_WAIT=120
             START_TIME=$(date +%s)
             while true; do
-                if docker exec finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "\q" > /dev/null 2>&1; then
+                if docker exec finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -c "\q" > /dev/null 2>&1; then
                     echo "PostgreSQL is ready."
                     break
                 fi
@@ -274,6 +282,13 @@ jobs:
                 fi
                 sleep 5
             done
+
+            if ! docker exec -i finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -tc \
+              "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME';" | grep -q 1; then
+                echo "Creating database $DB_NAME..."
+                docker exec -i finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -c \
+                  "CREATE DATABASE \"$DB_NAME\";"
+            fi
 
             # Универсальное применение схемы и функций при каждом деплое
             bash /home/kras/finance_telegram_bot/scripts/apply_db_schema.sh \
