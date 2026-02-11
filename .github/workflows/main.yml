@@ -106,12 +106,15 @@ jobs:
             git checkout test
             git reset --hard origin/test
 
-            # Сборка и перезапуск контейнеров (test override with different postgres port)
-            docker-compose -f docker-compose.yml -f docker-compose.test.yml build --pull --no-cache
-            docker-compose -f docker-compose.yml -f docker-compose.test.yml down
+            # Test uses different host port for Postgres
+            export PG_PORT=5433
+
+            # Сборка и перезапуск контейнеров
+            docker-compose -f docker-compose.yml build --pull --no-cache
+            docker-compose -f docker-compose.yml down
             docker volume prune -f
 
-            docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d --force-recreate --remove-orphans
+            docker-compose -f docker-compose.yml up -d --force-recreate --remove-orphans
             echo "Test environment updated successfully."
 
             echo "Restoring latest database backup..."
