@@ -683,18 +683,23 @@ BEGIN
         RAISE EXCEPTION 'Spend value must be greater than zero';
     END IF;
 
-    _value_RUB := (SELECT _value / (er.rate / er2.rate) as value
-FROM (SELECT
-		datetime,
-		currency,
-		rate,
-		ROW_NUMBER() OVER (PARTITION BY currency ORDER BY datetime DESC) AS rown
-	  FROM
-		exchange_rates) er
-JOIN exchange_rates er2 ON er.datetime = er2.datetime 
-WHERE er.currency = _currency 
-AND er2.currency = 'RUB'  
-AND rown = 1);
+    _value_RUB := (
+        SELECT _value / (src.rate / rub.rate)
+        FROM (
+            SELECT rate
+            FROM exchange_rates
+            WHERE currency = _currency
+            ORDER BY datetime DESC
+            LIMIT 1
+        ) src
+        CROSS JOIN (
+            SELECT rate
+            FROM exchange_rates
+            WHERE currency = 'RUB'
+            ORDER BY datetime DESC
+            LIMIT 1
+        ) rub
+    );
 
     IF _value_RUB IS NULL THEN
         RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency;
