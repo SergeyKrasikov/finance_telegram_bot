@@ -34,6 +34,8 @@ services:
       - "pg_stat_statements.track=all"
     env_file:
       - ./.env 
+    environment:
+      - POSTGRES_DB=${PG_DATABASE}
     volumes:
       - ./:/docker-entrypoint-initdb.d
       - pgdb-data:/var/lib/postgresql/data
