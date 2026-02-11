@@ -29,7 +29,7 @@ VALUES
   (900211, 14, 900201),
   (900212, 14, 900201);
 
--- Same timestamp for RUB and USDT because insert_spend_with_exchange joins rates by datetime
+-- Baseline: same timestamp for RUB and USDT
 WITH ts AS (SELECT now() AS t)
 INSERT INTO exchange_rates("datetime", currency, rate)
 SELECT t, 'USD', 1 FROM ts
@@ -95,6 +95,36 @@ BEGIN
     SELECT public.get_remains(900201, 'Travel') INTO travel_remains;
     IF travel_remains IS NULL OR abs(travel_remains + 8000) > 1e-9 THEN
         RAISE EXCEPTION 'Expected Travel remains = -8000, got %', travel_remains;
+    END IF;
+END $$;
+
+-- Scenario 2: different timestamps for RUB and USDT, still should work with latest independent rates
+DELETE FROM cash_flow WHERE users_id = 900201;
+DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
+
+INSERT INTO exchange_rates("datetime", currency, rate) VALUES
+  (now() - interval '2 day', 'USD', 1),
+  (now() - interval '2 day', 'RUB', 70),
+  (now() - interval '1 day', 'RUB', 90),
+  (now(), 'USDT', 1);
+
+SELECT public.insert_spend_with_exchange(900201, 'Travel', 100::numeric, 'USDT', 'fx test 2');
+
+DO $$
+DECLARE
+    rub_spend numeric;
+BEGIN
+    SELECT value INTO rub_spend
+    FROM cash_flow
+    WHERE users_id = 900201
+      AND category_id_from = 900212
+      AND category_id_to = 900211
+      AND currency = 'RUB'
+    ORDER BY id DESC
+    LIMIT 1;
+
+    IF rub_spend IS NULL OR abs(rub_spend - 9000) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected RUB conversion value 9000 with independent rates, got %', rub_spend;
     END IF;
 END $$;
 
