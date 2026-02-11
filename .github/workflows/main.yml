@@ -106,16 +106,23 @@ jobs:
             git checkout test
             git reset --hard origin/test
 
-            # Load local env (do not delete .env; test/prod are different)
+            # Load DB creds from .env without sourcing (file may not be shell-safe)
             if [ ! -f ".env" ]; then
               echo "Missing .env in $TEST_DIR"
               exit 1
             fi
-            set -a
-            source .env
-            set +a
-            DB_USER="${POSTGRES_USER:-postgres}"
-            DB_NAME="${PG_DATABASE:-${POSTGRES_DB:-postgres}}"
+            extract_env() {
+              local key="$1"
+              local val
+              val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
+              val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
+              echo "$val"
+            }
+            DB_USER="$(extract_env POSTGRES_USER)"
+            DB_NAME="$(extract_env PG_DATABASE)"
+            if [ -z "$DB_NAME" ]; then DB_NAME="$(extract_env POSTGRES_DB)"; fi
+            if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
+            if [ -z "$DB_NAME" ]; then DB_NAME="postgres"; fi
 
             # Test uses different host port for Postgres
             export PG_PORT=5433
@@ -226,14 +233,21 @@ jobs:
             git pull origin main
 
             if [ -f ".env" ]; then
-              set -a
-              source .env
-              set +a
-              DB_USER="${POSTGRES_USER:-postgres}"
-              DB_NAME="${PG_DATABASE:-${POSTGRES_DB:-postgres}}"
+              extract_env() {
+                local key="$1"
+                local val
+                val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
+                val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
+                echo "$val"
+              }
+              DB_USER="$(extract_env POSTGRES_USER)"
+              DB_NAME="$(extract_env PG_DATABASE)"
+              if [ -z "$DB_NAME" ]; then DB_NAME="$(extract_env POSTGRES_DB)"; fi
+              if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
+              if [ -z "$DB_NAME" ]; then DB_NAME="postgres"; fi
             else
-              DB_USER="my_finance_bot"
-              DB_NAME="my_finance_bot"
+              DB_USER="postgres"
+              DB_NAME="postgres"
             fi
 
             # Сборка и перезапуск продакшн контейнеров

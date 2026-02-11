@@ -56,6 +56,8 @@ services:
     command: sh -c "python -m app"
     env_file:
       - ./.env
+    environment:
+      - PG_PORT=5432
     restart: always
     depends_on:
       - postgres
