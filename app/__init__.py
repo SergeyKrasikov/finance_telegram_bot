@@ -50,7 +50,7 @@ async def main() -> None:
     bot = Bot(TOKEN)
     dp = Dispatcher()
     setup_dispatcher(dp)
-    dp.startup.register(lambda: on_startup(bot))
+    dp.startup.register(on_startup)
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 

@@ -286,11 +286,13 @@ BEGIN
             cf.datetime,
             c."name" AS "from",
             c2."name" AS "to",
-            CASE
-                WHEN ABS(cf.value) >= 1 THEN REPLACE(TO_CHAR(cf.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
-                WHEN cf.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
-                ELSE cf.value::text
-            END AS value,
+            CAST(
+                CASE
+                    WHEN ABS(cf.value) >= 1 THEN REPLACE(TO_CHAR(cf.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+                    WHEN cf.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
+                    ELSE cf.value::text
+                END
+            AS varchar) AS value,
             cf.currency,
             cf.description
         FROM (

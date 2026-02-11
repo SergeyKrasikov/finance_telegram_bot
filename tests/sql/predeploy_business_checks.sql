@@ -106,4 +106,19 @@ BEGIN
     END IF;
 END $$;
 
+-- 7) get_last_transaction returns varchar value (no type mismatch)
+DO $$
+DECLARE v text;
+DECLARE t text;
+BEGIN
+    SELECT value, pg_typeof(value)::text
+    INTO v, t
+    FROM get_last_transaction(900001, 1)
+    LIMIT 1;
+
+    IF t <> 'character varying' THEN
+        RAISE EXCEPTION 'Test failed: expected value type character varying, got %', t;
+    END IF;
+END $$;
+
 ROLLBACK;
