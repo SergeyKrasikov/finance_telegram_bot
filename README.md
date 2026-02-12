@@ -126,11 +126,18 @@ POSTGRES_USER=        # Пользователь БД
 POSTGRES_PASSWORD=    # Пароль пользователя БД
 PG_HOST=              # Хост PostgreSQL
 PG_PORT=              # Порт PostgreSQL
-PG_DATABASE=          # Название базы данных
+PG_DATABASE=          # Название базы данных (docker-compose использует его для POSTGRES_DB)
 AUTO_APPLY_DB_SCHEMA= # true/false: автоматически применять tables.sql и sql_functions.sql при старте бота
 DB_BOOTSTRAP_MAX_ATTEMPTS=   # Количество попыток подключения к БД при старте (по умолчанию 20)
 DB_BOOTSTRAP_RETRY_DELAY_SEC=# Пауза между попытками в секундах (по умолчанию 2)
 ```
+
+## Памятка (test/prod)
+- `PG_HOST` внутри контейнеров всегда должен быть `postgres` (имя сервиса в `docker-compose.yml`).
+- `PG_PORT` в `.env` влияет только на внешний порт (хост), внутри контейнера используется `5432`.
+- Разделение test/prod делается через **разные .env** и **разные volumes**, а не только порт.
+- Если поменяли `PG_DATABASE`, нужно пересоздать volume или создать базу вручную.
+- В тестовом деплое очистка и восстановление выполняются только при `TEST_RESTORE=1` в `.env`.
 
 ## Конфиги (единый список)
 - `app/config.py` — переменные окружения и группы категорий.

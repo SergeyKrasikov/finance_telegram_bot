@@ -87,6 +87,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT }}
+          command_timeout: 40m
           script: |
             set -euo pipefail
             echo "Starting test environment deployment..."
@@ -117,6 +118,7 @@ jobs:
               local val
               val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
               val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
+              val=$(echo "$val" | tr -d '\r' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
               echo "$val"
             }
             DB_USER="$(extract_env POSTGRES_USER)"
@@ -124,9 +126,6 @@ jobs:
             if [ -z "$DB_NAME" ]; then DB_NAME="$(extract_env POSTGRES_DB)"; fi
             if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
             if [ -z "$DB_NAME" ]; then DB_NAME="postgres"; fi
-
-            # Test uses different host port for Postgres
-            export PG_PORT=5433
 
             # Сборка и перезапуск контейнеров
             docker-compose -f docker-compose.yml build --pull --no-cache
@@ -167,8 +166,8 @@ jobs:
             START_TIME=$(date +%s)
 
             while true; do
-                # Проверяем соединение
-                if docker exec finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "\q" > /dev/null 2>&1; then
+                # Проверяем соединение (используем postgres, чтобы не зависеть от наличия DB_NAME)
+                if docker exec finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -c "\q" > /dev/null 2>&1; then
                     echo "PostgreSQL is ready."
                     break
                 fi
@@ -185,6 +184,43 @@ jobs:
                 sleep 5
             done
 
+            # Ensure target database exists
+            DB_EXISTS=$(docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -Atc \
+              "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = '$DB_NAME');" | tr -d '[:space:]')
+            if [ "$DB_EXISTS" != "t" ]; then
+                echo "Creating database $DB_NAME..."
+                docker exec -i finance_bot_test_postgres_1 psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "postgres" -c \
+                  "CREATE DATABASE \"$DB_NAME\";"
+            fi
+
+            # Ensure owner roles from dump exist (plain SQL dump may contain OWNER TO <role>)
+            DUMP_ROLES=$(unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" \
+              | tr -d '\r' \
+              | sed -nE 's/.*OWNER TO "?([^\";]+)"?;.*/\1/p' \
+              | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+              | sort -u)
+            if [ -n "${DUMP_ROLES:-}" ]; then
+                echo "Ensuring dump roles exist..."
+                printf '%s\n' "$DUMP_ROLES" | while IFS= read -r ROLE_NAME; do
+                    ROLE_NAME=$(printf "%s" "$ROLE_NAME" | tr -d '\r' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+                    [ -z "$ROLE_NAME" ] && continue
+                    ROLE_ESCAPED=$(printf "%s" "$ROLE_NAME" | sed "s/'/''/g")
+                    docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" \
+                      -v ON_ERROR_STOP=1 \
+                      -c "DO \$\$ DECLARE r text := '$ROLE_ESCAPED'; BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN EXECUTE format('CREATE ROLE %I NOLOGIN', r); END IF; END \$\$;"
+                done
+            fi
+
+            # Safety guard: require explicit flag to allow destructive restore
+            TEST_RESTORE="$(extract_env TEST_RESTORE)"
+            if [ "${TEST_RESTORE:-}" != "1" ]; then
+                echo "Refusing to drop schema without TEST_RESTORE=1"
+                exit 1
+            fi
+
+            # Stop bot during restore to avoid connect errors
+            docker-compose -f docker-compose.yml stop bot || true
+
             # Очистка базы данных
             if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"; then
                 echo "Error occurred while clearing the database!"
@@ -193,7 +229,10 @@ jobs:
             echo "Database cleared successfully."
 
             # Восстановление из SQL файла
-            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" | docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME"; then
+            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" \
+                | tr -d '\r' \
+                | sed -E '/[[:space:]]OWNER[[:space:]]+TO[[:space:]]/Id;/^[[:space:]]*GRANT[[:space:]]/Id;/^[[:space:]]*REVOKE[[:space:]]/Id;/SET[[:space:]]+SESSION[[:space:]]+AUTHORIZATION/Id;/^[[:space:]]*ALTER[[:space:]]+DEFAULT[[:space:]]+PRIVILEGES/Id' \
+                | docker exec -i finance_bot_test_postgres_1 psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "$DB_NAME"; then
                 echo "Error occurred during database restoration!"
                 exit 1
             fi
@@ -205,6 +244,16 @@ jobs:
               "$DB_USER" \
               "$DB_NAME" \
               /home/kras/finance_bot_test
+
+            # Sanity check (non-fatal)
+            USERS_COUNT=$(docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -Atc "select count(*) from users;")
+            CASHFLOW_COUNT=$(docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -Atc "select count(*) from cash_flow;")
+            if [ "${USERS_COUNT:-0}" -eq 0 ] && [ "${CASHFLOW_COUNT:-0}" -eq 0 ]; then
+                echo "Warning: restore completed but users and cash_flow are empty."
+            fi
+
+            # Start bot after restore
+            docker-compose -f docker-compose.yml up -d bot
 
             echo "Database restored successfully."
 
@@ -225,6 +274,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT }}
+          command_timeout: 40m
           script: |
             echo "Starting production environment deployment..."
             cd ~/finance_telegram_bot
@@ -233,22 +283,28 @@ jobs:
             git reset --hard
             git pull origin main
 
-            if [ -f ".env" ]; then
-              extract_env() {
-                local key="$1"
-                local val
-                val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
-                val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
-                echo "$val"
-              }
-              DB_USER="$(extract_env POSTGRES_USER)"
-              DB_NAME="$(extract_env PG_DATABASE)"
-              if [ -z "$DB_NAME" ]; then DB_NAME="$(extract_env POSTGRES_DB)"; fi
-              if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
-              if [ -z "$DB_NAME" ]; then DB_NAME="postgres"; fi
-            else
-              DB_USER="postgres"
-              DB_NAME="postgres"
+            if [ ! -f ".env" ]; then
+              echo "Missing .env in production directory"
+              exit 1
+            fi
+            extract_env() {
+              local key="$1"
+              local val
+              val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
+              val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
+              val=$(echo "$val" | tr -d '\r' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+              echo "$val"
+            }
+            DB_USER="$(extract_env POSTGRES_USER)"
+            DB_NAME="$(extract_env PG_DATABASE)"
+            if [ -z "$DB_USER" ] || [ -z "$DB_NAME" ]; then
+              echo "POSTGRES_USER and PG_DATABASE must be set in .env for production"
+              exit 1
+            fi
+
+            if echo "$DB_NAME" | grep -qi "test"; then
+              echo "Refusing to deploy production with test database name: $DB_NAME"
+              exit 1
             fi
 
             # Сборка и перезапуск продакшн контейнеров
@@ -261,7 +317,7 @@ jobs:
             MAX_WAIT=120
             START_TIME=$(date +%s)
             while true; do
-                if docker exec finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME" -c "\q" > /dev/null 2>&1; then
+                if docker exec finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -c "\q" > /dev/null 2>&1; then
                     echo "PostgreSQL is ready."
                     break
                 fi
@@ -274,6 +330,12 @@ jobs:
                 fi
                 sleep 5
             done
+
+            if ! docker exec -i finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -tc \
+              "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME';" | grep -q 1; then
+                echo "Production database $DB_NAME does not exist"
+                exit 1
+            fi
 
             # Универсальное применение схемы и функций при каждом деплое
             bash /home/kras/finance_telegram_bot/scripts/apply_db_schema.sh \

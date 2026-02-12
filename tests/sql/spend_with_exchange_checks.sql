@@ -29,17 +29,15 @@ VALUES
   (900211, 14, 900201),
   (900212, 14, 900201);
 
--- Baseline: same timestamp for RUB and USDT
-WITH ts AS (SELECT now() AS t)
+-- Different timestamps: conversion must use latest independent rates
 INSERT INTO exchange_rates("datetime", currency, rate)
-SELECT t, 'USD', 1 FROM ts
-UNION ALL
-SELECT t, 'RUB', 80 FROM ts
-UNION ALL
-SELECT t, 'USDT', 1 FROM ts;
+VALUES
+  (now() - interval '2 hour', 'USD', 1),
+  (now() - interval '1 hour', 'RUB', 80),
+  (now() - interval '10 minutes', 'USDT', 1);
 
 -- action
-SELECT public.insert_spend_with_exchange(900201, 'Travel', 100::numeric, 'USDT', 'fx test');
+SELECT public.insert_spend_with_exchange(900201, 'Travel', 100::numeric, 'usdt', 'fx test');
 
 -- assertions
 DO $$
