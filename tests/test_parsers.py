@@ -30,6 +30,8 @@ class ParserTests(unittest.TestCase):
         self.assertTrue(is_amount_input("1000"))
         self.assertTrue(is_amount_input("1000,25 USD"))
         self.assertTrue(is_amount_input("1000.25 usd coffee"))
+        self.assertTrue(is_amount_input("1000.25 USDT coffee"))
+        self.assertTrue(is_amount_input("1000 TOKEN1234 note"))
 
     def test_parse_amount_with_defaults(self) -> None:
         amount, currency, comment = parse_amount_with_defaults("1000,5")

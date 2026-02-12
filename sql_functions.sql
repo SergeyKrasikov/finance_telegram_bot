@@ -680,26 +680,38 @@ DECLARE
     _value_RUB NUMERIC(10,2);
     _reserv_id int;
     _category_id_from int;
+    _rate_src numeric;
+    _rate_rub numeric;
+    _currency_norm character varying := upper(_currency);
 BEGIN 
     IF _value <= 0 THEN
         RAISE EXCEPTION 'Spend value must be greater than zero';
     END IF;
 
-    _value_RUB := (SELECT _value / (er.rate / er2.rate) as value
-FROM (SELECT
-		datetime,
-		currency,
-		rate,
-		ROW_NUMBER() OVER (PARTITION BY currency ORDER BY datetime DESC) AS rown
-	  FROM
-		exchange_rates) er
-JOIN exchange_rates er2 ON er.datetime = er2.datetime 
-WHERE er.currency = _currency 
-AND er2.currency = 'RUB'  
-AND rown = 1);
+    IF _currency_norm = 'RUB' THEN
+        _value_RUB := _value;
+    ELSE
+        SELECT rate INTO _rate_src
+        FROM exchange_rates
+        WHERE currency = _currency_norm
+        ORDER BY datetime DESC
+        LIMIT 1;
+
+        SELECT rate INTO _rate_rub
+        FROM exchange_rates
+        WHERE currency = 'RUB'
+        ORDER BY datetime DESC
+        LIMIT 1;
+
+        IF _rate_src IS NULL OR _rate_rub IS NULL THEN
+            RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency_norm;
+        END IF;
+
+        _value_RUB := _value / (_rate_src / _rate_rub);
+    END IF;
 
     IF _value_RUB IS NULL THEN
-        RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency;
+        RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency_norm;
     END IF;
 
     _reserv_id := (SELECT get_categories_id(_users_id, 9));
@@ -718,9 +730,9 @@ AND rown = 1);
 
     INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
     VALUES
-        (_users_id, _reserv_id, _category_id_from, _value, _currency, concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency, ' ', _description)),
-        (_users_id, _category_id_from, _reserv_id, _value_RUB, 'RUB', concat('auto exchange ', _value, ' ', _currency, ' to ', _value_RUB, ' RUB', ' ', _description)),
-        (_users_id, _category_id_from, NULL, _value, _currency, _description);
+        (_users_id, _reserv_id, _category_id_from, _value, _currency_norm, concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency_norm, ' ', _description)),
+        (_users_id, _category_id_from, _reserv_id, _value_RUB, 'RUB', concat('auto exchange ', _value, ' ', _currency_norm, ' to ', _value_RUB, ' RUB', ' ', _description)),
+        (_users_id, _category_id_from, NULL, _value, _currency_norm, _description);
 
     RETURN 'OK';
 END

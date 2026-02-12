@@ -2,7 +2,7 @@ import re
 from decimal import Decimal
 from typing import List, Tuple, Optional
 
-_AMOUNT_RE = re.compile(r"^\d+([.,]\d+)?(\s+[A-Za-z]{3})?(\s+.+)?$")
+_AMOUNT_RE = re.compile(r"^\d+([.,]\d+)?(\s+[A-Za-z0-9]{3,16})?(\s+.+)?$")
 _NUMBER_RE = re.compile(r"^\d+([.,]\d+)?$")
 
 

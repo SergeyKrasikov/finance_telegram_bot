@@ -208,7 +208,7 @@ jobs:
             echo "Database cleared successfully."
 
             # Восстановление из SQL файла
-            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" | docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "$DB_NAME"; then
+            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" | docker exec -i finance_bot_test_postgres_1 psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "$DB_NAME"; then
                 echo "Error occurred during database restoration!"
                 exit 1
             fi
@@ -258,22 +258,27 @@ jobs:
             git reset --hard
             git pull origin main
 
-            if [ -f ".env" ]; then
-              extract_env() {
-                local key="$1"
-                local val
-                val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
-                val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
-                echo "$val"
-              }
-              DB_USER="$(extract_env POSTGRES_USER)"
-              DB_NAME="$(extract_env PG_DATABASE)"
-              if [ -z "$DB_NAME" ]; then DB_NAME="$(extract_env POSTGRES_DB)"; fi
-              if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
-              if [ -z "$DB_NAME" ]; then DB_NAME="postgres"; fi
-            else
-              DB_USER="postgres"
-              DB_NAME="postgres"
+            if [ ! -f ".env" ]; then
+              echo "Missing .env in production directory"
+              exit 1
+            fi
+            extract_env() {
+              local key="$1"
+              local val
+              val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
+              val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
+              echo "$val"
+            }
+            DB_USER="$(extract_env POSTGRES_USER)"
+            DB_NAME="$(extract_env PG_DATABASE)"
+            if [ -z "$DB_USER" ] || [ -z "$DB_NAME" ]; then
+              echo "POSTGRES_USER and PG_DATABASE must be set in .env for production"
+              exit 1
+            fi
+
+            if echo "$DB_NAME" | grep -qi "test"; then
+              echo "Refusing to deploy production with test database name: $DB_NAME"
+              exit 1
             fi
 
             # Сборка и перезапуск продакшн контейнеров
@@ -302,9 +307,8 @@ jobs:
 
             if ! docker exec -i finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -tc \
               "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME';" | grep -q 1; then
-                echo "Creating database $DB_NAME..."
-                docker exec -i finance_telegram_bot_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -c \
-                  "CREATE DATABASE \"$DB_NAME\";"
+                echo "Production database $DB_NAME does not exist"
+                exit 1
             fi
 
             # Универсальное применение схемы и функций при каждом деплое
