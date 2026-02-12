@@ -190,6 +190,20 @@ jobs:
                   "CREATE DATABASE \"$DB_NAME\";"
             fi
 
+            # Ensure owner roles from dump exist (plain SQL dump may contain OWNER TO <role>)
+            DUMP_ROLES=$(unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" \
+              | sed -nE 's/.*OWNER TO "?([^\";]+)"?;.*/\1/p' \
+              | sort -u)
+            if [ -n "${DUMP_ROLES:-}" ]; then
+                echo "Ensuring dump roles exist..."
+                printf '%s\n' "$DUMP_ROLES" | while IFS= read -r ROLE_NAME; do
+                    [ -z "$ROLE_NAME" ] && continue
+                    docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" \
+                      -v ON_ERROR_STOP=1 -v role_name="$ROLE_NAME" \
+                      -c "DO \$\$ DECLARE r text := :'role_name'; BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN EXECUTE format('CREATE ROLE %I NOLOGIN', r); END IF; END \$\$;"
+                done
+            fi
+
             # Safety guard: require explicit flag to allow destructive restore
             TEST_RESTORE="$(extract_env TEST_RESTORE)"
             if [ "${TEST_RESTORE:-}" != "1" ]; then
