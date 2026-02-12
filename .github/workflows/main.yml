@@ -231,7 +231,7 @@ jobs:
             # Восстановление из SQL файла
             if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" \
                 | tr -d '\r' \
-                | grep -viE 'OWNER[[:space:]]+TO[[:space:]]' \
+                | sed -E '/[[:space:]]OWNER[[:space:]]+TO[[:space:]]/Id;/^[[:space:]]*GRANT[[:space:]]/Id;/^[[:space:]]*REVOKE[[:space:]]/Id;/SET[[:space:]]+SESSION[[:space:]]+AUTHORIZATION/Id;/^[[:space:]]*ALTER[[:space:]]+DEFAULT[[:space:]]+PRIVILEGES/Id' \
                 | docker exec -i finance_bot_test_postgres_1 psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "$DB_NAME"; then
                 echo "Error occurred during database restoration!"
                 exit 1
