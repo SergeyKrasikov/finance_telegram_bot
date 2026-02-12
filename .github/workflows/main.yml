@@ -201,9 +201,10 @@ jobs:
                 echo "Ensuring dump roles exist..."
                 printf '%s\n' "$DUMP_ROLES" | while IFS= read -r ROLE_NAME; do
                     [ -z "$ROLE_NAME" ] && continue
+                    ROLE_ESCAPED=$(printf "%s" "$ROLE_NAME" | sed "s/'/''/g")
                     docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" \
-                      -v ON_ERROR_STOP=1 -v role_name="$ROLE_NAME" \
-                      -c "DO \$\$ DECLARE r text := :'role_name'; BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN EXECUTE format('CREATE ROLE %I NOLOGIN', r); END IF; END \$\$;"
+                      -v ON_ERROR_STOP=1 \
+                      -c "DO \$\$ DECLARE r text := '$ROLE_ESCAPED'; BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN EXECUTE format('CREATE ROLE %I NOLOGIN', r); END IF; END \$\$;"
                 done
             fi
 
