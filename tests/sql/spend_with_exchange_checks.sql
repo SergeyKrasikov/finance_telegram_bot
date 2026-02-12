@@ -96,4 +96,34 @@ BEGIN
     END IF;
 END $$;
 
+-- Scenario 2: different timestamps for RUB and USDT, still should work with latest independent rates
+DELETE FROM cash_flow WHERE users_id = 900201;
+DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
+
+INSERT INTO exchange_rates("datetime", currency, rate) VALUES
+  (now() - interval '2 day', 'USD', 1),
+  (now() - interval '2 day', 'RUB', 70),
+  (now() - interval '1 day', 'RUB', 90),
+  (now(), 'USDT', 1);
+
+SELECT public.insert_spend_with_exchange(900201, 'Travel', 100::numeric, 'USDT', 'fx test 2');
+
+DO $$
+DECLARE
+    rub_spend numeric;
+BEGIN
+    SELECT value INTO rub_spend
+    FROM cash_flow
+    WHERE users_id = 900201
+      AND category_id_from = 900212
+      AND category_id_to = 900211
+      AND currency = 'RUB'
+    ORDER BY id DESC
+    LIMIT 1;
+
+    IF rub_spend IS NULL OR abs(rub_spend - 9000) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected RUB conversion value 9000 with independent rates, got %', rub_spend;
+    END IF;
+END $$;
+
 ROLLBACK;
