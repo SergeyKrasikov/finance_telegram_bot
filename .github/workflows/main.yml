@@ -118,6 +118,7 @@ jobs:
               local val
               val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
               val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
+              val=$(echo "$val" | tr -d '\r' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
               echo "$val"
             }
             DB_USER="$(extract_env POSTGRES_USER)"
@@ -184,10 +185,11 @@ jobs:
             done
 
             # Ensure target database exists
-            if ! docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -tc \
-              "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME';" | grep -q 1; then
+            DB_EXISTS=$(docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -Atc \
+              "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = '$DB_NAME');" | tr -d '[:space:]')
+            if [ "$DB_EXISTS" != "t" ]; then
                 echo "Creating database $DB_NAME..."
-                docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" -c \
+                docker exec -i finance_bot_test_postgres_1 psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "postgres" -c \
                   "CREATE DATABASE \"$DB_NAME\";"
             fi
 
@@ -283,6 +285,7 @@ jobs:
               local val
               val=$(grep -E "^(export )?${key}=" .env | tail -n1 | sed -E "s/^(export )?${key}=//")
               val=$(echo "$val" | sed -E "s/^['\"](.*)['\"]$/\\1/")
+              val=$(echo "$val" | tr -d '\r' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
               echo "$val"
             }
             DB_USER="$(extract_env POSTGRES_USER)"
