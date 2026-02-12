@@ -195,11 +195,14 @@ jobs:
 
             # Ensure owner roles from dump exist (plain SQL dump may contain OWNER TO <role>)
             DUMP_ROLES=$(unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" \
+              | tr -d '\r' \
               | sed -nE 's/.*OWNER TO "?([^\";]+)"?;.*/\1/p' \
+              | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
               | sort -u)
             if [ -n "${DUMP_ROLES:-}" ]; then
                 echo "Ensuring dump roles exist..."
                 printf '%s\n' "$DUMP_ROLES" | while IFS= read -r ROLE_NAME; do
+                    ROLE_NAME=$(printf "%s" "$ROLE_NAME" | tr -d '\r' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
                     [ -z "$ROLE_NAME" ] && continue
                     ROLE_ESCAPED=$(printf "%s" "$ROLE_NAME" | sed "s/'/''/g")
                     docker exec -i finance_bot_test_postgres_1 psql -p "5432" -U "$DB_USER" -d "postgres" \
@@ -226,7 +229,10 @@ jobs:
             echo "Database cleared successfully."
 
             # Восстановление из SQL файла
-            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" | docker exec -i finance_bot_test_postgres_1 psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "$DB_NAME"; then
+            if ! unzip -p "$LATEST_BACKUP" "$SQL_FILE_IN_ZIP" \
+                | tr -d '\r' \
+                | grep -viE 'OWNER[[:space:]]+TO[[:space:]]' \
+                | docker exec -i finance_bot_test_postgres_1 psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "$DB_NAME"; then
                 echo "Error occurred during database restoration!"
                 exit 1
             fi
