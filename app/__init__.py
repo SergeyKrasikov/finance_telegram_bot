@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import (
     TOKEN,
@@ -22,6 +23,8 @@ from app.routers import (
     spend,
 )
 
+scheduler_instance: AsyncIOScheduler | None = None
+
 
 def setup_dispatcher(dp: Dispatcher) -> None:
     dp.include_router(commands.router)
@@ -34,15 +37,24 @@ def setup_dispatcher(dp: Dispatcher) -> None:
 
 
 async def on_startup(bot: Bot) -> None:
+    global scheduler_instance
     if AUTO_APPLY_DB_SCHEMA:
         await apply_db_schema_with_retry(
             max_attempts=DB_BOOTSTRAP_MAX_ATTEMPTS,
             retry_delay_sec=DB_BOOTSTRAP_RETRY_DELAY_SEC,
         )
         logging.info("DB schema and SQL functions applied on startup")
-    print("START")
-    scheduler = setup_scheduler(bot)
-    scheduler.start()
+    scheduler_instance = setup_scheduler(bot)
+    scheduler_instance.start()
+    logging.info("Scheduler started")
+
+
+async def on_shutdown(bot: Bot) -> None:
+    global scheduler_instance
+    if scheduler_instance and scheduler_instance.running:
+        scheduler_instance.shutdown(wait=False)
+        logging.info("Scheduler stopped")
+    scheduler_instance = None
 
 
 async def main() -> None:
@@ -51,6 +63,7 @@ async def main() -> None:
     dp = Dispatcher()
     setup_dispatcher(dp)
     dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 

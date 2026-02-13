@@ -41,11 +41,27 @@ async def monthly_task(bot) -> None:
 
 def setup_scheduler(bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: monthly_task(bot), "cron", **MONTHLY_REPORT_CRON)
     scheduler.add_job(
-        lambda: daily_task(bot),
+        monthly_task,
         "cron",
+        id="monthly_report",
+        replace_existing=True,
+        kwargs={"bot": bot},
+        **MONTHLY_REPORT_CRON,
+    )
+    scheduler.add_job(
+        daily_task,
+        "cron",
+        id="daily_report",
+        replace_existing=True,
+        kwargs={"bot": bot},
         hour=DAILY_REPORT_HOUR,
         minute=DAILY_REPORT_MINUTE,
+    )
+    logging.info(
+        "Scheduler configured: daily at %02d:%02d, monthly cron=%s",
+        DAILY_REPORT_HOUR,
+        DAILY_REPORT_MINUTE,
+        MONTHLY_REPORT_CRON,
     )
     return scheduler
