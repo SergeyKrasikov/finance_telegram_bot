@@ -1,4 +1,6 @@
 import logging
+import json
+from collections.abc import Iterable, Mapping
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.db.transactions import get_daily_transactions, monthly_summary
@@ -30,13 +32,35 @@ async def daily_task(bot) -> None:
 async def monthly_task(bot) -> None:
     try:
         result = await monthly_summary()
-        response = aggregate_monthly_rows(result)
+        response = aggregate_monthly_rows(_normalize_monthly_rows(result))
 
         for user_id, values_dict in response.items():
             message = build_monthly_message(values_dict, format_amount)
             await bot.send_message(user_id, message)
     except Exception:
         logging.error("Error while monthly task", exc_info=True)
+
+
+def _normalize_monthly_rows(
+    rows: Iterable[Mapping[str, object] | object],
+) -> list[Mapping[str, object]]:
+    """Handle SQL result shape from monthly(): [{get_remains: jsonb}] -> [{...}]."""
+    normalized: list[Mapping[str, object]] = []
+    for row in rows:
+        payload: object = row
+        if isinstance(row, Mapping):
+            payload = row.get("get_remains", row)
+
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+
+        if isinstance(payload, Mapping):
+            normalized.append(payload)
+
+    return normalized
 
 
 def setup_scheduler(bot) -> AsyncIOScheduler:

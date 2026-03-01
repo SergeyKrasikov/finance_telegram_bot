@@ -128,22 +128,26 @@ class MonthlyReportTaskTests(unittest.TestCase):
     def test_monthly_task_sends_messages_for_each_user(self) -> None:
         rows = [
             {
-                "user_id": 1,
-                "second_user_id": 2,
-                "семейный_взнос": 100,
-                "общие_категории": 50,
-                "investition": 10,
-                "month_earnings": 1000,
-                "month_spend": 300,
+                "get_remains": {
+                    "user_id": 1,
+                    "second_user_id": 2,
+                    "семейный_взнос": 100,
+                    "общие_категории": 50,
+                    "investition": 10,
+                    "month_earnings": 1000,
+                    "month_spend": 300,
+                }
             },
             {
-                "user_id": 2,
-                "second_user_id": 1,
-                "семейный_взнос": 80,
-                "общие_категории": 40,
-                "investition": 8,
-                "month_earnings": 800,
-                "month_spend": 200,
+                "get_remains": {
+                    "user_id": 2,
+                    "second_user_id": 1,
+                    "семейный_взнос": 80,
+                    "общие_категории": 40,
+                    "investition": 8,
+                    "month_earnings": 800,
+                    "month_spend": 200,
+                }
             },
         ]
         jobs = _load_jobs_with_rows(rows)
@@ -170,6 +174,27 @@ class MonthlyReportTaskTests(unittest.TestCase):
         asyncio.run(jobs.monthly_task(bot))
 
         self.assertEqual(bot.messages, [])
+
+    def test_monthly_task_accepts_json_string_payload(self) -> None:
+        jobs = _load_jobs_with_rows(
+            [
+                {
+                    "get_remains": (
+                        '{"user_id": 1, "second_user_id": 2, '
+                        '"семейный_взнос": 10, "общие_категории": 5, '
+                        '"investition": 1, "month_earnings": 11, "month_spend": 2}'
+                    )
+                }
+            ]
+        )
+        bot = _BotStub()
+
+        asyncio.run(jobs.monthly_task(bot))
+
+        self.assertEqual(len(bot.messages), 2)
+        message_by_user = dict(bot.messages)
+        self.assertIn("Всего пришло за месяц 11.00₽", message_by_user[1])
+        self.assertIn("На общие категории 5.00₽", message_by_user[2])
 
 
 if __name__ == "__main__":
