@@ -196,6 +196,43 @@ class MonthlyReportTaskTests(unittest.TestCase):
         self.assertIn("Всего пришло за месяц 11.00₽", message_by_user[1])
         self.assertIn("На общие категории 5.00₽", message_by_user[2])
 
+    def test_monthly_task_accepts_plain_mapping_rows(self) -> None:
+        jobs = _load_jobs_with_rows(
+            [
+                {
+                    "user_id": 943915310,
+                    "second_user_id": 249716305,
+                    "семейный_взнос": 120,
+                    "общие_категории": 30,
+                    "investition": 12,
+                    "month_earnings": 1500,
+                    "month_spend": 450,
+                }
+            ]
+        )
+        bot = _BotStub()
+
+        asyncio.run(jobs.monthly_task(bot))
+
+        self.assertEqual(
+            bot.messages[0][0],
+            943915310,
+            "Primary monthly recipient must receive the report",
+        )
+        self.assertEqual(
+            bot.messages[1][0],
+            249716305,
+            "Second user from the monthly payload must receive the report",
+        )
+        message_by_user = dict(bot.messages)
+        self.assertIn(
+            "Всего пришло за месяц 1 500.00₽", message_by_user[943915310]
+        )
+        self.assertIn("Всего потрачено за месяц 450.00₽", message_by_user[943915310])
+        self.assertIn("На семейный взнос 120.00₽", message_by_user[943915310])
+        self.assertIn("На общие категории 30.00₽", message_by_user[249716305])
+        self.assertIn("На инвестиции 12.00₽", message_by_user[249716305])
+
 
 if __name__ == "__main__":
     unittest.main()
