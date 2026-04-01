@@ -34,17 +34,11 @@ async def monthly_task(bot) -> None:
         result = await monthly_summary()
         normalized_rows = _normalize_monthly_rows(result)
         response = aggregate_monthly_rows(normalized_rows)
-        logging.info(
-            "Monthly summary normalized %d rows into %d reports",
-            len(normalized_rows),
-            len(response),
-        )
 
         for user_id, values_dict in response.items():
             message = build_monthly_message(values_dict, format_amount)
             try:
                 await bot.send_message(user_id, message)
-                logging.info("Monthly report sent to user %s", user_id)
             except Exception:
                 logging.error(
                     "Error while sending monthly report to user %s",
