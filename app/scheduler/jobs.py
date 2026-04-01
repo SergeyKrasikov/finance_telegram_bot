@@ -32,12 +32,19 @@ async def daily_task(bot) -> None:
 async def monthly_task(bot) -> None:
     try:
         result = await monthly_summary()
-        response = aggregate_monthly_rows(_normalize_monthly_rows(result))
+        normalized_rows = _normalize_monthly_rows(result)
+        response = aggregate_monthly_rows(normalized_rows)
+        logging.info(
+            "Monthly summary normalized %d rows into %d reports",
+            len(normalized_rows),
+            len(response),
+        )
 
         for user_id, values_dict in response.items():
             message = build_monthly_message(values_dict, format_amount)
             try:
                 await bot.send_message(user_id, message)
+                logging.info("Monthly report sent to user %s", user_id)
             except Exception:
                 logging.error(
                     "Error while sending monthly report to user %s",
@@ -55,8 +62,9 @@ def _normalize_monthly_rows(
     normalized: list[Mapping[str, object]] = []
     for row in rows:
         payload: object = row
-        if isinstance(row, Mapping):
-            payload = row.get("get_remains", row)
+        row_mapping = _to_mapping(row)
+        if row_mapping is not None:
+            payload = row_mapping.get("get_remains", row_mapping)
 
         if isinstance(payload, str):
             try:
@@ -64,10 +72,32 @@ def _normalize_monthly_rows(
             except json.JSONDecodeError:
                 continue
 
-        if isinstance(payload, Mapping):
-            normalized.append(payload)
+        payload_mapping = _to_mapping(payload)
+        if payload_mapping is not None:
+            normalized.append(payload_mapping)
 
     return normalized
+
+
+def _to_mapping(value: object) -> Mapping[str, object] | None:
+    if isinstance(value, Mapping):
+        return value
+
+    items = getattr(value, "items", None)
+    if callable(items):
+        try:
+            return dict(items())
+        except Exception:
+            return None
+
+    keys = getattr(value, "keys", None)
+    if callable(keys):
+        try:
+            return {key: value[key] for key in keys()}
+        except Exception:
+            return None
+
+    return None
 
 
 def setup_scheduler(bot) -> AsyncIOScheduler:
