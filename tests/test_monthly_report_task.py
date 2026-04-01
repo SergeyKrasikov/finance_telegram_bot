@@ -86,7 +86,7 @@ def _load_jobs_with_rows(rows):
     app_config_mod.MONTHLY_REPORT_CRON = {
         "day": 1,
         "hour": 6,
-        "minute": 45,
+        "minute": 0,
         "timezone": "UTC",
     }
 
