@@ -129,6 +129,20 @@ class _BotStub:
         self.messages.append((user_id, text))
 
 
+class _RecordLike:
+    def __init__(self, data):
+        self._data = data
+
+    def items(self):
+        return self._data.items()
+
+    def keys(self):
+        return self._data.keys()
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+
 class MonthlyReportTaskTests(unittest.TestCase):
     def test_monthly_task_sends_messages_for_each_user(self) -> None:
         rows = [
@@ -246,6 +260,37 @@ class MonthlyReportTaskTests(unittest.TestCase):
         self.assertIn("На семейный взнос 120.00₽", message_by_user[943915310])
         self.assertIn("На общие категории 14.00₽", message_by_user[249716305])
         self.assertIn("На инвестиции 6.00₽", message_by_user[249716305])
+
+    def test_monthly_task_accepts_record_like_rows(self) -> None:
+        jobs = _load_jobs_with_rows(
+            [
+                _RecordLike(
+                    {
+                        "get_remains": _RecordLike(
+                            {
+                                "user_id": 1,
+                                "second_user_id": 2,
+                                "семейный_взнос": 10,
+                                "общие_категории": 5,
+                                "investition": 1,
+                                "second_user_pay": 3,
+                                "investition_second": 2,
+                                "month_earnings": 11,
+                                "month_spend": 2,
+                            }
+                        )
+                    }
+                )
+            ]
+        )
+        bot = _BotStub()
+
+        asyncio.run(jobs.monthly_task(bot))
+
+        self.assertEqual(len(bot.messages), 2)
+        message_by_user = dict(bot.messages)
+        self.assertIn("Всего пришло за месяц 11.00₽", message_by_user[1])
+        self.assertIn("На общие категории 3.00₽", message_by_user[2])
 
 
 if __name__ == "__main__":
