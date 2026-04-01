@@ -48,6 +48,38 @@ class SchedulerSetupTests(unittest.TestCase):
         self.assertIn("daily_report", ids)
         self.assertIn("monthly_report", ids)
 
+    def test_monthly_job_allows_misfire_recovery(self) -> None:
+        add_job_calls = self._setup_scheduler_calls()
+        monthly_call = next(
+            call
+            for call in add_job_calls
+            if any(
+                kw.arg == "id"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value == "monthly_report"
+                for kw in call.keywords
+            )
+        )
+
+        self.assertTrue(
+            any(
+                kw.arg == "misfire_grace_time"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value == 86400
+                for kw in monthly_call.keywords
+            ),
+            "monthly_report must tolerate same-day startup delays",
+        )
+        self.assertTrue(
+            any(
+                kw.arg == "coalesce"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+                for kw in monthly_call.keywords
+            ),
+            "monthly_report should coalesce missed executions into one run",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,7 +36,14 @@ async def monthly_task(bot) -> None:
 
         for user_id, values_dict in response.items():
             message = build_monthly_message(values_dict, format_amount)
-            await bot.send_message(user_id, message)
+            try:
+                await bot.send_message(user_id, message)
+            except Exception:
+                logging.error(
+                    "Error while sending monthly report to user %s",
+                    user_id,
+                    exc_info=True,
+                )
     except Exception:
         logging.error("Error while monthly task", exc_info=True)
 
@@ -71,6 +78,8 @@ def setup_scheduler(bot) -> AsyncIOScheduler:
         id="monthly_report",
         replace_existing=True,
         kwargs={"bot": bot},
+        misfire_grace_time=86400,
+        coalesce=True,
         **MONTHLY_REPORT_CRON,
     )
     scheduler.add_job(

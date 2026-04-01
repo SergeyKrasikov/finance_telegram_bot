@@ -32,4 +32,4 @@ GROUP_PERSONAL = 15
 # Scheduler settings
 DAILY_REPORT_HOUR = 23
 DAILY_REPORT_MINUTE = 59
-MONTHLY_REPORT_CRON = {"month": "*"}
+MONTHLY_REPORT_CRON = {"day": 1, "hour": 6, "minute": 0, "timezone": "UTC"}
