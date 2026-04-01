@@ -83,7 +83,12 @@ def _load_jobs_with_rows(rows):
     app_config_mod = types.ModuleType("app.config")
     app_config_mod.DAILY_REPORT_HOUR = 23
     app_config_mod.DAILY_REPORT_MINUTE = 59
-    app_config_mod.MONTHLY_REPORT_CRON = {"month": "*"}
+    app_config_mod.MONTHLY_REPORT_CRON = {
+        "day": 1,
+        "hour": 6,
+        "minute": 0,
+        "timezone": "UTC",
+    }
 
     app_services_monthly_logic_mod = types.ModuleType("app.services.monthly_logic")
     app_services_monthly_logic_mod.aggregate_monthly_rows = (
@@ -134,6 +139,8 @@ class MonthlyReportTaskTests(unittest.TestCase):
                     "семейный_взнос": 100,
                     "общие_категории": 50,
                     "investition": 10,
+                    "second_user_pay": 7,
+                    "investition_second": 3,
                     "month_earnings": 1000,
                     "month_spend": 300,
                 }
@@ -145,6 +152,8 @@ class MonthlyReportTaskTests(unittest.TestCase):
                     "семейный_взнос": 80,
                     "общие_категории": 40,
                     "investition": 8,
+                    "second_user_pay": 9,
+                    "investition_second": 4,
                     "month_earnings": 800,
                     "month_spend": 200,
                 }
@@ -159,13 +168,13 @@ class MonthlyReportTaskTests(unittest.TestCase):
         message_by_user = dict(bot.messages)
         self.assertIn("Всего пришло за месяц 1 000.00₽", message_by_user[1])
         self.assertIn("Всего потрачено за месяц 300.00₽", message_by_user[1])
-        self.assertIn("На общие категории 90.00₽", message_by_user[1])
-        self.assertIn("На инвестиции 18.00₽", message_by_user[1])
+        self.assertIn("На общие категории 59.00₽", message_by_user[1])
+        self.assertIn("На инвестиции 14.00₽", message_by_user[1])
 
         self.assertIn("Всего пришло за месяц 800.00₽", message_by_user[2])
         self.assertIn("Всего потрачено за месяц 200.00₽", message_by_user[2])
-        self.assertIn("На общие категории 90.00₽", message_by_user[2])
-        self.assertIn("На инвестиции 18.00₽", message_by_user[2])
+        self.assertIn("На общие категории 47.00₽", message_by_user[2])
+        self.assertIn("На инвестиции 11.00₽", message_by_user[2])
 
     def test_monthly_task_with_empty_data_sends_nothing(self) -> None:
         jobs = _load_jobs_with_rows([])
@@ -182,7 +191,9 @@ class MonthlyReportTaskTests(unittest.TestCase):
                     "get_remains": (
                         '{"user_id": 1, "second_user_id": 2, '
                         '"семейный_взнос": 10, "общие_категории": 5, '
-                        '"investition": 1, "month_earnings": 11, "month_spend": 2}'
+                        '"investition": 1, "second_user_pay": 3, '
+                        '"investition_second": 2, "month_earnings": 11, '
+                        '"month_spend": 2}'
                     )
                 }
             ]
@@ -194,7 +205,8 @@ class MonthlyReportTaskTests(unittest.TestCase):
         self.assertEqual(len(bot.messages), 2)
         message_by_user = dict(bot.messages)
         self.assertIn("Всего пришло за месяц 11.00₽", message_by_user[1])
-        self.assertIn("На общие категории 5.00₽", message_by_user[2])
+        self.assertIn("На общие категории 3.00₽", message_by_user[2])
+        self.assertIn("На инвестиции 2.00₽", message_by_user[2])
 
     def test_monthly_task_accepts_plain_mapping_rows(self) -> None:
         jobs = _load_jobs_with_rows(
@@ -205,6 +217,8 @@ class MonthlyReportTaskTests(unittest.TestCase):
                     "семейный_взнос": 120,
                     "общие_категории": 30,
                     "investition": 12,
+                    "second_user_pay": 14,
+                    "investition_second": 6,
                     "month_earnings": 1500,
                     "month_spend": 450,
                 }
@@ -230,8 +244,8 @@ class MonthlyReportTaskTests(unittest.TestCase):
         )
         self.assertIn("Всего потрачено за месяц 450.00₽", message_by_user[943915310])
         self.assertIn("На семейный взнос 120.00₽", message_by_user[943915310])
-        self.assertIn("На общие категории 30.00₽", message_by_user[249716305])
-        self.assertIn("На инвестиции 12.00₽", message_by_user[249716305])
+        self.assertIn("На общие категории 14.00₽", message_by_user[249716305])
+        self.assertIn("На инвестиции 6.00₽", message_by_user[249716305])
 
 
 if __name__ == "__main__":

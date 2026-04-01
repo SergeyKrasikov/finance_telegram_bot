@@ -38,6 +38,8 @@ class MonthlyLogicTests(unittest.TestCase):
                 "семейный_взнос": 100,
                 "общие_категории": 50,
                 "investition": 10,
+                "second_user_pay": 7,
+                "investition_second": 3,
                 "month_earnings": 1000,
                 "month_spend": 300,
             },
@@ -47,6 +49,8 @@ class MonthlyLogicTests(unittest.TestCase):
                 "семейный_взнос": 80,
                 "общие_категории": 40,
                 "investition": 8,
+                "second_user_pay": 9,
+                "investition_second": 4,
                 "month_earnings": 800,
                 "month_spend": 200,
             },
@@ -55,14 +59,14 @@ class MonthlyLogicTests(unittest.TestCase):
         result = aggregate_monthly_rows(rows)
 
         self.assertEqual(result[1]["семейный_взнос"], 100)
-        self.assertEqual(result[1]["общие_категории"], 90)
-        self.assertEqual(result[1]["investition"], 18)
+        self.assertEqual(result[1]["общие_категории"], 59)
+        self.assertEqual(result[1]["investition"], 14)
         self.assertEqual(result[1]["month_earnings"], 1000)
         self.assertEqual(result[1]["month_spend"], 300)
 
         self.assertEqual(result[2]["семейный_взнос"], 80)
-        self.assertEqual(result[2]["общие_категории"], 90)
-        self.assertEqual(result[2]["investition"], 18)
+        self.assertEqual(result[2]["общие_категории"], 47)
+        self.assertEqual(result[2]["investition"], 11)
         self.assertEqual(result[2]["month_earnings"], 800)
         self.assertEqual(result[2]["month_spend"], 200)
 

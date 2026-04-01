@@ -28,14 +28,20 @@ def aggregate_monthly_rows(
             (
                 "user_id",
                 (
-                    "семейный_взнос",
-                    "общие_категории",
-                    "investition",
-                    "month_earnings",
-                    "month_spend",
+                    ("семейный_взнос", "семейный_взнос"),
+                    ("общие_категории", "общие_категории"),
+                    ("investition", "investition"),
+                    ("month_earnings", "month_earnings"),
+                    ("month_spend", "month_spend"),
                 ),
             ),
-            ("second_user_id", ("общие_категории", "investition")),
+            (
+                "second_user_id",
+                (
+                    ("общие_категории", "second_user_pay"),
+                    ("investition", "investition_second"),
+                ),
+            ),
         ):
             user_id_raw = row.get(user_key)
             if user_id_raw is None:
@@ -47,8 +53,8 @@ def aggregate_monthly_rows(
                     field: Decimal("0") for field in ALL_MONTHLY_FIELDS
                 }
 
-            for field in fields:
-                value = row.get(field, 0)
+            for field, source_field in fields:
+                value = row.get(source_field, 0)
                 response[user_id][field] += _to_decimal(value)
 
     return response
