@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Iterable, Mapping
 from decimal import Decimal
 
@@ -38,7 +40,6 @@ def aggregate_monthly_rows(
             (
                 "second_user_id",
                 (
-                    ("общие_категории", "second_user_pay"),
                     ("investition", "investition_second"),
                 ),
             ),

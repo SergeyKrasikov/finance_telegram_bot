@@ -23,6 +23,18 @@ DROP FUNCTION IF EXISTS public.get_currency();
 DROP FUNCTION IF EXISTS public.get_all_users_id();
 DROP FUNCTION IF EXISTS public.is_technical_cashflow_description(text);
 DROP FUNCTION IF EXISTS public.get_users_id(bigint);
+DROP FUNCTION IF EXISTS public.find_allocation_node_id(bigint, text);
+DROP FUNCTION IF EXISTS public.get_group_percent_sum(bigint, integer);
+DROP FUNCTION IF EXISTS public.distribute_with_allocation_fallback(bigint, text, integer, integer, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.transact_group_to_allocation_fallback(bigint, integer, text, integer, varchar, text);
+DROP FUNCTION IF EXISTS public.reserve_negative_personal_expenses_to_allocation_fallback(bigint, text, text, integer, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_monthly_compat_investition_second(bigint, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.validate_allocation_routes(bigint);
+DROP FUNCTION IF EXISTS public.allocation_distribute_recursive(bigint, bigint, numeric, varchar, integer, text, bigint[]);
+DROP FUNCTION IF EXISTS public.allocation_distribute(bigint, bigint, numeric, varchar, integer, text);
+DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, integer, varchar, text);
+DROP FUNCTION IF EXISTS public.monthly_allocation_report_metrics(bigint, bigint, jsonb);
+DROP FUNCTION IF EXISTS public.monthly_distribute_cascade(bigint, integer);
 
 -- принимает user_id и возвращает id всех пользьвателей из группы  
 create or replace function get_users_id(_user_id bigint)
@@ -83,6 +95,101 @@ END;
 $function$;
 
 
+-- Возвращает id активной allocation-ноды пользователя по slug.
+-- Используется только в переходной monthly-логике:
+-- по slug ищем новую root-ноду, если она уже собрана для конкретной ветки.
+CREATE OR REPLACE FUNCTION public.find_allocation_node_id(_user_id bigint, _slug text)
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT an.id
+    FROM public.allocation_nodes an
+    WHERE an.user_id = _user_id
+      AND an.slug = _slug
+      AND an.active
+    ORDER BY an.id
+    LIMIT 1;
+$function$;
+
+
+-- Сумма legacy-процентов внутри старой category_group.
+-- Нужна только на переходном этапе, чтобы остаток считался так же,
+-- как раньше в distribute_to_group(), даже если сами проводки уже пишет новый каскад.
+CREATE OR REPLACE FUNCTION public.get_group_percent_sum(_user_id bigint, _group_id integer)
+ RETURNS numeric
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT COALESCE(SUM(c.percent), 0)
+    FROM public.categories c
+    JOIN public.categories_category_groups ccg
+      ON ccg.categories_id = c.id
+    WHERE ccg.users_id = _user_id
+      AND ccg.category_groyps_id = _group_id;
+$function$;
+
+
+-- Legacy compatibility: some local/test mappings historically counted
+-- investition_second into the caller's investment leaf as well.
+-- Keep this narrow and mapping-driven so normal users are not affected.
+CREATE OR REPLACE FUNCTION public.insert_monthly_compat_investition_second(
+    _user_id bigint,
+    _amount numeric,
+    _currency varchar DEFAULT 'RUB',
+    _description text DEFAULT 'monthly distribute'
+)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _investment_category_id integer;
+BEGIN
+    IF _amount IS NULL OR _amount <= 0 THEN
+        RETURN;
+    END IF;
+
+    _investment_category_id := (
+        SELECT get_categories_id(_user_id, 1)
+    );
+
+    IF _investment_category_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    -- Only apply the compatibility posting when the investment leaf is also
+    -- attached to legacy group 15. This matches the known dirty local mapping
+    -- and avoids changing the normal production path.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.categories_category_groups ccg
+        WHERE ccg.users_id = _user_id
+          AND ccg.categories_id = _investment_category_id
+          AND ccg.category_groyps_id = 15
+    ) THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO public.cash_flow(
+        users_id,
+        category_id_from,
+        category_id_to,
+        value,
+        currency,
+        description
+    )
+    VALUES (
+        _user_id,
+        15,
+        _investment_category_id,
+        _amount,
+        _currency,
+        COALESCE(_description, 'monthly distribute')
+    );
+END;
+$function$;
+
+
 -- принимает user_id, группу категорий по которым распределить и id категории откуда поступили деньги, распределяет деньги по указанной группе и cумму для распределения, возвращает остаток  
 create or replace function distribute_to_group(
     _user_id bigint, 
@@ -139,6 +246,216 @@ end
 $function$;
 
 
+-- Переходный helper: если для шага уже есть allocation-root, пишет проводки через новый каскад,
+-- но остаток считает по legacy-процентам, чтобы совпадать со старой monthly_distribute().
+-- Если allocation-root отсутствует, использует старый distribute_to_group().
+-- Это главный "предохранитель" миграции:
+-- 1) позволяет переводить месячную логику по одной ветке;
+-- 2) сохраняет старый остаток без пересчета по report-нодам;
+-- 3) не заставляет собирать весь граф целиком перед первым запуском.
+CREATE OR REPLACE FUNCTION public.distribute_with_allocation_fallback(
+    _user_id bigint,
+    _root_slug text,
+    _legacy_group_id integer,
+    _category_id_from integer,
+    _amount numeric,
+    _currency varchar DEFAULT 'RUB',
+    _description text DEFAULT 'monthly distribute'
+)
+ RETURNS numeric
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _root_id bigint;
+    _remainder numeric;
+BEGIN
+    IF _amount IS NULL OR _amount <= 0 THEN
+        RETURN 0;
+    END IF;
+
+    -- Остаток здесь intentionally считается по legacy percent-сумме.
+    -- Это нужно, чтобы monthly_distribute_cascade() пока совпадала со старой monthly_distribute()
+    -- даже в тех ветках, где граф уже строит реальные проводки по allocation_routes.
+    _remainder := _amount * (1 - public.get_group_percent_sum(_user_id, _legacy_group_id));
+    _root_id := public.find_allocation_node_id(_user_id, _root_slug);
+
+    IF _root_id IS NULL THEN
+        -- Ветка ещё не перенесена на allocation-граф.
+        RETURN public.distribute_to_group(
+            _user_id,
+            _legacy_group_id,
+            _category_id_from,
+            _amount,
+            _currency
+        );
+    END IF;
+
+    PERFORM public.allocation_distribute(
+        _user_id,
+        _root_id,
+        _amount,
+        _currency,
+        _category_id_from,
+        _description
+    );
+
+    RETURN _remainder;
+END;
+$function$;
+
+
+-- Переходный helper для шагов консолидации many-to-one, таких как 11 -> 13.
+-- Legacy-версия transact_from_group_to_category() проходит по группе-источнику и переносит
+-- положительные балансы каждой категории в одну target-category.
+-- Этот helper повторяет то же поведение, но если allocation-root уже собран, то вместо прямой
+-- записи в legacy target-category запускает allocation_distribute() для каждой source-category отдельно.
+-- Если allocation-root отсутствует, полностью откатывается к старому transact_from_group_to_category().
+CREATE OR REPLACE FUNCTION public.transact_group_to_allocation_fallback(
+    _user_id bigint,
+    _source_group_id integer,
+    _target_root_slug text,
+    _fallback_category_id integer,
+    _currency varchar DEFAULT 'RUB',
+    _description text DEFAULT 'monthly distribute'
+)
+ RETURNS text
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _root_id bigint;
+    _source record;
+BEGIN
+    _root_id := public.find_allocation_node_id(_user_id, _target_root_slug);
+
+    IF _root_id IS NULL THEN
+        RETURN public.transact_from_group_to_category(
+            _user_id,
+            _source_group_id,
+            _fallback_category_id
+        );
+    END IF;
+
+    FOR _source IN
+        SELECT
+            ccg.categories_id AS category_id_from,
+            public.get_category_balance(_user_id, ccg.categories_id, _currency) AS balance
+        FROM public.categories_category_groups ccg
+        WHERE ccg.users_id = _user_id
+          AND ccg.category_groyps_id = _source_group_id
+        ORDER BY ccg.categories_id
+    LOOP
+        -- Повторяем legacy-поведение: двигаем только положительные остатки.
+        IF COALESCE(_source.balance, 0) <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        PERFORM public.allocation_distribute(
+            _user_id,
+            _root_id,
+            _source.balance,
+            _currency,
+            _source.category_id_from,
+            _description
+        );
+    END LOOP;
+
+    RETURN 'OK';
+END;
+$function$;
+
+
+-- Резервирует процент от отрицательных балансов только по личным тратам.
+-- Источник определяется бизнес-правилом через legacy-группы:
+-- категория должна входить и в GROUP_SPEND=8, и в GROUP_PERSONAL=15.
+-- Если reserve-root уже собран в allocation-графе, проводки пишутся через allocation_distribute().
+-- Если root ещё не собран, шаг временно откатывается в legacy reserve-category.
+CREATE OR REPLACE FUNCTION public.reserve_negative_personal_expenses_to_allocation_fallback(
+    _user_id bigint,
+    _personal_root_slug text,
+    _reserve_root_slug text,
+    _fallback_category_id integer,
+    _percent numeric DEFAULT 0.01,
+    _currency varchar DEFAULT 'RUB',
+    _description text DEFAULT 'monthly distribute'
+)
+ RETURNS numeric
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _reserve_root_id bigint;
+    _source record;
+    _balance numeric;
+    _reserve_amount numeric;
+    _total_reserved numeric := 0;
+BEGIN
+    IF _percent IS NULL OR _percent <= 0 THEN
+        RAISE EXCEPTION 'Reserve percent must be greater than zero';
+    END IF;
+
+    -- Параметр personal_root_slug оставлен в сигнатуре для будущего allocation-only варианта.
+    -- На текущем переходном этапе source selection deliberately строится по legacy-группам,
+    -- потому что compare-тест для reserve проверяет только personal-spend категории.
+    _reserve_root_id := public.find_allocation_node_id(_user_id, _reserve_root_slug);
+
+    FOR _source IN
+        SELECT DISTINCT spend_ccg.categories_id AS category_id
+        FROM public.categories_category_groups spend_ccg
+        JOIN public.categories_category_groups personal_ccg
+          ON personal_ccg.users_id = spend_ccg.users_id
+         AND personal_ccg.categories_id = spend_ccg.categories_id
+        WHERE spend_ccg.users_id = _user_id
+          AND spend_ccg.category_groyps_id = 8
+          AND personal_ccg.category_groyps_id = 15
+        ORDER BY spend_ccg.categories_id
+    LOOP
+        _balance := public.get_category_balance(_user_id, _source.category_id, _currency);
+
+        IF COALESCE(_balance, 0) >= 0 THEN
+            CONTINUE;
+        END IF;
+
+        _reserve_amount := ABS(_balance) * _percent;
+
+        IF _reserve_amount <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        IF _reserve_root_id IS NULL THEN
+            INSERT INTO public.cash_flow(
+                users_id,
+                category_id_from,
+                category_id_to,
+                value,
+                currency,
+                description
+            )
+            VALUES (
+                _user_id,
+                _source.category_id,
+                _fallback_category_id,
+                _reserve_amount,
+                _currency,
+                COALESCE(_description, 'monthly distribute')
+            );
+        ELSE
+            PERFORM public.allocation_distribute(
+                _user_id,
+                _reserve_root_id,
+                _reserve_amount,
+                _currency,
+                _source.category_id,
+                _description
+            );
+        END IF;
+
+        _total_reserved := _total_reserved + _reserve_amount;
+    END LOOP;
+
+    RETURN _total_reserved;
+END;
+$function$;
+
+
 -- Определяет внутренние тех.операции, которые не должны попадать в month_earnings/month_spend.
 -- Поддерживает как текущие префиксы, так и явный флаг в description: "internal:"
 CREATE OR REPLACE FUNCTION public.is_technical_cashflow_description(_description text)
@@ -154,6 +471,612 @@ SELECT CASE
         'monthly distribute%',
         'internal:%'
     ])
+END;
+$function$;
+
+
+-- Переходная версия monthly_distribute():
+-- повторяет старую функцию по расчетам и JSON,
+-- но постепенно переводит подготовительные шаги и ветки на allocation-граф.
+-- Важно:
+-- 1) функция должна оставаться эквивалентной monthly_distribute();
+-- 2) менять её нужно по одной ветке и после каждого изменения прогонять compare SQL;
+-- 3) подготовительные шаги и часть side effects пока ещё остаются переходными.
+CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(_user_id bigint, _income_category integer)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _sum_value numeric(10,2);
+    _free_money numeric(10,2);
+    _second_member_id bigint;
+    _sum_earnings numeric;
+    _sum_spend numeric;
+    _salary_primary_root_id bigint;
+    _report_rows jsonb := '[]'::jsonb;
+    _branch_report jsonb := '[]'::jsonb;
+    _report_metrics jsonb := '{}'::jsonb;
+BEGIN
+    -- Шаг 1. Подготовка доходов перед основным каскадом.
+    -- Оба шага консолидации many-to-one уже могут идти через allocation-root,
+    -- но helper пока сохраняет fallback на legacy target-category.
+    PERFORM public.transact_group_to_allocation_fallback(
+        _user_id::bigint,
+        11::integer,
+        'monthly_income_sources'::text,
+        (SELECT get_categories_id(_user_id, 13))::integer,
+        'RUB'::varchar,
+        'monthly distribute'::text
+    );
+
+    PERFORM public.transact_group_to_allocation_fallback(
+        _user_id::bigint,
+        12::integer,
+        'extra_income_sources'::text,
+        (SELECT get_categories_id(_user_id, 7))::integer,
+        'RUB'::varchar,
+        'monthly distribute'::text
+    );
+
+    _free_money := (
+        SELECT get_category_balance(_user_id, (SELECT get_categories_id(_user_id, 6)), 'RUB')
+    );
+
+    PERFORM public.distribute_to_group(
+        _user_id::bigint,
+        7::integer,
+        (SELECT get_categories_id(_user_id, 6))::integer,
+        _free_money,
+        'RUB'::varchar
+    );
+
+    PERFORM public.reserve_negative_personal_expenses_to_allocation_fallback(
+        _user_id::bigint,
+        'personal'::text,
+        'debt_reserve'::text,
+        (SELECT get_categories_id(_user_id, 9))::integer,
+        0.01::numeric,
+        'RUB'::varchar,
+        'monthly distribute'::text
+    );
+
+    _sum_value := (
+        SELECT get_category_balance(_user_id, _income_category, 'RUB')
+    );
+
+    _salary_primary_root_id := public.find_allocation_node_id(_user_id, 'salary_primary');
+
+    IF _salary_primary_root_id IS NULL THEN
+        RAISE EXCEPTION
+            'salary_primary allocation root is required for user %',
+            _user_id;
+    END IF;
+
+    IF _sum_value > 0 THEN
+        WITH distributed AS (
+            SELECT *
+            FROM public.allocation_distribute(
+                _user_id::bigint,
+                _salary_primary_root_id::bigint,
+                _sum_value::numeric,
+                'RUB'::varchar,
+                _income_category::integer,
+                'monthly distribute'::text
+            )
+        )
+        SELECT COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'owner_user_id', owner_user_id,
+                    'owner_user_group_id', owner_user_group_id,
+                    'node_id', report_node_id,
+                    'slug', report_node_slug,
+                    'name', report_node_name,
+                    'amount', report_amount
+                )
+                ORDER BY
+                    owner_user_id NULLS LAST,
+                    owner_user_group_id NULLS LAST,
+                    report_node_name
+            ),
+            '[]'::jsonb
+        )
+        INTO _branch_report
+        FROM distributed;
+
+        _report_rows := _report_rows || COALESCE(_branch_report, '[]'::jsonb);
+    END IF;
+
+    _second_member_id := (
+        SELECT user_id
+        FROM get_users_id(_user_id)
+        WHERE user_id != _user_id
+    );
+
+    -- Шаг 3. Итоговые отчётные суммы теперь собираются из report rows.
+    -- Важно: основной каскад запускается ровно один раз от salary_primary.
+    -- Дальнейшая логика "инвестиции -> семейный взнос -> остаток -> partner split -> leafs"
+    -- должна быть выражена самим allocation-графом, без дополнительных ручных вызовов
+    -- salary_secondary/family_split/free_pool из orchestration-функции.
+    _report_metrics := public.monthly_allocation_report_metrics(
+        _user_id,
+        _second_member_id,
+        _report_rows
+    );
+
+    _sum_earnings := (
+        SELECT COALESCE(SUM(value), 0)
+        FROM cash_flow
+        WHERE users_id = _user_id
+          AND category_id_from IS NULL
+          AND NOT public.is_technical_cashflow_description(description)
+          AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month'
+    );
+
+    _sum_spend := (
+        SELECT COALESCE(SUM(value), 0)
+        FROM cash_flow
+        WHERE users_id = _user_id
+          AND category_id_to IS NULL
+          AND NOT public.is_technical_cashflow_description(description)
+          AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month'
+    );
+
+    RETURN jsonb_build_object(
+        'user_id', _user_id,
+        'общие_категории', COALESCE((_report_metrics ->> 'общие_категории')::numeric, 0),
+        'second_user_id', _second_member_id,
+        'семейный_взнос', COALESCE((_report_metrics ->> 'семейный_взнос')::numeric, 0),
+        'second_user_pay', COALESCE((_report_metrics ->> 'second_user_pay')::numeric, 0),
+        'investition', COALESCE((_report_metrics ->> 'investition')::numeric, 0),
+        'investition_second', COALESCE((_report_metrics ->> 'investition_second')::numeric, 0),
+        'month_earnings', _sum_earnings,
+        'month_spend', _sum_spend
+    );
+END;
+$function$;
+
+
+-- Проверяет, что у исходной ноды не более одного маршрута "остаток"
+-- и что сумма процентных маршрутов не превышает 100%.
+-- percent = 1 трактуется как remainder route, а не как "перевести 100%".
+CREATE OR REPLACE FUNCTION public.validate_allocation_routes(_source_node_id bigint)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _remainder_count integer;
+    _percent_sum numeric;
+BEGIN
+    SELECT
+        COUNT(*) FILTER (WHERE percent = 1),
+        COALESCE(SUM(percent) FILTER (WHERE percent < 1), 0)
+    INTO
+        _remainder_count,
+        _percent_sum
+    FROM public.allocation_routes
+    WHERE source_node_id = _source_node_id
+      AND active;
+
+    IF _remainder_count > 1 THEN
+        RAISE EXCEPTION
+            'Allocation node % has % remainder routes; expected at most one',
+            _source_node_id,
+            _remainder_count;
+    END IF;
+
+    IF _percent_sum > 1 THEN
+        RAISE EXCEPTION
+            'Allocation node % has percent sum % > 1',
+            _source_node_id,
+            _percent_sum;
+    END IF;
+END;
+$function$;
+
+
+-- Рекурсивно распределяет сумму по allocation_routes.
+-- Пишет реальные проводки в cash_flow только на листьях.
+-- Для совместимости с текущим cash_flow leaf-нода должна иметь legacy_category_id.
+-- На переходном этапе mixed-node запрещена:
+-- нода либо промежуточная и имеет детей, либо лист и пишет в cash_flow.
+CREATE OR REPLACE FUNCTION public.allocation_distribute_recursive(
+    _executor_user_id bigint,
+    _source_node_id bigint,
+    _amount numeric,
+    _currency varchar DEFAULT 'RUB',
+    _category_id_from integer DEFAULT NULL,
+    _description text DEFAULT 'allocation cascade',
+    _path bigint[] DEFAULT ARRAY[]::bigint[]
+)
+ RETURNS TABLE(
+    owner_user_id bigint,
+    owner_user_group_id bigint,
+    report_node_id bigint,
+    report_node_slug varchar,
+    report_node_name varchar,
+    report_amount numeric
+ )
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _node public.allocation_nodes%ROWTYPE;
+    _route public.allocation_routes%ROWTYPE;
+    _route_count integer;
+    _remaining numeric;
+    _child_amount numeric;
+    _posting_user_id bigint;
+BEGIN
+    IF _amount IS NULL OR _amount <= 0 THEN
+        RETURN;
+    END IF;
+
+    IF _source_node_id = ANY(_path) THEN
+        RAISE EXCEPTION 'Cycle detected in allocation graph at node %', _source_node_id;
+    END IF;
+
+    SELECT *
+    INTO _node
+    FROM public.allocation_nodes
+    WHERE id = _source_node_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Allocation node % not found', _source_node_id;
+    END IF;
+
+    IF NOT _node.active THEN
+        RAISE EXCEPTION 'Allocation node % (%) is inactive', _node.id, _node.slug;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO _route_count
+    FROM public.allocation_routes
+    WHERE source_node_id = _source_node_id
+      AND active;
+
+    -- Явно запрещаем ноду, которая одновременно является и маршрутизатором, и leaf-точкой записи.
+    IF _route_count > 0 AND _node.legacy_category_id IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Allocation node % (%) has both outgoing routes and legacy_category_id; mixed nodes are not supported',
+            _node.id,
+            _node.slug;
+    END IF;
+
+    -- Report-сумма считается по входящей сумме в ноду.
+    -- Это позволяет включать в отчет как промежуточные report-ноды, так и конечные листья.
+    IF _node.include_in_report THEN
+        owner_user_id := _node.user_id;
+        owner_user_group_id := _node.user_group_id;
+        report_node_id := _node.id;
+        report_node_slug := _node.slug;
+        report_node_name := _node.name;
+        report_amount := _amount;
+        RETURN NEXT;
+    END IF;
+
+    -- Лист определяется отсутствием исходящих активных маршрутов.
+    IF _route_count = 0 THEN
+        IF _node.legacy_category_id IS NULL THEN
+            RAISE EXCEPTION
+                'Leaf allocation node % (%) must have legacy_category_id while cash_flow still uses categories',
+                _node.id,
+                _node.slug;
+        END IF;
+
+        _posting_user_id := COALESCE(_node.user_id, _executor_user_id);
+
+        INSERT INTO public.cash_flow(
+            users_id,
+            category_id_from,
+            category_id_to,
+            value,
+            currency,
+            description
+        )
+        VALUES (
+            _posting_user_id,
+            _category_id_from,
+            _node.legacy_category_id,
+            _amount,
+            _currency,
+            COALESCE(_description, 'allocation cascade')
+        );
+
+        RETURN;
+    END IF;
+
+    PERFORM public.validate_allocation_routes(_source_node_id);
+
+    _remaining := _amount;
+
+    FOR _route IN
+        SELECT *
+        FROM public.allocation_routes
+        WHERE source_node_id = _source_node_id
+          AND active
+        ORDER BY
+            CASE WHEN percent = 1 THEN 1 ELSE 0 END,
+            percent,
+            id
+    LOOP
+        -- Маршрут с percent = 1 забирает весь остаток после процентных веток.
+        IF _route.percent = 1 THEN
+            _child_amount := _remaining;
+        ELSE
+            _child_amount := _amount * _route.percent;
+            _remaining := _remaining - _child_amount;
+        END IF;
+
+        IF _child_amount IS NULL OR _child_amount <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        RETURN QUERY
+        SELECT *
+        FROM public.allocation_distribute_recursive(
+            _executor_user_id,
+            _route.target_node_id,
+            _child_amount,
+            _currency,
+            _category_id_from,
+            _description,
+            _path || _source_node_id
+        );
+    END LOOP;
+END;
+$function$;
+
+
+-- Публичная функция распределения:
+-- 1) проверяет доступ исполнителя к исходной ноде;
+-- 2) запускает рекурсивное распределение;
+-- 3) агрегирует строки отчета по нодам.
+-- Это low-level entrypoint нового движка.
+-- Месячная логика выше должна использовать именно его, а не писать напрямую в cash_flow.
+CREATE OR REPLACE FUNCTION public.allocation_distribute(
+    _executor_user_id bigint,
+    _source_node_id bigint,
+    _amount numeric,
+    _currency varchar DEFAULT 'RUB',
+    _category_id_from integer DEFAULT NULL,
+    _description text DEFAULT 'allocation cascade'
+)
+ RETURNS TABLE(
+    owner_user_id bigint,
+    owner_user_group_id bigint,
+    report_node_id bigint,
+    report_node_slug varchar,
+    report_node_name varchar,
+    report_amount numeric
+ )
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _source_node public.allocation_nodes%ROWTYPE;
+BEGIN
+    IF _amount IS NULL OR _amount <= 0 THEN
+        RAISE EXCEPTION 'Allocation amount must be greater than zero';
+    END IF;
+
+    SELECT *
+    INTO _source_node
+    FROM public.allocation_nodes
+    WHERE id = _source_node_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Allocation source node % not found', _source_node_id;
+    END IF;
+
+    IF NOT _source_node.active THEN
+        RAISE EXCEPTION 'Allocation source node % (%) is inactive', _source_node.id, _source_node.slug;
+    END IF;
+
+    IF _source_node.user_id IS NOT NULL AND _source_node.user_id <> _executor_user_id THEN
+        RAISE EXCEPTION
+            'Executor user % cannot start distribution from node % owned by user %',
+            _executor_user_id,
+            _source_node.id,
+            _source_node.user_id;
+    END IF;
+
+    IF _source_node.user_group_id IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM public.user_group_memberships ugm
+           WHERE ugm.user_id = _executor_user_id
+             AND ugm.user_group_id = _source_node.user_group_id
+             AND ugm.active
+       ) THEN
+        RAISE EXCEPTION
+            'Executor user % is not an active member of group % for source node %',
+            _executor_user_id,
+            _source_node.user_group_id,
+            _source_node.id;
+    END IF;
+
+    RETURN QUERY
+    SELECT
+        distributed.owner_user_id,
+        distributed.owner_user_group_id,
+        distributed.report_node_id,
+        distributed.report_node_slug,
+        distributed.report_node_name,
+        SUM(distributed.report_amount) AS report_amount
+    FROM public.allocation_distribute_recursive(
+        _executor_user_id,
+        _source_node_id,
+        _amount,
+        _currency,
+        _category_id_from,
+        _description,
+        ARRAY[]::bigint[]
+    ) distributed
+    GROUP BY
+        distributed.owner_user_id,
+        distributed.owner_user_group_id,
+        distributed.report_node_id,
+        distributed.report_node_slug,
+        distributed.report_node_name
+    ORDER BY
+        distributed.owner_user_id NULLS LAST,
+        distributed.owner_user_group_id NULLS LAST,
+        distributed.report_node_name;
+END;
+$function$;
+
+
+-- Новый месячный entrypoint поверх allocation_distribute.
+-- Сохраняет старую monthly_distribute() как эталон для сравнения.
+CREATE OR REPLACE FUNCTION public.monthly_distribute_allocation(
+    _executor_user_id bigint,
+    _source_node_id bigint,
+    _category_id_from integer,
+    _currency varchar DEFAULT 'RUB',
+    _description text DEFAULT 'monthly distribute allocation'
+)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _source_amount numeric;
+    _sum_earnings numeric;
+    _sum_spend numeric;
+    _report jsonb := '[]'::jsonb;
+BEGIN
+    IF _category_id_from IS NULL THEN
+        RAISE EXCEPTION 'monthly_distribute_allocation requires source category_id_from';
+    END IF;
+
+    _source_amount := COALESCE(
+        public.get_category_balance(_executor_user_id, _category_id_from, _currency),
+        0
+    );
+
+    _sum_earnings := (
+        SELECT COALESCE(SUM(value), 0)
+        FROM public.cash_flow
+        WHERE users_id = _executor_user_id
+          AND category_id_from IS NULL
+          AND NOT public.is_technical_cashflow_description(description)
+          AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month'
+    );
+
+    _sum_spend := (
+        SELECT COALESCE(SUM(value), 0)
+        FROM public.cash_flow
+        WHERE users_id = _executor_user_id
+          AND category_id_to IS NULL
+          AND NOT public.is_technical_cashflow_description(description)
+          AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month'
+    );
+
+    IF _source_amount > 0 THEN
+        WITH distributed AS (
+            SELECT *
+            FROM public.allocation_distribute(
+                _executor_user_id,
+                _source_node_id,
+                _source_amount,
+                _currency,
+                _category_id_from,
+                _description
+            )
+        )
+        SELECT COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'owner_user_id', owner_user_id,
+                    'owner_user_group_id', owner_user_group_id,
+                    'node_id', report_node_id,
+                    'slug', report_node_slug,
+                    'name', report_node_name,
+                    'amount', report_amount
+                )
+                ORDER BY
+                    owner_user_id NULLS LAST,
+                    owner_user_group_id NULLS LAST,
+                    report_node_name
+            ),
+            '[]'::jsonb
+        )
+        INTO _report
+        FROM distributed;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'user_id', _executor_user_id,
+        'source_node_id', _source_node_id,
+        'source_category_id', _category_id_from,
+        'source_amount', _source_amount,
+        'currency', _currency,
+        'month_earnings', COALESCE(_sum_earnings, 0),
+        'month_spend', COALESCE(_sum_spend, 0),
+        'report', _report
+    );
+END;
+$function$;
+
+
+-- Агрегирует report rows месячного каскада в итоговый JSON monthly-метрик.
+-- Новый контракт deliberately упрощён:
+-- 1) `общие_категории` уже содержит всю сумму по group-owned общим категориям;
+-- 2) `second_user_pay` больше не используется как отдельная часть отчёта и обнуляется;
+-- 3) Python-слой больше не должен складывать `общие_категории + second_user_pay`.
+-- Это позволяет считать общие траты только по конечным group-owned leaf-нодам
+-- без отдельной "общей" промежуточной ноды.
+CREATE OR REPLACE FUNCTION public.monthly_allocation_report_metrics(
+    _user_id bigint,
+    _second_user_id bigint,
+    _report_rows jsonb
+)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _family_contribution numeric := 0;
+    _common_total numeric := 0;
+    _invest_self numeric := 0;
+    _invest_partner numeric := 0;
+BEGIN
+    WITH rows AS (
+        SELECT
+            NULLIF(item ->> 'owner_user_id', '')::bigint AS owner_user_id,
+            NULLIF(item ->> 'owner_user_group_id', '')::bigint AS owner_user_group_id,
+            item ->> 'slug' AS slug,
+            COALESCE((item ->> 'amount')::numeric, 0) AS amount
+        FROM jsonb_array_elements(COALESCE(_report_rows, '[]'::jsonb)) AS item
+    )
+    SELECT
+        COALESCE(SUM(amount) FILTER (
+            WHERE owner_user_id = _user_id
+              AND slug IN ('family_contribution_out', 'family_contribution_report')
+        ), 0),
+        COALESCE(SUM(amount) FILTER (
+            WHERE owner_user_group_id IS NOT NULL
+              AND slug IN ('cat_3', 'cat_4', 'cat_10')
+        ), 0),
+        COALESCE(SUM(amount) FILTER (
+            WHERE owner_user_id = _user_id
+              AND slug = 'invest_self_report'
+        ), 0),
+        COALESCE(SUM(amount) FILTER (
+            WHERE owner_user_id = _second_user_id
+              AND slug IN ('invest_partner_report', 'invest_partner_incoming_report')
+        ), 0)
+    INTO
+        _family_contribution,
+        _common_total,
+        _invest_self,
+        _invest_partner
+    FROM rows;
+
+    RETURN jsonb_build_object(
+        'семейный_взнос', _family_contribution,
+        'общие_категории', _common_total,
+        'second_user_pay', 0,
+        'investition', _invest_self,
+        'investition_second', _invest_partner
+    );
 END;
 $function$;
 

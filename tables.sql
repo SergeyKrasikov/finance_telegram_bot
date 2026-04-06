@@ -3,10 +3,34 @@ id bigint primary key,
 nickname varchar(10)
 );
 
+alter table public.users
+    add column if not exists created_at timestamptz not null default now();
+
+alter table public.users
+    add column if not exists active boolean not null default true;
+
 create table if not exists users_groups(
 id serial primary key,
 users_id bigint references users(id),
 users_groups int);
+
+create table if not exists public.user_groups (
+id bigserial primary key,
+slug varchar(100) unique,
+"name" varchar(100) not null,
+description text,
+created_at timestamptz not null default now(),
+active boolean not null default true
+);
+
+create table if not exists public.user_group_memberships (
+id bigserial primary key,
+user_id bigint not null references users(id),
+user_group_id bigint not null references public.user_groups(id),
+joined_at timestamptz not null default now(),
+active boolean not null default true,
+unique(user_id, user_group_id)
+);
 
 
 
@@ -44,6 +68,36 @@ create table if not exists public.exchange_rates (
 "datetime" timestamp,
 currency varchar(16),
 rate numeric(20,10));
+
+create table if not exists public.allocation_nodes (
+id bigserial primary key,
+user_id bigint references users(id),
+user_group_id bigint references public.user_groups(id),
+slug varchar(100) not null,
+"name" varchar(100) not null,
+description text,
+node_kind varchar(16) not null,
+-- Compatibility bridge while cash_flow still references legacy categories.
+legacy_category_id int references categories(id),
+visible boolean not null default true,
+include_in_report boolean not null default false,
+active boolean not null default true,
+constraint allocation_nodes_owner_check
+    check ((user_id is not null) <> (user_group_id is not null)),
+constraint allocation_nodes_node_kind_check
+    check (node_kind in ('technical', 'income', 'expense', 'both', 'neutral', 'storage'))
+);
+
+create table if not exists public.allocation_routes (
+id bigserial primary key,
+source_node_id bigint not null references public.allocation_nodes(id) on delete cascade,
+target_node_id bigint not null references public.allocation_nodes(id) on delete cascade,
+percent numeric(10,6) not null,
+description text,
+active boolean not null default true,
+constraint allocation_routes_percent_check
+    check (percent > 0 and percent <= 1)
+);
 
 -- Compatibility upgrade for existing databases with varchar(3) currency columns
 DO $$
@@ -95,3 +149,13 @@ CREATE INDEX IF NOT EXISTS idx_cash_flow_user_category_from ON cash_flow (users_
 CREATE INDEX IF NOT EXISTS idx_cash_flow_income_monthly ON cash_flow (users_id, datetime) WHERE category_id_from IS NULL;
 CREATE INDEX IF NOT EXISTS idx_cash_flow_spend_monthly ON cash_flow (users_id, datetime) WHERE category_id_to IS NULL;
 CREATE INDEX IF NOT EXISTS idx_ccg_user_category ON categories_category_groups (users_id, categories_id);
+CREATE INDEX IF NOT EXISTS idx_user_group_memberships_user ON public.user_group_memberships (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_group_memberships_group ON public.user_group_memberships (user_group_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_nodes_user ON public.allocation_nodes (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_allocation_nodes_group ON public.allocation_nodes (user_group_id) WHERE user_group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_allocation_nodes_legacy_category ON public.allocation_nodes (legacy_category_id) WHERE legacy_category_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_nodes_user_slug ON public.allocation_nodes (user_id, slug) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_nodes_group_slug ON public.allocation_nodes (user_group_id, slug) WHERE user_group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_allocation_routes_source ON public.allocation_routes (source_node_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_routes_target ON public.allocation_routes (target_node_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_routes_source_target ON public.allocation_routes (source_node_id, target_node_id);
