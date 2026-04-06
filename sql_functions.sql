@@ -1435,9 +1435,19 @@ CREATE OR REPLACE FUNCTION public.monthly()
 AS $function$
 BEGIN
 return  query
-		(SELECT monthly_distribute_cascade(943915310, 37)
-		 UNION ALL
-		 SELECT monthly_distribute_cascade(249716305, 16)) ;
+		(
+            SELECT CASE
+                WHEN public.find_allocation_node_id(943915310, 'salary_primary') IS NOT NULL
+                    THEN public.monthly_distribute_cascade(943915310, 37)
+                ELSE public.monthly_distribute(943915310, 37)
+            END
+         UNION ALL
+            SELECT CASE
+                WHEN public.find_allocation_node_id(249716305, 'salary_primary') IS NOT NULL
+                    THEN public.monthly_distribute_cascade(249716305, 16)
+                ELSE public.monthly_distribute(249716305, 16)
+            END
+        ) ;
 end
 $function$
 ;  
