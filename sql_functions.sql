@@ -1342,28 +1342,10 @@ CREATE OR REPLACE FUNCTION public.monthly()
  LANGUAGE plpgsql
 AS $function$
 BEGIN
-return  query
-		(
-            SELECT CASE
-                WHEN public.find_allocation_node_id(943915310, 'monthly_income_sources') IS NOT NULL
-                 AND public.find_allocation_node_id(943915310, 'extra_income_sources') IS NOT NULL
-                 AND public.find_allocation_node_id(943915310, 'free_to_gifts') IS NOT NULL
-                 AND public.find_allocation_node_id(943915310, 'debt_reserve') IS NOT NULL
-                 AND public.find_allocation_node_id(943915310, 'salary_primary') IS NOT NULL
-                    THEN public.monthly_distribute_cascade(943915310, 37)
-                ELSE public.monthly_distribute(943915310, 37)
-            END
-         UNION ALL
-            SELECT CASE
-                WHEN public.find_allocation_node_id(249716305, 'monthly_income_sources') IS NOT NULL
-                 AND public.find_allocation_node_id(249716305, 'extra_income_sources') IS NOT NULL
-                 AND public.find_allocation_node_id(249716305, 'free_to_gifts') IS NOT NULL
-                 AND public.find_allocation_node_id(249716305, 'debt_reserve') IS NOT NULL
-                 AND public.find_allocation_node_id(249716305, 'salary_primary') IS NOT NULL
-                    THEN public.monthly_distribute_cascade(249716305, 16)
-                ELSE public.monthly_distribute(249716305, 16)
-            END
-        ) ;
+    RETURN QUERY
+        SELECT public.monthly_distribute_cascade(943915310, 37)
+        UNION ALL
+        SELECT public.monthly_distribute_cascade(249716305, 16);
 end
 $function$
 ;  

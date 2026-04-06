@@ -317,13 +317,12 @@ graph TD
 
 #### Ограничения текущей реализации
 
-- `monthly()` использует cascade только если для пользователя существуют roots:
+- `monthly()` теперь всегда использует `monthly_distribute_cascade()`, поэтому перед запуском в БД должны существовать roots:
   - `monthly_income_sources`
   - `extra_income_sources`
   - `free_to_gifts`
   - `debt_reserve`
   - `salary_primary`
-- Если хотя бы одного root нет, `monthly()` откатывается на legacy `monthly_distribute(...)`.
 - Пока тестируем миграцию на restored legacy data, seed для single-target roots (`monthly_income_sources`, `extra_income_sources`, `debt_reserve`, `invest_*_report`) использует явные канонические leaf-категории для пользователей `249716305` и `943915310`.
   Это защищает граф от грязных legacy group mappings вроде попадания `cat_15` в investment group.
 
