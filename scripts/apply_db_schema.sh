@@ -13,6 +13,7 @@ PROJECT_DIR="$4"
 
 TABLES_FILE="$PROJECT_DIR/tables.sql"
 FUNCTIONS_FILE="$PROJECT_DIR/sql_functions.sql"
+MONTHLY_ALLOCATION_SEED_FILE="$PROJECT_DIR/scripts/seed_monthly_allocation_graph.sql"
 
 if [ ! -f "$TABLES_FILE" ]; then
   echo "tables.sql file not found at $TABLES_FILE"
@@ -32,4 +33,10 @@ echo "Applying sql_functions.sql..."
 docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "$DB_NAME" < "$FUNCTIONS_FILE"
 echo "sql_functions.sql applied successfully."
 
-echo "Database schema and functions applied successfully."
+if [ -f "$MONTHLY_ALLOCATION_SEED_FILE" ]; then
+  echo "Applying monthly allocation seed..."
+  docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -p "5432" -U "$DB_USER" -d "$DB_NAME" < "$MONTHLY_ALLOCATION_SEED_FILE"
+  echo "Monthly allocation seed applied successfully."
+fi
+
+echo "Database schema, functions, and seeds applied successfully."

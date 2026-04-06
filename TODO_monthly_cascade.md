@@ -18,12 +18,35 @@
   - `find_allocation_node_id(...)`
   - `get_group_percent_sum(...)`
   - `distribute_with_allocation_fallback(...)`
-- `transact_group_to_allocation_fallback(...)` для шагов консолидации many-to-one.
-- `reserve_negative_personal_expenses_to_allocation_fallback(...)` для reserve-шага по личным тратам.
 - Каскадные шаги групп `1`, `2`, `3`, `6` в `monthly_distribute_cascade()` уже идут через allocation-граф.
-- Подготовительный шаг `11 -> 13` уже может идти через allocation-root `monthly_income_sources`.
-- Подготовительный шаг `12 -> 7` уже может идти через allocation-root `extra_income_sources`.
+- Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `monthly_distribute_cascade()` и требуют готовые allocation roots.
 - Старые функции и legacy-группы не удалены.
+
+## Текущий граф
+
+Актуальная схема описана подробно в `README.md`, секция `Monthly Allocation Graph`.
+
+Коротко:
+- prep roots:
+  - `monthly_income_sources`
+  - `extra_income_sources`
+  - `debt_reserve`
+- main roots:
+  - `salary_primary`
+  - `family_contribution_in`
+  - `partner_contribution_split`
+  - `self_distribution`
+  - `partner_distribution`
+- report nodes:
+  - `invest_self_report`
+  - `family_contribution_out`
+  - `invest_partner_report`
+- shared leaves:
+  - `group 4`, владельцем является `user_group monthly_pair_249716305_943915310`
+- user-owned leaves:
+  - `group 1`, `2`, `3`, `6`, `7`, `9`, `13`
+- единственный оставшийся legacy-step внутри `monthly_distribute_cascade()`:
+  - `free(category from group 6) -> group 7` через `distribute_to_group(...)`
 
 ## Инварианты до полного переключения
 
@@ -38,29 +61,29 @@
 ## Порядок безопасной миграции
 
 1. Ветка `salary_primary`
-- Проверить, что все leaf/report-ноды ветки существуют.
-- Перевести расчёт и маршруты только этой ветки на новые `allocation_routes`.
+- Проверить, что root существует и маршруты до `invest_self_report`, `family_contribution_out` и `self_distribution` корректны.
 - Прогнать compare SQL.
 
-2. Ветка `salary_secondary`
-- Отдельно проверить report-ноды общих категорий до слияния.
+2. Ветка `family_contribution_out -> family_contribution_in`
+- Отдельно проверить межпользовательский сценарий.
 - Прогнать compare SQL.
 
-3. Ветка `family_split`
-- Проверить межпользовательский сценарий.
+3. Ветка `partner_contribution_split`
+- Проверить split входящего семейного взноса на `invest_partner_report` и `partner_distribution`.
 - Прогнать compare SQL.
 
-4. Ветка `free_pool`
-- Статус: переведена на прямой `allocation_distribute(...)` без fallback.
+4. Ветки `self_distribution` и `partner_distribution`
+- Проверить leaf/report-ноды личных и общих категорий.
+- Проверить remainder route в free-category.
 - Прогнать compare SQL.
 
 5. Подготовительные шаги до каскада
 - `11 -> 13`
-  Статус: переведён через `transact_group_to_allocation_fallback(...)`, но всё ещё имеет legacy fallback.
+  Статус: allocation-only, logic inlined в `monthly_distribute_cascade()`.
 - `12 -> 7`
-  Статус: переведён через `transact_group_to_allocation_fallback(...)`, но всё ещё имеет legacy fallback.
+  Статус: allocation-only, logic inlined в `monthly_distribute_cascade()`.
 - 1% с должников в резерв
-  Статус: вынесен в `reserve_negative_personal_expenses_to_allocation_fallback(...)`.
+  Статус: allocation-only, logic inlined в `monthly_distribute_cascade()`.
 - После каждого изменения прогонять compare SQL.
 
 6. Отчёт
@@ -98,7 +121,8 @@
 - В monthly-path больше нет переходных fallback-вызовов:
   - `distribute_with_allocation_fallback(...)`
   - `transact_group_to_allocation_fallback(...)`
-- Все шаги месячного сценария используют только allocation-граф или allocation-only helper'ы.
+- Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve встроены прямо в `monthly_distribute_cascade()`.
+- Допустимо оставить только legacy-вызов `distribute_to_group(...)` для текущего шага group `7`, пока для него не собрана отдельная allocation-ветка.
 - Если нужной root-ноды нет, функция падает явно, а не уходит в legacy-ветку.
 
 ### 2. Собраны все monthly root-ноды
@@ -107,9 +131,13 @@
   - `monthly_income_sources`
   - `extra_income_sources`
   - `salary_primary`
-  - `salary_secondary`
-  - `family_split`
-  - `free_pool`
+  - `self_distribution`
+  - `family_contribution_out`
+  - `family_contribution_in`
+  - `partner_contribution_split`
+  - `partner_distribution`
+  - `invest_self_report`
+  - `invest_partner_report`
   - `debt_reserve` если reserve остаётся частью нового графа
 - Для этих нод проверены:
   - active routes

@@ -492,31 +492,80 @@ DECLARE
     _second_member_id bigint;
     _sum_earnings numeric;
     _sum_spend numeric;
+    _monthly_income_root_id bigint;
+    _extra_income_root_id bigint;
+    _reserve_root_id bigint;
     _salary_primary_root_id bigint;
+    _source record;
+    _balance numeric;
+    _reserve_amount numeric;
     _report_rows jsonb := '[]'::jsonb;
     _branch_report jsonb := '[]'::jsonb;
     _report_metrics jsonb := '{}'::jsonb;
 BEGIN
-    -- Шаг 1. Подготовка доходов перед основным каскадом.
-    -- Оба шага консолидации many-to-one уже могут идти через allocation-root,
-    -- но helper пока сохраняет fallback на legacy target-category.
-    PERFORM public.transact_group_to_allocation_fallback(
-        _user_id::bigint,
-        11::integer,
-        'monthly_income_sources'::text,
-        (SELECT get_categories_id(_user_id, 13))::integer,
-        'RUB'::varchar,
-        'monthly distribute'::text
-    );
+    -- Шаг 1. Allocation-only подготовка monthly incomes (group 11 -> monthly_income_sources).
+    _monthly_income_root_id := public.find_allocation_node_id(_user_id, 'monthly_income_sources');
 
-    PERFORM public.transact_group_to_allocation_fallback(
-        _user_id::bigint,
-        12::integer,
-        'extra_income_sources'::text,
-        (SELECT get_categories_id(_user_id, 7))::integer,
-        'RUB'::varchar,
-        'monthly distribute'::text
-    );
+    IF _monthly_income_root_id IS NULL THEN
+        RAISE EXCEPTION
+            'monthly_income_sources allocation root is required for user %',
+            _user_id;
+    END IF;
+
+    FOR _source IN
+        SELECT
+            ccg.categories_id AS category_id_from,
+            public.get_category_balance(_user_id, ccg.categories_id, 'RUB') AS balance
+        FROM public.categories_category_groups ccg
+        WHERE ccg.users_id = _user_id
+          AND ccg.category_groyps_id = 11
+        ORDER BY ccg.categories_id
+    LOOP
+        IF COALESCE(_source.balance, 0) <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        PERFORM public.allocation_distribute(
+            _user_id::bigint,
+            _monthly_income_root_id::bigint,
+            _source.balance::numeric,
+            'RUB'::varchar,
+            _source.category_id_from::integer,
+            'monthly distribute'::text
+        );
+    END LOOP;
+
+    -- Шаг 2. Allocation-only подготовка extra incomes (group 12 -> extra_income_sources).
+    _extra_income_root_id := public.find_allocation_node_id(_user_id, 'extra_income_sources');
+
+    IF _extra_income_root_id IS NULL THEN
+        RAISE EXCEPTION
+            'extra_income_sources allocation root is required for user %',
+            _user_id;
+    END IF;
+
+    FOR _source IN
+        SELECT
+            ccg.categories_id AS category_id_from,
+            public.get_category_balance(_user_id, ccg.categories_id, 'RUB') AS balance
+        FROM public.categories_category_groups ccg
+        WHERE ccg.users_id = _user_id
+          AND ccg.category_groyps_id = 12
+        ORDER BY ccg.categories_id
+    LOOP
+        IF COALESCE(_source.balance, 0) <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        PERFORM public.allocation_distribute(
+            _user_id::bigint,
+            _extra_income_root_id::bigint,
+            _source.balance::numeric,
+            'RUB'::varchar,
+            _source.category_id_from::integer,
+            'monthly distribute'::text
+        );
+    END LOOP;
 
     _free_money := (
         SELECT get_category_balance(_user_id, (SELECT get_categories_id(_user_id, 6)), 'RUB')
@@ -530,15 +579,47 @@ BEGIN
         'RUB'::varchar
     );
 
-    PERFORM public.reserve_negative_personal_expenses_to_allocation_fallback(
-        _user_id::bigint,
-        'personal'::text,
-        'debt_reserve'::text,
-        (SELECT get_categories_id(_user_id, 9))::integer,
-        0.01::numeric,
-        'RUB'::varchar,
-        'monthly distribute'::text
-    );
+    -- Шаг 3. Allocation-only reserve для отрицательных personal-spend категорий.
+    _reserve_root_id := public.find_allocation_node_id(_user_id, 'debt_reserve');
+
+    IF _reserve_root_id IS NULL THEN
+        RAISE EXCEPTION
+            'debt_reserve allocation root is required for user %',
+            _user_id;
+    END IF;
+
+    FOR _source IN
+        SELECT DISTINCT spend_ccg.categories_id AS category_id
+        FROM public.categories_category_groups spend_ccg
+        JOIN public.categories_category_groups personal_ccg
+          ON personal_ccg.users_id = spend_ccg.users_id
+         AND personal_ccg.categories_id = spend_ccg.categories_id
+        WHERE spend_ccg.users_id = _user_id
+          AND spend_ccg.category_groyps_id = 8
+          AND personal_ccg.category_groyps_id = 15
+        ORDER BY spend_ccg.categories_id
+    LOOP
+        _balance := public.get_category_balance(_user_id, _source.category_id, 'RUB');
+
+        IF COALESCE(_balance, 0) >= 0 THEN
+            CONTINUE;
+        END IF;
+
+        _reserve_amount := ABS(_balance) * 0.01;
+
+        IF _reserve_amount <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        PERFORM public.allocation_distribute(
+            _user_id::bigint,
+            _reserve_root_id::bigint,
+            _reserve_amount::numeric,
+            'RUB'::varchar,
+            _source.category_id::integer,
+            'monthly distribute'::text
+        );
+    END LOOP;
 
     _sum_value := (
         SELECT get_category_balance(_user_id, _income_category, 'RUB')
@@ -1437,13 +1518,19 @@ BEGIN
 return  query
 		(
             SELECT CASE
-                WHEN public.find_allocation_node_id(943915310, 'salary_primary') IS NOT NULL
+                WHEN public.find_allocation_node_id(943915310, 'monthly_income_sources') IS NOT NULL
+                 AND public.find_allocation_node_id(943915310, 'extra_income_sources') IS NOT NULL
+                 AND public.find_allocation_node_id(943915310, 'debt_reserve') IS NOT NULL
+                 AND public.find_allocation_node_id(943915310, 'salary_primary') IS NOT NULL
                     THEN public.monthly_distribute_cascade(943915310, 37)
                 ELSE public.monthly_distribute(943915310, 37)
             END
          UNION ALL
             SELECT CASE
-                WHEN public.find_allocation_node_id(249716305, 'salary_primary') IS NOT NULL
+                WHEN public.find_allocation_node_id(249716305, 'monthly_income_sources') IS NOT NULL
+                 AND public.find_allocation_node_id(249716305, 'extra_income_sources') IS NOT NULL
+                 AND public.find_allocation_node_id(249716305, 'debt_reserve') IS NOT NULL
+                 AND public.find_allocation_node_id(249716305, 'salary_primary') IS NOT NULL
                     THEN public.monthly_distribute_cascade(249716305, 16)
                 ELSE public.monthly_distribute(249716305, 16)
             END
