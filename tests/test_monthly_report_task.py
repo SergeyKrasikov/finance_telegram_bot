@@ -184,12 +184,12 @@ class MonthlyReportTaskTests(unittest.TestCase):
         message_by_user = dict(bot.messages)
         self.assertIn("Всего пришло за месяц 1 000.00₽", message_by_user[1])
         self.assertIn("Всего потрачено за месяц 300.00₽", message_by_user[1])
-        self.assertIn("На общие категории 50.00₽", message_by_user[1])
+        self.assertIn("На общие категории 59.00₽", message_by_user[1])
         self.assertIn("На инвестиции 14.00₽", message_by_user[1])
 
         self.assertIn("Всего пришло за месяц 800.00₽", message_by_user[2])
         self.assertIn("Всего потрачено за месяц 200.00₽", message_by_user[2])
-        self.assertIn("На общие категории 40.00₽", message_by_user[2])
+        self.assertIn("На общие категории 47.00₽", message_by_user[2])
         self.assertIn("На инвестиции 11.00₽", message_by_user[2])
 
     def test_monthly_task_with_empty_data_sends_nothing(self) -> None:
@@ -221,7 +221,7 @@ class MonthlyReportTaskTests(unittest.TestCase):
         self.assertEqual(len(bot.messages), 2)
         message_by_user = dict(bot.messages)
         self.assertIn("Всего пришло за месяц 11.00₽", message_by_user[1])
-        self.assertIn("На общие категории 0₽", message_by_user[2])
+        self.assertIn("На общие категории 3.00₽", message_by_user[2])
         self.assertIn("На инвестиции 2.00₽", message_by_user[2])
 
     def test_monthly_task_accepts_plain_mapping_rows(self) -> None:
@@ -260,7 +260,7 @@ class MonthlyReportTaskTests(unittest.TestCase):
         )
         self.assertIn("Всего потрачено за месяц 450.00₽", message_by_user[943915310])
         self.assertIn("На семейный взнос 120.00₽", message_by_user[943915310])
-        self.assertIn("На общие категории 0₽", message_by_user[249716305])
+        self.assertIn("На общие категории 14.00₽", message_by_user[249716305])
         self.assertIn("На инвестиции 6.00₽", message_by_user[249716305])
 
     def test_monthly_task_accepts_record_like_rows(self) -> None:
@@ -292,7 +292,7 @@ class MonthlyReportTaskTests(unittest.TestCase):
         self.assertEqual(len(bot.messages), 2)
         message_by_user = dict(bot.messages)
         self.assertIn("Всего пришло за месяц 11.00₽", message_by_user[1])
-        self.assertIn("На общие категории 0₽", message_by_user[2])
+        self.assertIn("На общие категории 3.00₽", message_by_user[2])
 
 
 if __name__ == "__main__":

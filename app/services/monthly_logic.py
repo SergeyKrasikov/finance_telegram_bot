@@ -40,6 +40,7 @@ def aggregate_monthly_rows(
             (
                 "second_user_id",
                 (
+                    ("общие_категории", "second_user_pay"),
                     ("investition", "investition_second"),
                 ),
             ),

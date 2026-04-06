@@ -1018,12 +1018,13 @@ $function$;
 
 
 -- Агрегирует report rows месячного каскада в итоговый JSON monthly-метрик.
--- Новый контракт deliberately упрощён:
--- 1) `общие_категории` уже содержит всю сумму по group-owned общим категориям;
--- 2) `second_user_pay` больше не используется как отдельная часть отчёта и обнуляется;
--- 3) Python-слой больше не должен складывать `общие_категории + second_user_pay`.
--- Это позволяет считать общие траты только по конечным group-owned leaf-нодам
--- без отдельной "общей" промежуточной ноды.
+-- Для Telegram-отчёта сохраняем split-контракт старой monthly_distribute():
+-- 1) `общие_категории` — доля текущего пользователя;
+-- 2) `second_user_pay` — доля партнёра, которая потом будет досуммирована в Python-агрегации;
+-- 3) `investition_second` — инвестиции партнёра из семейного взноса.
+-- Пока граф не несёт отдельный report-node для partner-common, второй кусок общих категорий
+-- восстанавливаем как остаток partner-ветки:
+-- family_contribution - invest_partner - все partner-owned leaf-суммы.
 CREATE OR REPLACE FUNCTION public.monthly_allocation_report_metrics(
     _user_id bigint,
     _second_user_id bigint,
@@ -1037,6 +1038,9 @@ DECLARE
     _common_total numeric := 0;
     _invest_self numeric := 0;
     _invest_partner numeric := 0;
+    _partner_leaf_total numeric := 0;
+    _partner_common numeric := 0;
+    _self_common numeric := 0;
 BEGIN
     WITH rows AS (
         SELECT
@@ -1045,6 +1049,17 @@ BEGIN
             item ->> 'slug' AS slug,
             COALESCE((item ->> 'amount')::numeric, 0) AS amount
         FROM jsonb_array_elements(COALESCE(_report_rows, '[]'::jsonb)) AS item
+    ),
+    common_slugs AS (
+        SELECT DISTINCT CONCAT('cat_', ccg.categories_id) AS slug
+        FROM public.categories_category_groups ccg
+        WHERE ccg.category_groyps_id = 4
+    ),
+    second_invest_slugs AS (
+        SELECT DISTINCT CONCAT('cat_', ccg.categories_id) AS slug
+        FROM public.categories_category_groups ccg
+        WHERE ccg.users_id = _second_user_id
+          AND ccg.category_groyps_id = 1
     )
     SELECT
         COALESCE(SUM(amount) FILTER (
@@ -1053,7 +1068,7 @@ BEGIN
         ), 0),
         COALESCE(SUM(amount) FILTER (
             WHERE owner_user_group_id IS NOT NULL
-              AND slug IN ('cat_3', 'cat_4', 'cat_10')
+              AND slug IN (SELECT slug FROM common_slugs)
         ), 0),
         COALESCE(SUM(amount) FILTER (
             WHERE owner_user_id = _user_id
@@ -1062,18 +1077,31 @@ BEGIN
         COALESCE(SUM(amount) FILTER (
             WHERE owner_user_id = _second_user_id
               AND slug IN ('invest_partner_report', 'invest_partner_incoming_report')
+        ), 0),
+        COALESCE(SUM(amount) FILTER (
+            WHERE owner_user_id = _second_user_id
+              AND slug ~ '^cat_[0-9]+$'
+              AND slug NOT IN (SELECT slug FROM common_slugs)
+              AND slug NOT IN (SELECT slug FROM second_invest_slugs)
         ), 0)
     INTO
         _family_contribution,
         _common_total,
         _invest_self,
-        _invest_partner
+        _invest_partner,
+        _partner_leaf_total
     FROM rows;
+
+    _partner_common := LEAST(
+        _common_total,
+        GREATEST(_family_contribution - _invest_partner - _partner_leaf_total, 0)
+    );
+    _self_common := GREATEST(_common_total - _partner_common, 0);
 
     RETURN jsonb_build_object(
         'семейный_взнос', _family_contribution,
-        'общие_категории', _common_total,
-        'second_user_pay', 0,
+        'общие_категории', _self_common,
+        'second_user_pay', _partner_common,
         'investition', _invest_self,
         'investition_second', _invest_partner
     );
@@ -1407,9 +1435,9 @@ CREATE OR REPLACE FUNCTION public.monthly()
 AS $function$
 BEGIN
 return  query
-		(SELECT monthly_distribute(943915310, 37)
+		(SELECT monthly_distribute_cascade(943915310, 37)
 		 UNION ALL
-		 SELECT monthly_distribute(249716305, 16)) ;
+		 SELECT monthly_distribute_cascade(249716305, 16)) ;
 end
 $function$
 ;  

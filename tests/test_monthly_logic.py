@@ -61,13 +61,13 @@ class MonthlyLogicTests(unittest.TestCase):
         result = aggregate_monthly_rows(rows)
 
         self.assertEqual(result[1]["семейный_взнос"], 100)
-        self.assertEqual(result[1]["общие_категории"], 50)
+        self.assertEqual(result[1]["общие_категории"], 59)
         self.assertEqual(result[1]["investition"], 14)
         self.assertEqual(result[1]["month_earnings"], 1000)
         self.assertEqual(result[1]["month_spend"], 300)
 
         self.assertEqual(result[2]["семейный_взнос"], 80)
-        self.assertEqual(result[2]["общие_категории"], 40)
+        self.assertEqual(result[2]["общие_категории"], 47)
         self.assertEqual(result[2]["investition"], 11)
         self.assertEqual(result[2]["month_earnings"], 800)
         self.assertEqual(result[2]["month_spend"], 200)
