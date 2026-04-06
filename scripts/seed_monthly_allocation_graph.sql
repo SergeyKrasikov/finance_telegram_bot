@@ -388,6 +388,19 @@ WHERE src.user_id IN (249716305, 943915310)
 ON CONFLICT DO NOTHING;
 
 -- self_distribution (group 2): common leaves, personal leaves, free remainder
+-- Cleanup old incorrect routes from previous seed versions:
+-- a legacy category with percent = 1 would create a second remainder route and break validation.
+DELETE FROM public.allocation_routes r
+USING public.allocation_nodes src
+WHERE r.source_node_id = src.id
+  AND src.user_id IN (249716305, 943915310)
+  AND src.slug IN ('self_distribution', 'partner_distribution')
+  AND r.percent = 1
+  AND r.description NOT IN (
+      'self_distribution -> free remainder',
+      'partner_distribution -> free remainder'
+  );
+
 INSERT INTO public.allocation_routes (
     source_node_id,
     target_node_id,
@@ -420,6 +433,7 @@ LEFT JOIN public.allocation_nodes user_dst
 WHERE ccg.users_id IN (249716305, 943915310)
   AND ccg.category_groyps_id = 2
   AND COALESCE(c.percent, 0) > 0
+  AND COALESCE(c.percent, 0) < 1
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (
@@ -479,6 +493,7 @@ LEFT JOIN public.allocation_nodes user_dst
 WHERE ccg.users_id IN (249716305, 943915310)
   AND ccg.category_groyps_id = 3
   AND COALESCE(c.percent, 0) > 0
+  AND COALESCE(c.percent, 0) < 1
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (
