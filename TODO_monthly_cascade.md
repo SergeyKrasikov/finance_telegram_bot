@@ -45,6 +45,8 @@
   - `group 4`, владельцем является `user_group monthly_pair_249716305_943915310`
 - user-owned leaves:
   - `group 1`, `2`, `3`, `6`, `7`, `9`, `13`
+- single-target roots во время тестовой миграции:
+  - используют явные канонические leaf-категории для `249716305` и `943915310`, а не весь legacy group mapping
 - единственный оставшийся legacy-step внутри `monthly_distribute_cascade()`:
   - `free(category from group 6) -> group 7` через `distribute_to_group(...)`
 

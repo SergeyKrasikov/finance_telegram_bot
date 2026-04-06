@@ -324,6 +324,8 @@ graph TD
   - `salary_primary`
 - Если хотя бы одного root нет, `monthly()` откатывается на legacy `monthly_distribute(...)`.
 - Шаг `free -> group 7` пока остаётся на `distribute_to_group(...)`; остальной monthly-path уже выражен allocation-графом.
+- Пока тестируем миграцию на restored legacy data, seed для single-target roots (`monthly_income_sources`, `extra_income_sources`, `debt_reserve`, `invest_*_report`) использует явные канонические leaf-категории для пользователей `249716305` и `943915310`.
+  Это защищает граф от грязных legacy group mappings вроде попадания `cat_15` в investment group.
 
 ## Заметки
 - Основная точка входа: `app.py`.

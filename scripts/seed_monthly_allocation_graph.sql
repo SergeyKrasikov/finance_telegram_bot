@@ -209,7 +209,13 @@ WHERE r.source_node_id = src.id
       ) AND src.slug ~ '^cat_[0-9]+$')
   );
 
--- monthly_income_sources -> income bucket (group 13)
+-- Single-target roots are seeded via explicit canonical leaves.
+-- While we are testing migration on top of restored legacy data, some category groups
+-- can contain dirty duplicates (for example, cat_15 leaking into group 1).
+-- validate_allocation_routes() interprets every percent = 1 route as a remainder route,
+-- so these roots must always have exactly one outgoing route.
+
+-- monthly_income_sources -> canonical income bucket
 INSERT INTO public.allocation_routes (
     source_node_id,
     target_node_id,
@@ -223,18 +229,20 @@ SELECT
     1.0,
     'monthly_income_sources -> income bucket',
     true
-FROM public.categories_category_groups ccg
+FROM (
+    VALUES
+        (249716305::bigint, 'monthly_income_sources'::text, 'cat_16'::text),
+        (943915310::bigint, 'monthly_income_sources'::text, 'cat_37'::text)
+) AS m(user_id, source_slug, target_slug)
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
- AND src.slug = 'monthly_income_sources'
+  ON src.user_id = m.user_id
+ AND src.slug = m.source_slug
 JOIN public.allocation_nodes dst
-  ON dst.user_id = ccg.users_id
- AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (249716305, 943915310)
-  AND ccg.category_groyps_id = 13
+  ON dst.user_id = m.user_id
+ AND dst.slug = m.target_slug
 ON CONFLICT DO NOTHING;
 
--- extra_income_sources -> gift/extra bucket (group 7)
+-- extra_income_sources -> canonical extra/gift bucket
 INSERT INTO public.allocation_routes (
     source_node_id,
     target_node_id,
@@ -248,18 +256,20 @@ SELECT
     1.0,
     'extra_income_sources -> extra income bucket',
     true
-FROM public.categories_category_groups ccg
+FROM (
+    VALUES
+        (249716305::bigint, 'extra_income_sources'::text, 'cat_7'::text),
+        (943915310::bigint, 'extra_income_sources'::text, 'cat_26'::text)
+) AS m(user_id, source_slug, target_slug)
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
- AND src.slug = 'extra_income_sources'
+  ON src.user_id = m.user_id
+ AND src.slug = m.source_slug
 JOIN public.allocation_nodes dst
-  ON dst.user_id = ccg.users_id
- AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (249716305, 943915310)
-  AND ccg.category_groyps_id = 7
+  ON dst.user_id = m.user_id
+ AND dst.slug = m.target_slug
 ON CONFLICT DO NOTHING;
 
--- debt_reserve -> reserve bucket (group 9)
+-- debt_reserve -> canonical reserve bucket
 INSERT INTO public.allocation_routes (
     source_node_id,
     target_node_id,
@@ -273,18 +283,20 @@ SELECT
     1.0,
     'debt_reserve -> reserve bucket',
     true
-FROM public.categories_category_groups ccg
+FROM (
+    VALUES
+        (249716305::bigint, 'debt_reserve'::text, 'cat_28'::text),
+        (943915310::bigint, 'debt_reserve'::text, 'cat_27'::text)
+) AS m(user_id, source_slug, target_slug)
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
- AND src.slug = 'debt_reserve'
+  ON src.user_id = m.user_id
+ AND src.slug = m.source_slug
 JOIN public.allocation_nodes dst
-  ON dst.user_id = ccg.users_id
- AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (249716305, 943915310)
-  AND ccg.category_groyps_id = 9
+  ON dst.user_id = m.user_id
+ AND dst.slug = m.target_slug
 ON CONFLICT DO NOTHING;
 
--- investment report nodes -> own investment leaves (group 1)
+-- investment report nodes -> canonical own investment leaves
 INSERT INTO public.allocation_routes (
     source_node_id,
     target_node_id,
@@ -298,15 +310,17 @@ SELECT
     1.0,
     'invest_self_report -> own investment leaf',
     true
-FROM public.categories_category_groups ccg
+FROM (
+    VALUES
+        (249716305::bigint, 'invest_self_report'::text, 'cat_1'::text),
+        (943915310::bigint, 'invest_self_report'::text, 'cat_22'::text)
+) AS m(user_id, source_slug, target_slug)
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
- AND src.slug = 'invest_self_report'
+  ON src.user_id = m.user_id
+ AND src.slug = m.source_slug
 JOIN public.allocation_nodes dst
-  ON dst.user_id = ccg.users_id
- AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (249716305, 943915310)
-  AND ccg.category_groyps_id = 1
+  ON dst.user_id = m.user_id
+ AND dst.slug = m.target_slug
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (
@@ -322,15 +336,17 @@ SELECT
     1.0,
     'invest_partner_report -> partner investment leaf',
     true
-FROM public.categories_category_groups ccg
+FROM (
+    VALUES
+        (249716305::bigint, 'invest_partner_report'::text, 'cat_1'::text),
+        (943915310::bigint, 'invest_partner_report'::text, 'cat_22'::text)
+) AS m(user_id, source_slug, target_slug)
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
- AND src.slug = 'invest_partner_report'
+  ON src.user_id = m.user_id
+ AND src.slug = m.source_slug
 JOIN public.allocation_nodes dst
-  ON dst.user_id = ccg.users_id
- AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (249716305, 943915310)
-  AND ccg.category_groyps_id = 1
+  ON dst.user_id = m.user_id
+ AND dst.slug = m.target_slug
 ON CONFLICT DO NOTHING;
 
 -- salary_primary split
