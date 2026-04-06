@@ -232,7 +232,8 @@ Scheduler:
    Для тестовой пары источники reserve зафиксированы канонически:
    `249716305 -> cat_2, cat_8, cat_9, cat_11`;
    `943915310 -> cat_17, cat_18, cat_20, cat_21, cat_26`.
-4. Остаток в free-category (`group 6`) переводится через отдельный root `free_to_gifts` в canonical gifts leaf пользователя.
+4. Из free-category (`group 6`) через root `free_to_gifts` переводится только legacy `group 7` доля free-баланса.
+   Для суммы перевода сохраняется старая формула `free_balance * sum(percent(group 7))`, а route уже ведёт эту сумму в canonical gifts leaf пользователя.
 5. После этого основной monthly каскад стартует из `salary_primary` на балансе `_income_category`.
 
 #### Узлы графа

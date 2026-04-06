@@ -31,6 +31,8 @@
   - `extra_income_sources`
   - `free_to_gifts`
   - `debt_reserve`
+- `free_to_gifts` сохраняет legacy сумму перевода:
+  - `free_balance * sum(percent(group 7))`
 - Для test-пары reserve-source categories канонизированы:
   - `249716305 -> cat_2, cat_8, cat_9, cat_11`
   - `943915310 -> cat_17, cat_18, cat_20, cat_21, cat_26`
