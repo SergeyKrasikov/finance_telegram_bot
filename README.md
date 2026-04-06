@@ -228,7 +228,9 @@ Scheduler:
 
 1. `group 11` доходы консолидируются через root `monthly_income_sources` в legacy income bucket пользователя (`group 13`).
 2. `group 12` дополнительные доходы консолидируются через root `extra_income_sources` в legacy extra bucket пользователя (`group 7`).
-3. Отрицательные personal-spend категории (`group 8 ∩ group 15`) резервируются через root `debt_reserve` в reserve bucket пользователя (`group 9`) по правилу `1%` от отрицательного баланса.
+3. Отрицательные personal-spend категории резервируются через root `debt_reserve` в reserve bucket пользователя (`group 9`) по правилу `1%` от отрицательного баланса.
+   Для тестовой пары источники reserve зафиксированы канонически:
+   `249716305 -> cat_3`, `943915310 -> cat_17`, чтобы restored legacy mapping не затягивал `free`-категории в reserve.
 4. Остаток в free-category (`group 6`) переводится через отдельный root `free_to_gifts` в canonical gifts leaf пользователя.
 5. После этого основной monthly каскад стартует из `salary_primary` на балансе `_income_category`.
 
@@ -325,6 +327,8 @@ graph TD
   - `salary_primary`
 - Пока тестируем миграцию на restored legacy data, seed для single-target roots (`monthly_income_sources`, `extra_income_sources`, `debt_reserve`, `invest_*_report`) использует явные канонические leaf-категории для пользователей `249716305` и `943915310`.
   Это защищает граф от грязных legacy group mappings вроде попадания `cat_15` в investment group.
+- Источники reserve для этой пары тоже зафиксированы канонически в `monthly_distribute_cascade()`:
+  `249716305 -> cat_3`, `943915310 -> cat_17`.
 
 ## Заметки
 - Основная точка входа: `app.py`.

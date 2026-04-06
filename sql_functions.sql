@@ -391,15 +391,30 @@ BEGIN
     END IF;
 
     FOR _source IN
+        WITH canonical_reserve_sources AS (
+            SELECT v.user_id, v.category_id
+            FROM (
+                VALUES
+                    (249716305::bigint, 3::integer),
+                    (943915310::bigint, 17::integer)
+            ) AS v(user_id, category_id)
+        )
+        SELECT category_id
+        FROM canonical_reserve_sources
+        WHERE user_id = _user_id
+
+        UNION
+
         SELECT DISTINCT spend_ccg.categories_id AS category_id
         FROM public.categories_category_groups spend_ccg
         JOIN public.categories_category_groups personal_ccg
           ON personal_ccg.users_id = spend_ccg.users_id
          AND personal_ccg.categories_id = spend_ccg.categories_id
         WHERE spend_ccg.users_id = _user_id
+          AND _user_id NOT IN (249716305, 943915310)
           AND spend_ccg.category_groyps_id = 8
           AND personal_ccg.category_groyps_id = 15
-        ORDER BY spend_ccg.categories_id
+        ORDER BY category_id
     LOOP
         _balance := public.get_category_balance(_user_id, _source.category_id, 'RUB');
 

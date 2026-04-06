@@ -31,6 +31,9 @@
   - `extra_income_sources`
   - `free_to_gifts`
   - `debt_reserve`
+- Для test-пары reserve-source categories канонизированы:
+  - `249716305 -> cat_3`
+  - `943915310 -> cat_17`
 - main roots:
   - `salary_primary`
   - `family_contribution_in`
