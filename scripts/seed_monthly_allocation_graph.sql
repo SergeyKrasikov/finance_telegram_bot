@@ -455,7 +455,28 @@ INSERT INTO public.allocation_routes (
 SELECT
     src.id,
     COALESCE(common_dst.id, user_dst.id),
-    c.percent,
+    c.percent / COALESCE(
+        NULLIF(
+            1 - (
+                SELECT inv_c.percent
+                FROM (
+                    VALUES
+                        (249716305::bigint, 1::integer),
+                        (943915310::bigint, 22::integer)
+                ) AS invest_leaf(user_id, category_id)
+                JOIN public.categories_category_groups inv_ccg
+                  ON inv_ccg.users_id = invest_leaf.user_id
+                 AND inv_ccg.category_groyps_id = 2
+                 AND inv_ccg.categories_id = invest_leaf.category_id
+                JOIN public.categories inv_c
+                  ON inv_c.id = invest_leaf.category_id
+                WHERE invest_leaf.user_id = ccg.users_id
+                LIMIT 1
+            ),
+            0
+        ),
+        1
+    ),
     CONCAT('self_distribution -> cat_', ccg.categories_id),
     true
 FROM public.categories_category_groups ccg
@@ -525,7 +546,28 @@ INSERT INTO public.allocation_routes (
 SELECT
     src.id,
     COALESCE(common_dst.id, user_dst.id),
-    c.percent,
+    c.percent / COALESCE(
+        NULLIF(
+            1 - (
+                SELECT inv_c.percent
+                FROM (
+                    VALUES
+                        (249716305::bigint, 1::integer),
+                        (943915310::bigint, 22::integer)
+                ) AS invest_leaf(user_id, category_id)
+                JOIN public.categories_category_groups inv_ccg
+                  ON inv_ccg.users_id = invest_leaf.user_id
+                 AND inv_ccg.category_groyps_id = 3
+                 AND inv_ccg.categories_id = invest_leaf.category_id
+                JOIN public.categories inv_c
+                  ON inv_c.id = invest_leaf.category_id
+                WHERE invest_leaf.user_id = ccg.users_id
+                LIMIT 1
+            ),
+            0
+        ),
+        1
+    ),
     CONCAT('partner_distribution -> cat_', ccg.categories_id),
     true
 FROM public.categories_category_groups ccg
