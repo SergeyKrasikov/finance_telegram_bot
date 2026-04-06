@@ -395,8 +395,15 @@ BEGIN
             SELECT v.user_id, v.category_id
             FROM (
                 VALUES
-                    (249716305::bigint, 3::integer),
-                    (943915310::bigint, 17::integer)
+                    (249716305::bigint, 2::integer),
+                    (249716305::bigint, 8::integer),
+                    (249716305::bigint, 9::integer),
+                    (249716305::bigint, 11::integer),
+                    (943915310::bigint, 17::integer),
+                    (943915310::bigint, 18::integer),
+                    (943915310::bigint, 20::integer),
+                    (943915310::bigint, 21::integer),
+                    (943915310::bigint, 26::integer)
             ) AS v(user_id, category_id)
         )
         SELECT category_id

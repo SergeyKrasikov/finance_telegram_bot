@@ -32,8 +32,8 @@
   - `free_to_gifts`
   - `debt_reserve`
 - Для test-пары reserve-source categories канонизированы:
-  - `249716305 -> cat_3`
-  - `943915310 -> cat_17`
+  - `249716305 -> cat_2, cat_8, cat_9, cat_11`
+  - `943915310 -> cat_17, cat_18, cat_20, cat_21, cat_26`
 - main roots:
   - `salary_primary`
   - `family_contribution_in`
