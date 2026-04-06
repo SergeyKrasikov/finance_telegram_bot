@@ -14,10 +14,9 @@
 - Введён новый движок:
   - `allocation_distribute_recursive(...)`
   - `allocation_distribute(...)`
-- Добавлены переходные helper-функции:
+- Добавлены transition/helper-функции:
   - `find_allocation_node_id(...)`
   - `get_group_percent_sum(...)`
-  - `distribute_with_allocation_fallback(...)`
 - Каскадные шаги групп `1`, `2`, `3`, `6` в `monthly_distribute_cascade()` уже идут через allocation-граф.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `monthly_distribute_cascade()` и требуют готовые allocation roots.
 - Старые функции и legacy-группы не удалены.
@@ -120,9 +119,7 @@
 
 ### 1. Allocation-only monthly path
 
-- В monthly-path больше нет переходных fallback-вызовов:
-  - `distribute_with_allocation_fallback(...)`
-  - `transact_group_to_allocation_fallback(...)`
+- В monthly-path больше нет переходных fallback-вызовов.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve встроены прямо в `monthly_distribute_cascade()`.
 - Допустимо оставить только legacy-вызов `distribute_to_group(...)` для текущего шага group `7`, пока для него не собрана отдельная allocation-ветка.
 - Если нужной root-ноды нет, функция падает явно, а не уходит в legacy-ветку.
