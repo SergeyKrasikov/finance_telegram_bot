@@ -29,6 +29,7 @@
 - prep roots:
   - `monthly_income_sources`
   - `extra_income_sources`
+  - `free_to_gifts`
   - `debt_reserve`
 - main roots:
   - `salary_primary`
@@ -46,9 +47,6 @@
   - `group 1`, `2`, `3`, `6`, `7`, `9`, `13`
 - single-target roots во время тестовой миграции:
   - используют явные канонические leaf-категории для `249716305` и `943915310`, а не весь legacy group mapping
-- единственный оставшийся legacy-step внутри `monthly_distribute_cascade()`:
-  - `free(category from group 6) -> group 7` через `distribute_to_group(...)`
-
 ## Инварианты до полного переключения
 
 - `monthly_distribute()` остаётся эталоном.
@@ -121,7 +119,6 @@
 
 - В monthly-path больше нет переходных fallback-вызовов.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve встроены прямо в `monthly_distribute_cascade()`.
-- Допустимо оставить только legacy-вызов `distribute_to_group(...)` для текущего шага group `7`, пока для него не собрана отдельная allocation-ветка.
 - Если нужной root-ноды нет, функция падает явно, а не уходит в legacy-ветку.
 
 ### 2. Собраны все monthly root-ноды
@@ -129,6 +126,7 @@
 - Для каждого пользователя/группы, участвующих в monthly-сценарии, существуют и активны:
   - `monthly_income_sources`
   - `extra_income_sources`
+  - `free_to_gifts`
   - `salary_primary`
   - `self_distribution`
   - `family_contribution_out`

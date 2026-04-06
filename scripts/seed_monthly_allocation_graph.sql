@@ -78,6 +78,7 @@ CROSS JOIN (
     VALUES
         ('monthly_income_sources', 'Monthly income sources', 'Consolidation root for group 11', false),
         ('extra_income_sources', 'Extra income sources', 'Consolidation root for group 12', false),
+        ('free_to_gifts', 'Free to gifts', 'Transfer free money from group 6 to gifts bucket', false),
         ('debt_reserve', 'Debt reserve', 'Reserve root for negative personal spend', false),
         ('salary_primary', 'Salary primary', 'Main monthly cascade root', false),
         ('invest_self_report', 'Invest self report', '10 percent of own monthly income', true),
@@ -191,6 +192,7 @@ WHERE r.source_node_id = src.id
       (src.user_id IN (249716305, 943915310) AND src.slug IN (
           'monthly_income_sources',
           'extra_income_sources',
+          'free_to_gifts',
           'debt_reserve',
           'salary_primary',
           'invest_self_report',
@@ -269,6 +271,32 @@ JOIN public.allocation_nodes dst
  AND dst.slug = m.target_slug
 ON CONFLICT DO NOTHING;
 
+-- free_to_gifts -> canonical extra/gift bucket
+INSERT INTO public.allocation_routes (
+    source_node_id,
+    target_node_id,
+    percent,
+    description,
+    active
+)
+SELECT
+    src.id,
+    dst.id,
+    1.0,
+    'free_to_gifts -> extra income bucket',
+    true
+FROM (
+    VALUES
+        (249716305::bigint, 'free_to_gifts'::text, 'cat_7'::text),
+        (943915310::bigint, 'free_to_gifts'::text, 'cat_26'::text)
+) AS m(user_id, source_slug, target_slug)
+JOIN public.allocation_nodes src
+  ON src.user_id = m.user_id
+ AND src.slug = m.source_slug
+JOIN public.allocation_nodes dst
+  ON dst.user_id = m.user_id
+ AND dst.slug = m.target_slug
+ON CONFLICT DO NOTHING;
 -- debt_reserve -> canonical reserve bucket
 INSERT INTO public.allocation_routes (
     source_node_id,

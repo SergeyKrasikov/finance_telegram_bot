@@ -283,6 +283,7 @@ DECLARE
     _sum_spend numeric;
     _monthly_income_root_id bigint;
     _extra_income_root_id bigint;
+    _free_to_gifts_root_id bigint;
     _reserve_root_id bigint;
     _salary_primary_root_id bigint;
     _source record;
@@ -360,13 +361,25 @@ BEGIN
         SELECT get_category_balance(_user_id, (SELECT get_categories_id(_user_id, 6)), 'RUB')
     );
 
-    PERFORM public.distribute_to_group(
-        _user_id::bigint,
-        7::integer,
-        (SELECT get_categories_id(_user_id, 6))::integer,
-        _free_money,
-        'RUB'::varchar
-    );
+    -- Шаг 2.5. Allocation-only перевод free money в gifts bucket.
+    _free_to_gifts_root_id := public.find_allocation_node_id(_user_id, 'free_to_gifts');
+
+    IF _free_to_gifts_root_id IS NULL THEN
+        RAISE EXCEPTION
+            'free_to_gifts allocation root is required for user %',
+            _user_id;
+    END IF;
+
+    IF COALESCE(_free_money, 0) > 0 THEN
+        PERFORM public.allocation_distribute(
+            _user_id::bigint,
+            _free_to_gifts_root_id::bigint,
+            _free_money::numeric,
+            'RUB'::varchar,
+            (SELECT get_categories_id(_user_id, 6))::integer,
+            'monthly distribute'::text
+        );
+    END IF;
 
     -- Шаг 3. Allocation-only reserve для отрицательных personal-spend категорий.
     _reserve_root_id := public.find_allocation_node_id(_user_id, 'debt_reserve');
@@ -1334,6 +1347,7 @@ return  query
             SELECT CASE
                 WHEN public.find_allocation_node_id(943915310, 'monthly_income_sources') IS NOT NULL
                  AND public.find_allocation_node_id(943915310, 'extra_income_sources') IS NOT NULL
+                 AND public.find_allocation_node_id(943915310, 'free_to_gifts') IS NOT NULL
                  AND public.find_allocation_node_id(943915310, 'debt_reserve') IS NOT NULL
                  AND public.find_allocation_node_id(943915310, 'salary_primary') IS NOT NULL
                     THEN public.monthly_distribute_cascade(943915310, 37)
@@ -1343,6 +1357,7 @@ return  query
             SELECT CASE
                 WHEN public.find_allocation_node_id(249716305, 'monthly_income_sources') IS NOT NULL
                  AND public.find_allocation_node_id(249716305, 'extra_income_sources') IS NOT NULL
+                 AND public.find_allocation_node_id(249716305, 'free_to_gifts') IS NOT NULL
                  AND public.find_allocation_node_id(249716305, 'debt_reserve') IS NOT NULL
                  AND public.find_allocation_node_id(249716305, 'salary_primary') IS NOT NULL
                     THEN public.monthly_distribute_cascade(249716305, 16)
