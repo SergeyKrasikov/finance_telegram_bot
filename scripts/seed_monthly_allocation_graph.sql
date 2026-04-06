@@ -181,6 +181,34 @@ WHERE NOT EXISTS (
       AND an.slug = CONCAT('cat_', common_ids.categories_id)
 );
 
+-- Rebuild managed monthly routes from scratch.
+-- Older seed versions could leave stale remainder routes on the same source nodes,
+-- and validate_allocation_routes() treats every percent = 1 route as a remainder route.
+DELETE FROM public.allocation_routes r
+USING public.allocation_nodes src
+WHERE r.source_node_id = src.id
+  AND (
+      (src.user_id IN (249716305, 943915310) AND src.slug IN (
+          'monthly_income_sources',
+          'extra_income_sources',
+          'debt_reserve',
+          'salary_primary',
+          'invest_self_report',
+          'family_contribution_out',
+          'family_contribution_in',
+          'partner_contribution_split',
+          'invest_partner_report',
+          'self_distribution',
+          'partner_distribution'
+      ))
+      OR
+      (src.user_group_id = (
+          SELECT id
+          FROM public.user_groups
+          WHERE slug = 'monthly_pair_249716305_943915310'
+      ) AND src.slug ~ '^cat_[0-9]+$')
+  );
+
 -- monthly_income_sources -> income bucket (group 13)
 INSERT INTO public.allocation_routes (
     source_node_id,
