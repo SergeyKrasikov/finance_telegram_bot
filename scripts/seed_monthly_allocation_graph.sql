@@ -478,6 +478,16 @@ WHERE ccg.users_id IN (249716305, 943915310)
   AND ccg.category_groyps_id = 2
   AND COALESCE(c.percent, 0) > 0
   AND COALESCE(c.percent, 0) < 1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM (
+          VALUES
+              (249716305::bigint, 1::integer),
+              (943915310::bigint, 22::integer)
+      ) AS invest_leaf(user_id, category_id)
+      WHERE invest_leaf.user_id = ccg.users_id
+        AND invest_leaf.category_id = ccg.categories_id
+  )
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (
@@ -538,6 +548,16 @@ WHERE ccg.users_id IN (249716305, 943915310)
   AND ccg.category_groyps_id = 3
   AND COALESCE(c.percent, 0) > 0
   AND COALESCE(c.percent, 0) < 1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM (
+          VALUES
+              (249716305::bigint, 1::integer),
+              (943915310::bigint, 22::integer)
+      ) AS invest_leaf(user_id, category_id)
+      WHERE invest_leaf.user_id = ccg.users_id
+        AND invest_leaf.category_id = ccg.categories_id
+  )
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (

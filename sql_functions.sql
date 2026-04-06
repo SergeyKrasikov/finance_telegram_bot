@@ -782,11 +782,14 @@ CREATE OR REPLACE FUNCTION public.allocation_distribute_recursive(
 AS $function$
 DECLARE
     _node public.allocation_nodes%ROWTYPE;
+    _target_node public.allocation_nodes%ROWTYPE;
     _route public.allocation_routes%ROWTYPE;
     _route_count integer;
     _remaining numeric;
     _child_amount numeric;
     _posting_user_id bigint;
+    _next_executor_user_id bigint;
+    _next_category_id_from integer;
 BEGIN
     IF _amount IS NULL OR _amount <= 0 THEN
         RETURN;
@@ -892,14 +895,36 @@ BEGIN
             CONTINUE;
         END IF;
 
+        SELECT *
+        INTO _target_node
+        FROM public.allocation_nodes
+        WHERE id = _route.target_node_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Allocation target node % not found', _route.target_node_id;
+        END IF;
+
+        -- При переходе в partner-ветку меняем "владельца" downstream-проводок на целевого пользователя.
+        -- Это важно для shared/group-owned leaf-nodes: они должны писаться от имени текущей ветки,
+        -- а не всегда от исходного executor_user_id.
+        _next_executor_user_id := COALESCE(_target_node.user_id, _executor_user_id);
+
+        -- В old monthly_distribute() partner-ветка всегда писалась из family contribution category 15.
+        -- Сохраняем этот cash_flow-контракт при входе в family_contribution_in.
+        IF _target_node.slug = 'family_contribution_in' THEN
+            _next_category_id_from := 15;
+        ELSE
+            _next_category_id_from := _category_id_from;
+        END IF;
+
         RETURN QUERY
         SELECT *
         FROM public.allocation_distribute_recursive(
-            _executor_user_id,
+            _next_executor_user_id,
             _route.target_node_id,
             _child_amount,
             _currency,
-            _category_id_from,
+            _next_category_id_from,
             _description,
             _path || _source_node_id
         );
