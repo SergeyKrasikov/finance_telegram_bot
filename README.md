@@ -219,6 +219,7 @@ Scheduler:
 - `public.monthly_distribute_cascade(...)` должна оставаться эквивалентной ей по JSON-результату.
 - Каскадные ветки и подготовительные шаги переводятся по одной, с compare SQL после каждого изменения.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `public.monthly_distribute_cascade(...)`; monthly-path больше не зависит от переходных helper-вызовов.
+- `monthly_allocation_report_metrics(...)` уже определяет shared leaves и investment leaves через `allocation_nodes` / `allocation_routes`, а не через legacy `group 4` / `group 1`.
 - Финальные критерии замены legacy monthly-функции зафиксированы в `TODO_monthly_cascade.md`, секция `Finalization Checklist`.
 
 ### Monthly Allocation Graph

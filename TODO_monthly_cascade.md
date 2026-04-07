@@ -92,6 +92,7 @@
 
 6. Отчёт
 - Начать замену legacy расчётов `общие_категории`, `second_user_pay`, `investition`, `investition_second` на суммы из report-нод.
+- Классификация shared leaves и investment leaves уже переведена на `allocation_nodes` / `allocation_routes`.
 - Сравнить с legacy JSON.
 - Новый согласованный контракт для Python-слоя:
   - `общие_категории` уже приходит финальной суммой по общим group-owned leaf-категориям;

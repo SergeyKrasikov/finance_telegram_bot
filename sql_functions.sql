@@ -990,15 +990,25 @@ BEGIN
         FROM jsonb_array_elements(COALESCE(_report_rows, '[]'::jsonb)) AS item
     ),
     common_slugs AS (
-        SELECT DISTINCT CONCAT('cat_', ccg.categories_id) AS slug
-        FROM public.categories_category_groups ccg
-        WHERE ccg.category_groyps_id = 4
+        SELECT DISTINCT an.slug
+        FROM public.allocation_nodes an
+        WHERE an.active
+          AND an.user_group_id IS NOT NULL
+          AND an.slug ~ '^cat_[0-9]+$'
     ),
     second_invest_slugs AS (
-        SELECT DISTINCT CONCAT('cat_', ccg.categories_id) AS slug
-        FROM public.categories_category_groups ccg
-        WHERE ccg.users_id = _second_user_id
-          AND ccg.category_groyps_id = 1
+        SELECT DISTINCT target.slug
+        FROM public.allocation_nodes source
+        JOIN public.allocation_routes ar
+          ON ar.source_node_id = source.id
+         AND ar.active
+        JOIN public.allocation_nodes target
+          ON target.id = ar.target_node_id
+        WHERE source.user_id = _second_user_id
+          AND source.active
+          AND source.slug IN ('invest_self_report', 'invest_partner_report')
+          AND target.active
+          AND target.slug ~ '^cat_[0-9]+$'
     )
     SELECT
         COALESCE(SUM(amount) FILTER (
