@@ -221,6 +221,7 @@ Scheduler:
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `public.monthly_distribute_cascade(...)`; monthly-path больше не зависит от переходных helper-вызовов.
 - `monthly_allocation_report_metrics(...)` уже определяет shared leaves и investment leaves через `allocation_nodes` / `allocation_routes`, а не через legacy `group 4` / `group 1`.
 - free-category для шага `free_to_gifts` теперь тоже берётся из allocation-графа через remainder leaf `self_distribution`, а не через legacy `get_categories_id(group 6)`.
+- Доля перевода `free_to_gifts` теперь хранится в route `free_to_gifts -> gift leaf`, а не считается в orchestrator через legacy `group 7` проценты.
 - Финальные критерии замены legacy monthly-функции зафиксированы в `TODO_monthly_cascade.md`, секция `Finalization Checklist`.
 
 ### Monthly Allocation Graph

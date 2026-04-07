@@ -282,7 +282,7 @@ INSERT INTO public.allocation_routes (
 SELECT
     src.id,
     dst.id,
-    1.0,
+    p.percent,
     'free_to_gifts -> extra income bucket',
     true
 FROM (
@@ -296,6 +296,19 @@ JOIN public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = m.user_id
  AND dst.slug = m.target_slug
+JOIN (
+    SELECT
+        ccg.users_id AS user_id,
+        COALESCE(SUM(c.percent), 0) AS percent
+    FROM public.categories_category_groups ccg
+    JOIN public.categories c
+      ON c.id = ccg.categories_id
+    WHERE ccg.users_id IN (249716305, 943915310)
+      AND ccg.category_groyps_id = 7
+    GROUP BY ccg.users_id
+) p
+  ON p.user_id = m.user_id
+ AND p.percent > 0
 ON CONFLICT DO NOTHING;
 -- debt_reserve -> canonical reserve bucket
 INSERT INTO public.allocation_routes (

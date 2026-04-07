@@ -303,7 +303,6 @@ AS $function$
 DECLARE
     _sum_value numeric(10,2);
     _free_money numeric(10,2);
-    _free_to_gifts_amount numeric;
     _second_member_id bigint;
     _sum_earnings numeric;
     _sum_spend numeric;
@@ -393,14 +392,6 @@ BEGIN
     END IF;
 
     _free_money := public.get_category_balance(_user_id, _free_category_id, 'RUB');
-    _free_to_gifts_amount := (
-        SELECT COALESCE(_free_money * SUM(c.percent), 0)
-        FROM public.categories c
-        JOIN public.categories_category_groups ccg
-          ON ccg.categories_id = c.id
-        WHERE ccg.users_id = _user_id
-          AND ccg.category_groyps_id = 7
-    );
 
     -- Шаг 2.5. Allocation-only перевод free money в gifts bucket.
     _free_to_gifts_root_id := public.find_allocation_node_id(_user_id, 'free_to_gifts');
@@ -411,11 +402,11 @@ BEGIN
             _user_id;
     END IF;
 
-    IF COALESCE(_free_to_gifts_amount, 0) > 0 THEN
+    IF COALESCE(_free_money, 0) > 0 THEN
         PERFORM public.allocation_distribute(
             _user_id::bigint,
             _free_to_gifts_root_id::bigint,
-            _free_to_gifts_amount::numeric,
+            _free_money::numeric,
             'RUB'::varchar,
             _free_category_id,
             'monthly distribute'::text
