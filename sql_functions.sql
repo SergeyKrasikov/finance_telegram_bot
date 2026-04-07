@@ -24,6 +24,7 @@ DROP FUNCTION IF EXISTS public.get_all_users_id();
 DROP FUNCTION IF EXISTS public.is_technical_cashflow_description(text);
 DROP FUNCTION IF EXISTS public.get_users_id(bigint);
 DROP FUNCTION IF EXISTS public.find_allocation_node_id(bigint, text);
+DROP FUNCTION IF EXISTS public.find_allocation_remainder_legacy_category_id(bigint, text);
 DROP FUNCTION IF EXISTS public.get_group_percent_sum(bigint, integer);
 DROP FUNCTION IF EXISTS public.distribute_with_allocation_fallback(bigint, text, integer, integer, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.transact_group_to_allocation_fallback(bigint, integer, text, integer, varchar, text);
@@ -109,6 +110,30 @@ AS $function$
       AND an.slug = _slug
       AND an.active
     ORDER BY an.id
+    LIMIT 1;
+$function$;
+
+
+-- Возвращает legacy_category_id remainder-leaf ноды, подключенной к source slug пользователя.
+-- Используется в переходной monthly-логике, чтобы брать free-category уже из allocation-графа.
+CREATE OR REPLACE FUNCTION public.find_allocation_remainder_legacy_category_id(_user_id bigint, _source_slug text)
+ RETURNS integer
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT target.legacy_category_id
+    FROM public.allocation_nodes source
+    JOIN public.allocation_routes ar
+      ON ar.source_node_id = source.id
+     AND ar.active
+     AND ar.percent = 1
+    JOIN public.allocation_nodes target
+      ON target.id = ar.target_node_id
+    WHERE source.user_id = _user_id
+      AND source.slug = _source_slug
+      AND source.active
+      AND target.active
+    ORDER BY ar.id
     LIMIT 1;
 $function$;
 
@@ -285,6 +310,7 @@ DECLARE
     _monthly_income_root_id bigint;
     _extra_income_root_id bigint;
     _free_to_gifts_root_id bigint;
+    _free_category_id integer;
     _reserve_root_id bigint;
     _salary_primary_root_id bigint;
     _source record;
@@ -358,9 +384,15 @@ BEGIN
         );
     END LOOP;
 
-    _free_money := (
-        SELECT get_category_balance(_user_id, (SELECT get_categories_id(_user_id, 6)), 'RUB')
-    );
+    _free_category_id := public.find_allocation_remainder_legacy_category_id(_user_id, 'self_distribution');
+
+    IF _free_category_id IS NULL THEN
+        RAISE EXCEPTION
+            'self_distribution remainder leaf with legacy_category_id is required for user %',
+            _user_id;
+    END IF;
+
+    _free_money := public.get_category_balance(_user_id, _free_category_id, 'RUB');
     _free_to_gifts_amount := (
         SELECT COALESCE(_free_money * SUM(c.percent), 0)
         FROM public.categories c
@@ -385,7 +417,7 @@ BEGIN
             _free_to_gifts_root_id::bigint,
             _free_to_gifts_amount::numeric,
             'RUB'::varchar,
-            (SELECT get_categories_id(_user_id, 6))::integer,
+            _free_category_id,
             'monthly distribute'::text
         );
     END IF;

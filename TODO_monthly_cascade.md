@@ -105,6 +105,7 @@
 ## Что ещё нужно сделать в схеме
 
 - Финально убрать зависимость движка от legacy category/group функций.
+- Free-category для `free_to_gifts` уже определяется через allocation remainder leaf, а не через `get_categories_id(group 6)`.
 - Определить финальную модель источника для monthly run:
   - либо старт от одной root-ноды,
   - либо orchestrator, который запускает несколько веток.
