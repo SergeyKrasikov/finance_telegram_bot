@@ -215,7 +215,8 @@ Scheduler:
 
 ## Monthly Migration
 - Для поэтапного перевода месячной логики используется `public.monthly_distribute_cascade(...)`.
-- Она должна оставаться эквивалентной legacy `public.monthly_distribute(...)` по JSON-результату.
+- Legacy `public.monthly_distribute(...)` сохранена в базе как reference/rollback функция и больше не используется из `public.monthly()`.
+- `public.monthly_distribute_cascade(...)` должна оставаться эквивалентной ей по JSON-результату.
 - Каскадные ветки и подготовительные шаги переводятся по одной, с compare SQL после каждого изменения.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `public.monthly_distribute_cascade(...)`; monthly-path больше не зависит от переходных helper-вызовов.
 - Финальные критерии замены legacy monthly-функции зафиксированы в `TODO_monthly_cascade.md`, секция `Finalization Checklist`.

@@ -4,7 +4,7 @@
 
 ## Текущее состояние
 
-- Старый эталон: `public.monthly_distribute(_user_id, _income_category)`.
+- Legacy reference/rollback функция: `public.monthly_distribute(_user_id, _income_category)`.
 - Переходная функция: `public.monthly_distribute_cascade(_user_id, _income_category)`.
 - Проверка эквивалентности старой и переходной функций уже собрана отдельным compare SQL.
 - Переходная функция совпадает со старой по возвращаемому JSON для пользователей `943915310` и `249716305`.
@@ -54,7 +54,7 @@
   - используют явные канонические leaf-категории для `249716305` и `943915310`, а не весь legacy group mapping
 ## Инварианты до полного переключения
 
-- `monthly_distribute()` остаётся эталоном.
+- `monthly_distribute()` остаётся legacy reference/rollback функцией.
 - `monthly_distribute_cascade()` должна оставаться эквивалентной по JSON-результату.
 - Любое изменение новой логики сначала проверяется compare SQL между старой и переходной функциями.
 - До полного переноса нельзя убирать legacy helper'ы:
@@ -99,7 +99,7 @@
 
 7. Переключение entrypoint
 - `monthly()` переведён на `monthly_distribute_cascade()`.
-- Следующий cleanup: удалить legacy `monthly_distribute()` после стабильного цикла.
+- `monthly_distribute()` остаётся в базе как legacy reference/rollback и пока не удаляется.
 
 ## Что ещё нужно сделать в схеме
 
@@ -193,8 +193,8 @@
 
 ### 7. Переключён entrypoint
 
-- `monthly_distribute()` использует новое тело или перенаправлен на `monthly_distribute_cascade()`.
-- Старая реализация удалена или архивирована.
+- `monthly()` использует `monthly_distribute_cascade()`.
+- Старая `monthly_distribute()` оставлена как legacy reference/rollback.
 - Переходные helper'ы переименованы или удалены.
 - TODO migration можно закрыть только после зелёного compare на финальной реализации.
 
@@ -202,7 +202,7 @@
 
 Миграция считается завершённой, когда одновременно выполнено всё ниже:
 
-- `monthly_distribute()` использует только allocation-каскад.
+- Legacy `monthly_distribute()` либо удалена, либо отдельно помечена как reference-only.
 - Compare-тест на фиксированном fixture зелёный.
 - Итоговый JSON строится из allocation-report, а не из legacy-формул.
 - В monthly-коде нет fallback-логики.

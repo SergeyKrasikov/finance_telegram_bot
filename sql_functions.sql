@@ -265,12 +265,12 @@ $function$;
 
 
 -- Переходная версия monthly_distribute():
--- повторяет старую функцию по расчетам и JSON,
+-- повторяет legacy monthly_distribute() по расчетам и JSON,
 -- но постепенно переводит подготовительные шаги и ветки на allocation-граф.
 -- Важно:
--- 1) функция должна оставаться эквивалентной monthly_distribute();
+-- 1) функция должна оставаться эквивалентной legacy monthly_distribute();
 -- 2) менять её нужно по одной ветке и после каждого изменения прогонять compare SQL;
--- 3) подготовительные шаги и часть side effects пока ещё остаются переходными.
+-- 3) legacy monthly_distribute() сохраняется ниже как reference/rollback и не должна вызываться из public.monthly().
 CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(_user_id bigint, _income_category integer)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -864,8 +864,8 @@ END;
 $function$;
 
 
--- Новый месячный entrypoint поверх allocation_distribute.
--- Сохраняет старую monthly_distribute() как эталон для сравнения.
+-- Внутренний allocation entrypoint для monthly cascade.
+-- Legacy monthly_distribute() сохраняется отдельно как reference/rollback.
 CREATE OR REPLACE FUNCTION public.monthly_distribute_allocation(
     _executor_user_id bigint,
     _source_node_id bigint,
@@ -1048,6 +1048,9 @@ END;
 $function$;
 
 
+-- LEGACY: старая monthly-функция.
+-- Сохраняется в базе только как reference/rollback для compare и аварийного отката.
+-- Новый public.monthly() её больше не вызывает.
 -- принимает id пользователя и id категории прихода и распределяет по всем категориям								
 CREATE OR REPLACE FUNCTION public.monthly_distribute(_user_id bigint, _income_category integer)
  RETURNS jsonb
