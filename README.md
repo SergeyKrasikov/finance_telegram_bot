@@ -337,6 +337,20 @@ graph TD
   `249716305 -> cat_2, cat_8, cat_9, cat_11`;
   `943915310 -> cat_17, cat_18, cat_20, cat_21, cat_26`.
 
+### Allocation Ledger
+
+- В схему добавлена таблица `public.allocation_postings` как будущий graph-native ledger.
+- Минимальная форма таблицы:
+  - `datetime`
+  - `user_id`
+  - `from_node_id`
+  - `to_node_id`
+  - `value`
+  - `currency`
+  - `description`
+  - `metadata`
+- Она пока не подключена в runtime и не заменяет `cash_flow`; это подготовительный слой для дальнейшей миграции с `legacy_category_id`.
+
 ## Заметки
 - Основная точка входа: `app.py`.
 - Роутеры лежат в `app/routers/`.
