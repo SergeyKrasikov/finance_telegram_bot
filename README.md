@@ -355,6 +355,8 @@ graph TD
   - `metadata`
 - Leaf-проводки нового allocation-движка уже пишутся в `allocation_postings` параллельно с `cash_flow`.
 - `cash_flow` остаётся compatibility ledger; `allocation_postings` пока используется как новый graph-native mirror.
+- При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
+- Новые dual-write записи помечаются в `metadata.legacy_cash_flow_id`, чтобы backfill не создавал дубли.
 
 ## Заметки
 - Основная точка входа: `app.py`.

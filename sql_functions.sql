@@ -725,6 +725,7 @@ DECLARE
     _child_amount numeric;
     _posting_user_id bigint;
     _posting_from_node_id bigint;
+    _legacy_cash_flow_id bigint;
     _next_executor_user_id bigint;
     _next_category_id_from integer;
 BEGIN
@@ -791,6 +792,24 @@ BEGIN
             ELSE NULL
         END;
 
+        INSERT INTO public.cash_flow(
+            users_id,
+            category_id_from,
+            category_id_to,
+            value,
+            currency,
+            description
+        )
+        VALUES (
+            _posting_user_id,
+            _category_id_from,
+            _node.legacy_category_id,
+            _amount,
+            _currency,
+            COALESCE(_description, 'allocation cascade')
+        )
+        RETURNING id INTO _legacy_cash_flow_id;
+
         INSERT INTO public.allocation_postings(
             user_id,
             from_node_id,
@@ -809,28 +828,12 @@ BEGIN
             COALESCE(_description, 'allocation cascade'),
             jsonb_strip_nulls(
                 jsonb_build_object(
+                    'legacy_cash_flow_id', _legacy_cash_flow_id,
                     'legacy_category_id_from', _category_id_from,
                     'legacy_category_id_to', _node.legacy_category_id,
                     'leaf_slug', _node.slug
                 )
             )
-        );
-
-        INSERT INTO public.cash_flow(
-            users_id,
-            category_id_from,
-            category_id_to,
-            value,
-            currency,
-            description
-        )
-        VALUES (
-            _posting_user_id,
-            _category_id_from,
-            _node.legacy_category_id,
-            _amount,
-            _currency,
-            COALESCE(_description, 'allocation cascade')
         );
 
         RETURN;

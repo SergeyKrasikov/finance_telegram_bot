@@ -178,3 +178,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_routes_source_target ON public.a
 CREATE INDEX IF NOT EXISTS idx_allocation_postings_user_datetime ON public.allocation_postings (user_id, datetime DESC);
 CREATE INDEX IF NOT EXISTS idx_allocation_postings_from_node ON public.allocation_postings (from_node_id, datetime DESC) WHERE from_node_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_allocation_postings_to_node ON public.allocation_postings (to_node_id, datetime DESC) WHERE to_node_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_postings_legacy_cash_flow_id
+    ON public.allocation_postings ((metadata->>'legacy_cash_flow_id'))
+    WHERE metadata ? 'legacy_cash_flow_id';
