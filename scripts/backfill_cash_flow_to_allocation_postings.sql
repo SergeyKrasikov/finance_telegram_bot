@@ -14,8 +14,14 @@ INSERT INTO public.allocation_postings (
 SELECT
     cf."datetime",
     cf.users_id,
-    from_node.id,
-    to_node.id,
+    COALESCE(
+        from_node.id,
+        public.ensure_allocation_compatibility_node(cf.users_id, cf.category_id_from)
+    ),
+    COALESCE(
+        to_node.id,
+        public.ensure_allocation_compatibility_node(cf.users_id, cf.category_id_to)
+    ),
     cf.value,
     cf.currency,
     cf.description,
@@ -69,7 +75,12 @@ LEFT JOIN LATERAL (
         an.id
     LIMIT 1
 ) AS to_node ON true
-WHERE (from_node.id IS NOT NULL OR to_node.id IS NOT NULL)
+WHERE (
+        from_node.id IS NOT NULL
+        OR to_node.id IS NOT NULL
+        OR cf.category_id_from IS NOT NULL
+        OR cf.category_id_to IS NOT NULL
+      )
   AND NOT EXISTS (
       SELECT 1
       FROM public.allocation_postings ap
@@ -77,8 +88,14 @@ WHERE (from_node.id IS NOT NULL OR to_node.id IS NOT NULL)
          OR (
              ap."datetime" = cf."datetime"
              AND ap.user_id = cf.users_id
-             AND ap.from_node_id IS NOT DISTINCT FROM from_node.id
-             AND ap.to_node_id IS NOT DISTINCT FROM to_node.id
+             AND ap.from_node_id IS NOT DISTINCT FROM COALESCE(
+                 from_node.id,
+                 public.ensure_allocation_compatibility_node(cf.users_id, cf.category_id_from)
+             )
+             AND ap.to_node_id IS NOT DISTINCT FROM COALESCE(
+                 to_node.id,
+                 public.ensure_allocation_compatibility_node(cf.users_id, cf.category_id_to)
+             )
              AND ap.value = cf.value
              AND ap.currency = cf.currency
              AND COALESCE(ap.description, '') = COALESCE(cf.description, '')

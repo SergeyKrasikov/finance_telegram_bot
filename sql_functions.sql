@@ -18,6 +18,7 @@ DROP FUNCTION IF EXISTS public.get_category_balance_with_currency(bigint, intege
 DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance(bigint, bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text, varchar);
+DROP FUNCTION IF EXISTS public.ensure_allocation_compatibility_node(bigint, integer);
 DROP FUNCTION IF EXISTS public.mirror_cash_flow_row_to_allocation_postings(bigint, text, text, text, jsonb);
 DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_id_from_name(varchar);
@@ -177,6 +178,77 @@ AS $function$
 $function$;
 
 
+-- Ensures a user-owned compatibility node exists for a legacy category so
+-- legacy cash_flow can always be mirrored/backfilled into allocation_postings.
+CREATE OR REPLACE FUNCTION public.ensure_allocation_compatibility_node(
+    _user_id bigint,
+    _legacy_category_id integer
+) RETURNS bigint
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _node_id bigint;
+    _category_name text;
+BEGIN
+    IF _legacy_category_id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT an.id
+    INTO _node_id
+    FROM public.allocation_nodes an
+    WHERE an.active
+      AND an.user_id = _user_id
+      AND an.legacy_category_id = _legacy_category_id
+    ORDER BY an.id
+    LIMIT 1;
+
+    IF _node_id IS NOT NULL THEN
+        RETURN _node_id;
+    END IF;
+
+    SELECT c."name"
+    INTO _category_name
+    FROM public.categories c
+    WHERE c.id = _legacy_category_id;
+
+    IF _category_name IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    INSERT INTO public.allocation_nodes (
+        user_id,
+        slug,
+        "name",
+        description,
+        node_kind,
+        legacy_category_id,
+        visible,
+        include_in_report,
+        active
+    )
+    VALUES (
+        _user_id,
+        CONCAT('legacy_bridge_cat_', _legacy_category_id),
+        _category_name,
+        CONCAT('Compatibility bridge for legacy category ', _legacy_category_id),
+        'both',
+        _legacy_category_id,
+        false,
+        false,
+        true
+    )
+    ON CONFLICT (user_id, slug) WHERE user_id IS NOT NULL
+    DO UPDATE SET
+        legacy_category_id = EXCLUDED.legacy_category_id,
+        active = true
+    RETURNING id INTO _node_id;
+
+    RETURN _node_id;
+END;
+$function$;
+
+
 -- Mirror one legacy cash_flow row into allocation_postings when matching allocation nodes exist.
 -- Used by manual runtime write-paths while cash_flow remains the compatibility ledger.
 CREATE OR REPLACE FUNCTION public.mirror_cash_flow_row_to_allocation_postings(
@@ -229,6 +301,13 @@ BEGIN
         an.id
     LIMIT 1;
 
+    IF _from_node_id IS NULL THEN
+        _from_node_id := public.ensure_allocation_compatibility_node(
+            _cf.users_id,
+            _cf.category_id_from
+        );
+    END IF;
+
     SELECT an.id
     INTO _to_node_id
     FROM public.allocation_nodes an
@@ -247,6 +326,13 @@ BEGIN
         CASE WHEN an.user_id = _cf.users_id THEN 0 ELSE 1 END,
         an.id
     LIMIT 1;
+
+    IF _to_node_id IS NULL THEN
+        _to_node_id := public.ensure_allocation_compatibility_node(
+            _cf.users_id,
+            _cf.category_id_to
+        );
+    END IF;
 
     IF _from_node_id IS NULL AND _to_node_id IS NULL THEN
         RETURN;
