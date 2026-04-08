@@ -18,6 +18,7 @@ DROP FUNCTION IF EXISTS public.get_category_balance_with_currency(bigint, intege
 DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance(bigint, bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text, varchar);
+DROP FUNCTION IF EXISTS public.mirror_cash_flow_row_to_allocation_postings(bigint, text, text, text, jsonb);
 DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_id_from_name(varchar);
 DROP FUNCTION IF EXISTS public.get_categories_id(bigint, integer);
@@ -173,6 +174,114 @@ AS $function$
     )
     SELECT public.get_allocation_node_balance(_user_id, id, _currency)
     FROM target_node;
+$function$;
+
+
+-- Mirror one legacy cash_flow row into allocation_postings when matching allocation nodes exist.
+-- Used by manual runtime write-paths while cash_flow remains the compatibility ledger.
+CREATE OR REPLACE FUNCTION public.mirror_cash_flow_row_to_allocation_postings(
+    _cash_flow_id bigint,
+    _kind text,
+    _subkind text,
+    _origin text,
+    _extra_metadata jsonb DEFAULT '{}'::jsonb
+) RETURNS void
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _cf public.cash_flow%ROWTYPE;
+    _from_node_id bigint;
+    _to_node_id bigint;
+BEGIN
+    SELECT *
+    INTO _cf
+    FROM public.cash_flow
+    WHERE id = _cash_flow_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'cash_flow row % not found', _cash_flow_id;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM public.allocation_postings ap
+        WHERE ap.metadata->>'legacy_cash_flow_id' = _cash_flow_id::text
+    ) THEN
+        RETURN;
+    END IF;
+
+    SELECT an.id
+    INTO _from_node_id
+    FROM public.allocation_nodes an
+    WHERE an.active
+      AND an.legacy_category_id = _cf.category_id_from
+      AND (
+          an.user_id = _cf.users_id
+          OR an.user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _cf.users_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN an.user_id = _cf.users_id THEN 0 ELSE 1 END,
+        an.id
+    LIMIT 1;
+
+    SELECT an.id
+    INTO _to_node_id
+    FROM public.allocation_nodes an
+    WHERE an.active
+      AND an.legacy_category_id = _cf.category_id_to
+      AND (
+          an.user_id = _cf.users_id
+          OR an.user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _cf.users_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN an.user_id = _cf.users_id THEN 0 ELSE 1 END,
+        an.id
+    LIMIT 1;
+
+    IF _from_node_id IS NULL AND _to_node_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO public.allocation_postings(
+        "datetime",
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    VALUES (
+        _cf.datetime,
+        _cf.users_id,
+        _from_node_id,
+        _to_node_id,
+        _cf.value,
+        _cf.currency,
+        _cf.description,
+        jsonb_strip_nulls(
+            jsonb_build_object(
+                'kind', _kind,
+                'subkind', _subkind,
+                'origin', _origin,
+                'legacy_cash_flow_id', _cf.id,
+                'legacy_category_id_from', _cf.category_id_from,
+                'legacy_category_id_to', _cf.category_id_to
+            ) || COALESCE(_extra_metadata, '{}'::jsonb)
+        )
+    );
+END;
 $function$;
 
 
@@ -1372,11 +1481,21 @@ CREATE OR REPLACE FUNCTION public.insert_in_cash_flow(_users_id bigint,
 RETURNS text
 LANGUAGE plpgsql
 AS $function$
+declare
+    _cash_flow_id bigint;
 begin 
 	insert into cash_flow(users_id, datetime, category_id_from, category_id_to, value, currency, description)
-		   values(_users_id, _datetime, _category_id_from, _category_id_to, _value, _currency, _description);
-return 'OK';
-		end
+		   values(_users_id, _datetime, _category_id_from, _category_id_to, _value, _currency, _description)
+        returning id into _cash_flow_id;
+
+    perform public.mirror_cash_flow_row_to_allocation_postings(
+        _cash_flow_id,
+        'cash_flow_insert',
+        'generic',
+        'app'
+    );
+    return 'OK';
+end
 $function$
 ;
 
@@ -1386,15 +1505,25 @@ CREATE OR REPLACE FUNCTION public.insert_spend(_users_id bigint, _category_name_
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
+declare
+    _cash_flow_id bigint;
 begin 
 	insert into cash_flow (users_id, category_id_from, value, currency, description) 
                 select _users_id, c.id, _value, _currency as currency, _description
                 from categories c
                 join categories_category_groups ccg on c.id = ccg.categories_id
                 where ccg.category_groyps_id = 14 and ccg.users_id = _users_id
-                and c."name"=_category_name_from;
-return 'OK';
-		end
+                and c."name"=_category_name_from
+        returning id into _cash_flow_id;
+
+    perform public.mirror_cash_flow_row_to_allocation_postings(
+        _cash_flow_id,
+        'transaction',
+        'spend',
+        'app'
+    );
+    return 'OK';
+end
 $function$
 ;
 
@@ -1403,15 +1532,25 @@ CREATE OR REPLACE FUNCTION public.insert_revenue(_users_id bigint, _category_to 
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
+declare
+    _cash_flow_id bigint;
 begin 
 	insert into cash_flow (users_id, category_id_to, value, currency, description) 
                 select _users_id, c.id, _value, _currency, _description
                 from categories c
                 join categories_category_groups ccg on c.id = ccg.categories_id
                 where ccg.category_groyps_id = 14 and ccg.users_id = _users_id
-                and c."name"=_category_to;
-return 'OK';
-		end
+                and c."name"=_category_to
+        returning id into _cash_flow_id;
+
+    perform public.mirror_cash_flow_row_to_allocation_postings(
+        _cash_flow_id,
+        'transaction',
+        'revenue',
+        'app'
+    );
+    return 'OK';
+end
 $function$
 ;
 
@@ -1546,6 +1685,8 @@ declare
     _rate_in_current numeric;
     _rate_out_text text;
     _rate_in_text text;
+    _cash_flow_id_out bigint;
+    _cash_flow_id_in bigint;
     _stable_currencies text[] := array[
         'USDT','USDC','DAI','BUSD','TUSD','USDP','GUSD','USDN','FRAX','USDD','FDUSD','USDE','SUSD','PYUSD'
     ];
@@ -1618,10 +1759,29 @@ begin
         values(_ts, _currency_in, _rate_in);
     end if;
 
-	insert into cash_flow(users_id, category_id_from, value, currency, description)
-		   values(_users_id, _category_id, _value_out, _currency_out, concat('exchange to ', _value_in, ' ',  _currency_in));
-	insert into cash_flow(users_id, category_id_to, value, currency, description)
-		   values(_users_id, _category_id, _value_in, _currency_in, concat('exchange from ', _value_out, ' ',  _currency_out));
+    insert into cash_flow(users_id, category_id_from, value, currency, description)
+           values(_users_id, _category_id, _value_out, _currency_out, concat('exchange to ', _value_in, ' ',  _currency_in))
+    returning id into _cash_flow_id_out;
+
+    perform public.mirror_cash_flow_row_to_allocation_postings(
+        _cash_flow_id_out,
+        'exchange',
+        'manual',
+        'app',
+        jsonb_build_object('direction', 'out')
+    );
+
+    insert into cash_flow(users_id, category_id_to, value, currency, description)
+           values(_users_id, _category_id, _value_in, _currency_in, concat('exchange from ', _value_out, ' ',  _currency_out))
+    returning id into _cash_flow_id_in;
+
+    perform public.mirror_cash_flow_row_to_allocation_postings(
+        _cash_flow_id_in,
+        'exchange',
+        'manual',
+        'app',
+        jsonb_build_object('direction', 'in')
+    );
 
     if _currency_out = 'USD' then
         _rate_out_current := 1;
@@ -1725,8 +1885,11 @@ DECLARE
     _category_id_from int;
     _rate_src numeric;
     _rate_rub numeric;
+    _cash_flow_exchange_out_id bigint;
+    _cash_flow_exchange_in_id bigint;
+    _cash_flow_spend_id bigint;
     _currency_norm character varying := upper(_currency);
-BEGIN 
+BEGIN
     IF _value <= 0 THEN
         RAISE EXCEPTION 'Spend value must be greater than zero';
     END IF;
@@ -1773,9 +1936,42 @@ BEGIN
 
     INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
     VALUES
-        (_users_id, _reserv_id, _category_id_from, _value, _currency_norm, concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency_norm, ' ', _description)),
-        (_users_id, _category_id_from, _reserv_id, _value_RUB, 'RUB', concat('auto exchange ', _value, ' ', _currency_norm, ' to ', _value_RUB, ' RUB', ' ', _description)),
-        (_users_id, _category_id_from, NULL, _value, _currency_norm, _description);
+        (_users_id, _reserv_id, _category_id_from, _value, _currency_norm, concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency_norm, ' ', _description))
+    RETURNING id INTO _cash_flow_exchange_out_id;
+
+    PERFORM public.mirror_cash_flow_row_to_allocation_postings(
+        _cash_flow_exchange_out_id,
+        'exchange',
+        'auto',
+        'system',
+        jsonb_build_object('direction', 'out')
+    );
+
+    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
+    VALUES
+        (_users_id, _category_id_from, _reserv_id, _value_RUB, 'RUB', concat('auto exchange ', _value, ' ', _currency_norm, ' to ', _value_RUB, ' RUB', ' ', _description))
+    RETURNING id INTO _cash_flow_exchange_in_id;
+
+    PERFORM public.mirror_cash_flow_row_to_allocation_postings(
+        _cash_flow_exchange_in_id,
+        'exchange',
+        'auto',
+        'system',
+        jsonb_build_object('direction', 'in')
+    );
+
+    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
+    VALUES
+        (_users_id, _category_id_from, NULL, _value, _currency_norm, _description)
+    RETURNING id INTO _cash_flow_spend_id;
+
+    PERFORM public.mirror_cash_flow_row_to_allocation_postings(
+        _cash_flow_spend_id,
+        'transaction',
+        'spend',
+        'app',
+        jsonb_build_object('exchange_subkind', 'auto')
+    );
 
     RETURN 'OK';
 END
