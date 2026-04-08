@@ -21,6 +21,9 @@ SELECT
     cf.description,
     jsonb_strip_nulls(
         jsonb_build_object(
+            'kind', 'backfill',
+            'subkind', 'cash_flow',
+            'origin', 'migration',
             'legacy_cash_flow_id', cf.id,
             'legacy_category_id_from', cf.category_id_from,
             'legacy_category_id_to', cf.category_id_to,

@@ -828,6 +828,9 @@ BEGIN
             COALESCE(_description, 'allocation cascade'),
             jsonb_strip_nulls(
                 jsonb_build_object(
+                    'kind', 'monthly',
+                    'subkind', 'leaf_posting',
+                    'origin', 'allocation_runtime',
                     'legacy_cash_flow_id', _legacy_cash_flow_id,
                     'legacy_category_id_from', _category_id_from,
                     'legacy_category_id_to', _node.legacy_category_id,
