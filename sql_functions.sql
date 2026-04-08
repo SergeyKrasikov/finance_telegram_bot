@@ -101,7 +101,7 @@ $function$;
 
 
 -- Возвращает баланс allocation-ноды по новому graph-native ledger.
--- Пока используется только как подготовительный helper: manual transactions ещё не пишут в allocation_postings.
+-- Используется как read-helper во время перехода с cash_flow на allocation_postings.
 CREATE OR REPLACE FUNCTION public.get_allocation_node_balance(
     _user_id bigint,
     _node_id bigint,
@@ -822,18 +822,18 @@ BEGIN
 
     _sum_earnings := (
         SELECT COALESCE(SUM(value), 0)
-        FROM cash_flow
-        WHERE users_id = _user_id
-          AND category_id_from IS NULL
+        FROM public.allocation_postings
+        WHERE user_id = _user_id
+          AND from_node_id IS NULL
           AND NOT public.is_technical_cashflow_description(description)
           AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month'
     );
 
     _sum_spend := (
         SELECT COALESCE(SUM(value), 0)
-        FROM cash_flow
-        WHERE users_id = _user_id
-          AND category_id_to IS NULL
+        FROM public.allocation_postings
+        WHERE user_id = _user_id
+          AND to_node_id IS NULL
           AND NOT public.is_technical_cashflow_description(description)
           AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month'
     );

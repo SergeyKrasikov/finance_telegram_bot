@@ -61,6 +61,8 @@
   - `distribute_to_group(...)`
   - `transact_from_group_to_category(...)`
   - `get_categories_id(...)`
+- Read-path migration started:
+  - `monthly_distribute_cascade()` уже считает `month_earnings` / `month_spend` из `allocation_postings`
 
 ## Порядок безопасной миграции
 
