@@ -282,6 +282,10 @@ BEGIN
         RETURN;
     END IF;
 
+    IF COALESCE(_cf.value, 0) <= 0 THEN
+        RETURN;
+    END IF;
+
     SELECT an.id
     INTO _from_node_id
     FROM public.allocation_nodes an

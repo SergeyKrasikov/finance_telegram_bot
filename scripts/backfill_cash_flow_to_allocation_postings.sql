@@ -127,6 +127,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) AS to_node ON true
 WHERE (from_node.id IS NOT NULL OR to_node.id IS NOT NULL)
+  AND COALESCE(cf.value, 0) > 0
   AND NOT EXISTS (
       SELECT 1
       FROM public.allocation_postings ap
