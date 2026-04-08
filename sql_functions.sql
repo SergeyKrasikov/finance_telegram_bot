@@ -16,6 +16,8 @@ DROP FUNCTION IF EXISTS public.get_all_balances(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_remains(bigint, character);
 DROP FUNCTION IF EXISTS public.get_category_balance_with_currency(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
+DROP FUNCTION IF EXISTS public.get_allocation_node_balance(bigint, bigint, varchar);
+DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text, varchar);
 DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_id_from_name(varchar);
 DROP FUNCTION IF EXISTS public.get_categories_id(bigint, integer);
@@ -93,6 +95,84 @@ BEGIN
 
     RETURN result;
 END;
+$function$;
+
+
+-- Возвращает баланс allocation-ноды по новому graph-native ledger.
+-- Пока используется только как подготовительный helper: manual transactions ещё не пишут в allocation_postings.
+CREATE OR REPLACE FUNCTION public.get_allocation_node_balance(
+    _user_id bigint,
+    _node_id bigint,
+    _currency CHARACTER VARYING DEFAULT 'RUB'::CHARACTER VARYING
+) RETURNS NUMERIC
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    result NUMERIC;
+BEGIN
+    WITH _exchange_rates AS (
+        SELECT DISTINCT ON (currency)
+            currency,
+            rate
+        FROM exchange_rates
+        ORDER BY currency, datetime DESC
+    ),
+    posting_data AS (
+        SELECT
+            CASE
+                WHEN to_node_id = _node_id THEN value
+                ELSE -value
+            END AS value,
+            currency
+        FROM public.allocation_postings ap
+        WHERE (_node_id IN (ap.to_node_id, ap.from_node_id))
+          AND ap.user_id IN (SELECT get_users_id(_user_id))
+    )
+    SELECT
+        SUM(p.value / (src_rate.rate / target_rate.rate))
+    INTO result
+    FROM posting_data p
+    JOIN _exchange_rates src_rate
+      ON src_rate.currency = p.currency
+    JOIN _exchange_rates target_rate
+      ON target_rate.currency = _currency;
+
+    RETURN result;
+END;
+$function$;
+
+
+-- Возвращает баланс allocation-ноды по slug.
+-- Сначала ищет user-owned ноду, затем group-owned ноду среди активных membership пользователя.
+CREATE OR REPLACE FUNCTION public.get_allocation_node_balance_by_slug(
+    _user_id bigint,
+    _slug text,
+    _currency CHARACTER VARYING DEFAULT 'RUB'::CHARACTER VARYING
+) RETURNS NUMERIC
+LANGUAGE sql
+STABLE
+AS $function$
+    WITH target_node AS (
+        SELECT an.id
+        FROM public.allocation_nodes an
+        WHERE an.active
+          AND an.slug = _slug
+          AND (
+              an.user_id = _user_id
+              OR an.user_group_id IN (
+                  SELECT ugm.user_group_id
+                  FROM public.user_group_memberships ugm
+                  WHERE ugm.user_id = _user_id
+                    AND ugm.active
+              )
+          )
+        ORDER BY
+            CASE WHEN an.user_id IS NOT NULL THEN 0 ELSE 1 END,
+            an.id
+        LIMIT 1
+    )
+    SELECT public.get_allocation_node_balance(_user_id, id, _currency)
+    FROM target_node;
 $function$;
 
 
