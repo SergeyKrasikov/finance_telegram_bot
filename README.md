@@ -349,7 +349,8 @@ graph TD
   - `currency`
   - `description`
   - `metadata`
-- Она пока не подключена в runtime и не заменяет `cash_flow`; это подготовительный слой для дальнейшей миграции с `legacy_category_id`.
+- Leaf-проводки нового allocation-движка уже пишутся в `allocation_postings` параллельно с `cash_flow`.
+- `cash_flow` остаётся compatibility ledger; `allocation_postings` пока используется как новый graph-native mirror.
 
 ## Заметки
 - Основная точка входа: `app.py`.

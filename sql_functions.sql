@@ -644,6 +644,7 @@ DECLARE
     _remaining numeric;
     _child_amount numeric;
     _posting_user_id bigint;
+    _posting_from_node_id bigint;
     _next_executor_user_id bigint;
     _next_category_id_from integer;
 BEGIN
@@ -704,6 +705,36 @@ BEGIN
         END IF;
 
         _posting_user_id := COALESCE(_node.user_id, _executor_user_id);
+        _posting_from_node_id := CASE
+            WHEN COALESCE(array_length(_path, 1), 0) > 0
+                THEN _path[array_length(_path, 1)]
+            ELSE NULL
+        END;
+
+        INSERT INTO public.allocation_postings(
+            user_id,
+            from_node_id,
+            to_node_id,
+            value,
+            currency,
+            description,
+            metadata
+        )
+        VALUES (
+            _posting_user_id,
+            _posting_from_node_id,
+            _node.id,
+            _amount,
+            _currency,
+            COALESCE(_description, 'allocation cascade'),
+            jsonb_strip_nulls(
+                jsonb_build_object(
+                    'legacy_category_id_from', _category_id_from,
+                    'legacy_category_id_to', _node.legacy_category_id,
+                    'leaf_slug', _node.slug
+                )
+            )
+        );
 
         INSERT INTO public.cash_flow(
             users_id,
