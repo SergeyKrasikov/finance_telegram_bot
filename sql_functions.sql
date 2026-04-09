@@ -1787,8 +1787,8 @@ end
 $function$
 ;
 
--- Allocation-primary candidate for spend writes.
--- Writes allocation_postings first, then mirrors to cash_flow for compatibility/backfill safety.
+-- Allocation-primary spend write helper.
+-- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
 CREATE OR REPLACE FUNCTION public.insert_spend_v2(_users_id bigint, _category_name_from character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql
@@ -1796,8 +1796,6 @@ AS $function$
 DECLARE
     _node_id bigint;
     _legacy_category_id integer;
-    _cash_flow_id bigint;
-    _allocation_posting_id bigint;
 BEGIN
     IF _value <= 0 THEN
         RAISE EXCEPTION 'Spend value must be greater than zero';
@@ -1838,30 +1836,7 @@ BEGIN
                 'legacy_category_id_from', _legacy_category_id
             )
         )
-    )
-    RETURNING id INTO _allocation_posting_id;
-
-    INSERT INTO public.cash_flow (
-        users_id,
-        category_id_from,
-        value,
-        currency,
-        description
-    )
-    VALUES (
-        _users_id,
-        _legacy_category_id,
-        _value,
-        _currency,
-        _description
-    )
-    RETURNING id INTO _cash_flow_id;
-
-    UPDATE public.allocation_postings
-    SET metadata = jsonb_strip_nulls(
-        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_id)
-    )
-    WHERE id = _allocation_posting_id;
+    );
 
     RETURN 'OK';
 END
@@ -1896,8 +1871,8 @@ end
 $function$
 ;
 
--- Allocation-primary candidate for revenue writes.
--- Writes allocation_postings first, then mirrors to cash_flow for compatibility/backfill safety.
+-- Allocation-primary revenue write helper.
+-- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
 CREATE OR REPLACE FUNCTION public.insert_revenue_v2(_users_id bigint, _category_to character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql
@@ -1905,8 +1880,6 @@ AS $function$
 DECLARE
     _node_id bigint;
     _legacy_category_id integer;
-    _cash_flow_id bigint;
-    _allocation_posting_id bigint;
 BEGIN
     IF _value <= 0 THEN
         RAISE EXCEPTION 'Revenue value must be greater than zero';
@@ -1947,30 +1920,7 @@ BEGIN
                 'legacy_category_id_to', _legacy_category_id
             )
         )
-    )
-    RETURNING id INTO _allocation_posting_id;
-
-    INSERT INTO public.cash_flow (
-        users_id,
-        category_id_to,
-        value,
-        currency,
-        description
-    )
-    VALUES (
-        _users_id,
-        _legacy_category_id,
-        _value,
-        _currency,
-        _description
-    )
-    RETURNING id INTO _cash_flow_id;
-
-    UPDATE public.allocation_postings
-    SET metadata = jsonb_strip_nulls(
-        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_id)
-    )
-    WHERE id = _allocation_posting_id;
+    );
 
     RETURN 'OK';
 END

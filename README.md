@@ -114,6 +114,7 @@ bash scripts/apply_db_schema.sh finance_telegram_bot_postgres_1 my_finance_bot m
   - `tests/sql/exchange_edge_case_checks.sql`
   - `tests/sql/spend_with_exchange_checks.sql`
   - `tests/sql/spend_with_exchange_negative_checks.sql`
+  - `tests/sql/ledger_write_path_checks.sql`
   - `tests/sql/balance_functions_checks.sql`
   - `tests/sql/monthly_business_checks.sql`
   - `tests/sql/monthly_distribute_golden.sql`
@@ -225,7 +226,7 @@ Scheduler:
 - Добавлены helper-функции чтения из нового ledger:
   - `get_allocation_node_balance(...)`
   - `get_allocation_node_balance_by_slug(...)`
-- Runtime пока не переключён на них: manual transactions ещё живут только в `cash_flow`.
+- App runtime manual transactions уже читают и пишут через `allocation_postings`.
 - Финальные критерии замены legacy monthly-функции зафиксированы в `TODO_monthly_cascade.md`, секция `Finalization Checklist`.
 
 ### Monthly Allocation Graph
@@ -353,8 +354,8 @@ graph TD
   - `currency`
   - `description`
   - `metadata`
-- Leaf-проводки нового allocation-движка уже пишутся в `allocation_postings` параллельно с `cash_flow`.
-- `cash_flow` остаётся compatibility ledger; `allocation_postings` пока используется как новый graph-native mirror.
+- Leaf-проводки нового allocation-движка пишутся в `allocation_postings`; legacy `cash_flow` остаётся historical/backfill source.
+- Простые manual spend/revenue write-paths уже ledger-only и больше не создают новые `cash_flow` rows.
 - `monthly_distribute_cascade()` уже читает `month_earnings` и `month_spend` из `allocation_postings`, а не из `cash_flow`.
 - Для безопасного наблюдения за новым ledger добавлен read-only helper:
   - `public.get_last_allocation_postings(user_id, num)`
@@ -390,7 +391,7 @@ graph TD
   Legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)`
   remain in SQL for reference/compare/rollback.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
-- Новые dual-write записи помечаются в `metadata.legacy_cash_flow_id`, чтобы backfill не создавал дубли.
+- Dual-write записи, которые ещё зеркалятся в `cash_flow`, помечаются в `metadata.legacy_cash_flow_id`, чтобы backfill не создавал дубли.
 - Текущая конвенция `metadata`:
   - monthly runtime: `kind=monthly`, `subkind=leaf_posting`, `origin=allocation_runtime`
   - backfill: `kind=backfill`, `subkind=cash_flow`, `origin=migration`

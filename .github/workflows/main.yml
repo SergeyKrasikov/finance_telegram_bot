@@ -66,6 +66,7 @@ jobs:
           psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/exchange_edge_case_checks.sql
           psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_checks.sql
           psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_negative_checks.sql
+          psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/ledger_write_path_checks.sql
           psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/balance_functions_checks.sql
           psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/monthly_business_checks.sql
           psql -h localhost -p 5432 -U postgres -d finance_test -v ON_ERROR_STOP=1 -f tests/sql/monthly_distribute_golden.sql
