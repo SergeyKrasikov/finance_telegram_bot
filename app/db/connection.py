@@ -9,6 +9,7 @@ _ALLOWED_DB_FUNCTIONS = {
     "exchange",
     "get_all_balances",
     "get_all_users_id",
+    "get_last_allocation_postings",
     "get_categories_name",
     "get_category_balance_with_currency",
     "get_category_id_from_name",

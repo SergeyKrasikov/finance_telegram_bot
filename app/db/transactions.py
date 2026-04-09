@@ -7,6 +7,10 @@ async def get_last_transaction(user_id: int, num: int):
     return await db_function("get_last_transaction", user_id, num)
 
 
+async def get_last_allocation_postings(user_id: int, num: int):
+    return await db_function("get_last_allocation_postings", user_id, num)
+
+
 async def delete_transactions(transaction_ids: list[int]) -> None:
     await db_function("delete_transaction", transaction_ids)
 

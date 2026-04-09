@@ -10,6 +10,7 @@ DROP FUNCTION IF EXISTS public.insert_spend(bigint, varchar, numeric, varchar, t
 DROP FUNCTION IF EXISTS public.insert_in_cash_flow(bigint, timestamp, integer, integer, integer, varchar, text);
 DROP FUNCTION IF EXISTS public.get_daily_transactions(bigint);
 DROP FUNCTION IF EXISTS public.get_last_transaction(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_last_allocation_postings(bigint, integer);
 DROP FUNCTION IF EXISTS public.delete_transaction(bigint[]);
 DROP FUNCTION IF EXISTS public.get_group_balance(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_all_balances(bigint, integer);
@@ -1556,6 +1557,59 @@ BEGIN
         LEFT JOIN categories c2 ON cf.category_id_to = c2.id 
         WHERE 
             "rank" = _num
+    );
+END;
+$function$;
+
+
+-- Read-only helper for observing the new allocation ledger without switching /history yet.
+CREATE OR REPLACE FUNCTION public.get_last_allocation_postings(_user_id bigint, _num int)
+RETURNS TABLE (
+    id bigint,
+    datetime timestamp,
+    "from" varchar(100),
+    "to" varchar(100),
+    value varchar,
+    currency varchar(16),
+    description text,
+    kind text,
+    subkind text,
+    origin text
+)
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY (
+        SELECT
+            ap.id,
+            ap.datetime,
+            src."name" AS "from",
+            dst."name" AS "to",
+            CAST(
+                CASE
+                    WHEN ABS(ap.value) >= 1 THEN REPLACE(TO_CHAR(ap.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+                    WHEN ap.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM ap.value::text), '.')
+                    ELSE ap.value::text
+                END
+            AS varchar) AS value,
+            ap.currency,
+            ap.description,
+            ap.metadata->>'kind' AS kind,
+            ap.metadata->>'subkind' AS subkind,
+            ap.metadata->>'origin' AS origin
+        FROM (
+            SELECT
+                ap_sub.*,
+                dense_rank() OVER (ORDER BY ap_sub.datetime DESC) AS "rank"
+            FROM public.allocation_postings ap_sub
+            WHERE ap_sub.user_id = _user_id
+        ) ap
+        LEFT JOIN public.allocation_nodes src
+          ON src.id = ap.from_node_id
+        LEFT JOIN public.allocation_nodes dst
+          ON dst.id = ap.to_node_id
+        WHERE ap."rank" = _num
+        ORDER BY ap.id
     );
 END;
 $function$;

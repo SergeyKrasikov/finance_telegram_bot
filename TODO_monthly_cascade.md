@@ -63,6 +63,7 @@
   - `get_categories_id(...)`
 - Read-path migration started:
   - `monthly_distribute_cascade()` уже считает `month_earnings` / `month_spend` из `allocation_postings`
+  - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
 
 ## Порядок безопасной миграции
 
