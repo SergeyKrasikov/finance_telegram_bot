@@ -361,7 +361,8 @@ graph TD
 - `monthly_distribute_cascade()` уже передаёт source category node id в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и основного `salary_primary` split.
   `legacy_category_id` пока остаётся compatibility-полем для балансов, metadata и bridge/backfill, но больше не является единственным способом выбрать debit-node внутри monthly runtime.
 - Вызовы `allocation_distribute(...)` из `monthly_distribute_cascade()` больше не передают legacy source category id; он выводится из source node только как compatibility metadata.
-- `monthly()` больше не передаёт hard-coded income category id; `salary_primary` берёт стартовую income leaf из `allocation_nodes.metadata.source_category_node_id`.
+- `monthly()` больше не содержит hard-coded monthly users и income category id; entrypoint запускает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots.
+  `salary_primary` берёт стартовую income leaf из `allocation_nodes.metadata.source_category_node_id`.
   Старый параметр `_income_category` в `monthly_distribute_cascade()` сохранён как fallback на время миграции.
 - Internal helper `monthly_distribute_allocation(...)` уже может принимать явный `source_category_node_id` без обязательного legacy category id.
 - Partner bridge `family_contribution_out -> family_contribution_in` берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id.

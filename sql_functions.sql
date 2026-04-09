@@ -2470,9 +2470,12 @@ CREATE OR REPLACE FUNCTION public.monthly()
 AS $function$
 BEGIN
     RETURN QUERY
-        SELECT public.monthly_distribute_cascade(943915310)
-        UNION ALL
-        SELECT public.monthly_distribute_cascade(249716305);
+        SELECT public.monthly_distribute_cascade(salary_root.user_id)
+        FROM public.allocation_nodes salary_root
+        WHERE salary_root.active
+          AND salary_root.user_id IS NOT NULL
+          AND salary_root.slug = 'salary_primary'
+        ORDER BY salary_root.id;
 end
 $function$
 ;  

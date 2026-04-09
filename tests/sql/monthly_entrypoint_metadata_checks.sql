@@ -26,15 +26,16 @@ BEGIN
     SELECT pg_get_functiondef('public.monthly()'::regprocedure)
     INTO monthly_def;
 
-    IF POSITION('monthly_distribute_cascade' IN monthly_def) = 0
-       OR POSITION('943915310' IN monthly_def) = 0
-       OR POSITION('249716305' IN monthly_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly() to call monthly_distribute_cascade() for both monthly users';
+    IF POSITION('monthly_distribute_cascade(salary_root.user_id)' IN monthly_def) = 0
+       OR POSITION('salary_root.slug = ''salary_primary''' IN monthly_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly() to discover monthly users from active salary_primary roots';
     END IF;
 
-    IF POSITION(', 37' IN monthly_def) > 0
+    IF POSITION('943915310' IN monthly_def) > 0
+       OR POSITION('249716305' IN monthly_def) > 0
+       OR POSITION(', 37' IN monthly_def) > 0
        OR POSITION(', 16' IN monthly_def) > 0 THEN
-        RAISE EXCEPTION 'monthly() still passes hard-coded legacy income category ids';
+        RAISE EXCEPTION 'monthly() still hard-codes monthly users or legacy income category ids';
     END IF;
 
     SELECT pg_get_functiondef('public.monthly_distribute_cascade(bigint,integer)'::regprocedure)

@@ -67,7 +67,7 @@
   - `free_to_gifts` уже считает free balance через `get_allocation_node_balance(...)` по remainder node id
   - `monthly_distribute_cascade()` уже передаёт явный source allocation node в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и `salary_primary`
   - `monthly_distribute_cascade()` больше не передаёт legacy source category id в `allocation_distribute(...)`; lower-level функция выводит его из source node только для compatibility metadata
-  - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` без hard-coded legacy income category id; source leaf для `salary_primary` хранится в `allocation_nodes.metadata.source_category_node_id`
+  - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots, без hard-coded monthly users и legacy income category id; source leaf для `salary_primary` хранится в `allocation_nodes.metadata.source_category_node_id`
   - `monthly_distribute_allocation(...)` уже поддерживает явный source allocation node без обязательного legacy category id
   - partner bridge уже берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id
   - graph-native leaf-ноды уже могут писать `allocation_postings` без `legacy_category_id`
@@ -126,6 +126,7 @@
 
 7. Переключение entrypoint
 - `monthly()` переведён на `monthly_distribute_cascade()`.
+- Список monthly users берётся из активных user-owned `salary_primary` roots.
 - `monthly_distribute()` остаётся в базе как legacy reference/rollback и пока не удаляется.
 
 ## Что ещё нужно сделать в схеме
