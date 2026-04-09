@@ -58,12 +58,13 @@ BEGIN
         RAISE EXCEPTION 'Unexpected exchange message for FDUSD: %', msg;
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM cash_flow
-        WHERE users_id = 905001
+    IF (
+        SELECT count(DISTINCT currency)
+        FROM allocation_postings
+        WHERE user_id = 905001
           AND currency IN ('USDT', 'FDUSD')
-    ) THEN
-        RAISE EXCEPTION 'Expected cash_flow rows with long currency codes';
+    ) <> 2 THEN
+        RAISE EXCEPTION 'Expected ledger rows with long currency codes';
     END IF;
 
     IF (

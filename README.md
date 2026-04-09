@@ -388,6 +388,7 @@ graph TD
   - `public.insert_spend_with_exchange_v2(...)`
   - `public.exchange_v2(...)`
   App write-paths for manual spend/revenue, auto-exchange spend, and manual exchange already use these v2 functions.
+  Simple manual spend/revenue and manual exchange are ledger-only; auto-exchange spend still dual-writes for compatibility.
   Legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)`
   remain in SQL for reference/compare/rollback.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).

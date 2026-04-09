@@ -113,6 +113,8 @@ DO $$
 DECLARE v text;
 DECLARE t text;
 DECLARE ledger_rows int;
+DECLARE linked_legacy_rows int;
+DECLARE cash_flow_rows int;
 BEGIN
     SELECT count(*)
     INTO ledger_rows
@@ -125,9 +127,30 @@ BEGIN
         RAISE EXCEPTION 'Test failed: expected 8 manual exchange ledger rows, got %', ledger_rows;
     END IF;
 
+    SELECT count(*)
+    INTO linked_legacy_rows
+    FROM allocation_postings
+    WHERE user_id = 900001
+      AND metadata->>'kind' = 'exchange'
+      AND metadata->>'subkind' = 'manual'
+      AND metadata ? 'legacy_cash_flow_id';
+
+    IF linked_legacy_rows <> 0 THEN
+        RAISE EXCEPTION 'Test failed: expected no legacy_cash_flow_id for ledger-only exchange, got %', linked_legacy_rows;
+    END IF;
+
+    SELECT count(*)
+    INTO cash_flow_rows
+    FROM cash_flow
+    WHERE users_id = 900001;
+
+    IF cash_flow_rows <> 0 THEN
+        RAISE EXCEPTION 'Test failed: expected no cash_flow rows for ledger-only exchange, got %', cash_flow_rows;
+    END IF;
+
     SELECT value, pg_typeof(value)::text
     INTO v, t
-    FROM get_last_transaction(900001, 1)
+    FROM get_last_transaction_v2(900001, 1)
     LIMIT 1;
 
     IF t <> 'character varying' THEN

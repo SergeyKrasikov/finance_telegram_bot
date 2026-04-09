@@ -86,6 +86,10 @@ BEGIN
     IF (SELECT count(*) FROM cash_flow WHERE users_id = 904001) <> 0 THEN
         RAISE EXCEPTION 'Failed exchange should not create cash_flow rows';
     END IF;
+
+    IF (SELECT count(*) FROM allocation_postings WHERE user_id = 904001) <> 0 THEN
+        RAISE EXCEPTION 'Failed exchange should not create ledger rows';
+    END IF;
 END $$;
 
 ROLLBACK;

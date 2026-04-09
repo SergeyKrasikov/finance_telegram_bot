@@ -2306,7 +2306,7 @@ $function$
 ;
 
 -- Allocation-primary manual exchange.
--- Preserves legacy rate update rules and mirrors two compatibility rows to cash_flow.
+-- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
 CREATE OR REPLACE FUNCTION public.exchange_v2(_users_id bigint, _category_id int, _value_out numeric, _currency_out character VARYING, _value_in numeric, _currency_in character varying)
  RETURNS text
  LANGUAGE plpgsql
@@ -2319,8 +2319,6 @@ declare
     _rate_out_text text;
     _rate_in_text text;
     _category_node_id bigint;
-    _cash_flow_id_out bigint;
-    _cash_flow_id_in bigint;
     _allocation_posting_id_out bigint;
     _allocation_posting_id_in bigint;
     _currency_out_norm varchar := upper(_currency_out);
@@ -2450,14 +2448,6 @@ begin
     )
     returning id into _allocation_posting_id_out;
 
-    insert into cash_flow(users_id, category_id_from, value, currency, description)
-           values(_users_id, _category_id, _value_out, _currency_out_norm, concat('exchange to ', _value_in, ' ',  _currency_in_norm))
-    returning id into _cash_flow_id_out;
-
-    update public.allocation_postings
-    set metadata = metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_id_out)
-    where id = _allocation_posting_id_out;
-
     insert into public.allocation_postings(
         user_id,
         from_node_id,
@@ -2485,15 +2475,8 @@ begin
     )
     returning id into _allocation_posting_id_in;
 
-    insert into cash_flow(users_id, category_id_to, value, currency, description)
-           values(_users_id, _category_id, _value_in, _currency_in_norm, concat('exchange from ', _value_out, ' ',  _currency_out_norm))
-    returning id into _cash_flow_id_in;
-
     update public.allocation_postings
-    set metadata = metadata || jsonb_build_object(
-        'legacy_cash_flow_id', _cash_flow_id_in,
-        'paired_posting_id', _allocation_posting_id_out
-    )
+    set metadata = metadata || jsonb_build_object('paired_posting_id', _allocation_posting_id_out)
     where id = _allocation_posting_id_in;
 
     update public.allocation_postings
