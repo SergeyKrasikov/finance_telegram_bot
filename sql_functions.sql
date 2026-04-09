@@ -6,7 +6,9 @@ DROP FUNCTION IF EXISTS public.transact_from_group_to_category(bigint, integer, 
 DROP FUNCTION IF EXISTS public.exchange(bigint, integer, numeric, varchar, numeric, varchar);
 DROP FUNCTION IF EXISTS public.insert_spend_with_exchange(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_revenue(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_revenue_v2(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_spend(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_spend_v2(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_in_cash_flow(bigint, timestamp, integer, integer, integer, varchar, text);
 DROP FUNCTION IF EXISTS public.get_daily_transactions(bigint);
 DROP FUNCTION IF EXISTS public.get_daily_allocation_transactions(bigint);
@@ -32,6 +34,7 @@ DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_categories_name_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_id_from_name(varchar);
 DROP FUNCTION IF EXISTS public.get_category_id_from_name_v2(bigint, varchar);
+DROP FUNCTION IF EXISTS public.find_allocation_category_node_id_by_name(bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_categories_id(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_currency();
 DROP FUNCTION IF EXISTS public.get_all_users_id();
@@ -1780,6 +1783,87 @@ end
 $function$
 ;
 
+-- Allocation-primary candidate for spend writes.
+-- Writes allocation_postings first, then mirrors to cash_flow for compatibility/backfill safety.
+CREATE OR REPLACE FUNCTION public.insert_spend_v2(_users_id bigint, _category_name_from character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
+ RETURNS text
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _node_id bigint;
+    _legacy_category_id integer;
+    _cash_flow_id bigint;
+    _allocation_posting_id bigint;
+BEGIN
+    IF _value <= 0 THEN
+        RAISE EXCEPTION 'Spend value must be greater than zero';
+    END IF;
+
+    _node_id := public.find_allocation_category_node_id_by_name(_users_id, _category_name_from);
+
+    IF _node_id IS NULL THEN
+        RAISE EXCEPTION 'Allocation category node not found for user %, category %', _users_id, _category_name_from;
+    END IF;
+
+    SELECT legacy_category_id
+    INTO _legacy_category_id
+    FROM public.allocation_nodes
+    WHERE id = _node_id;
+
+    INSERT INTO public.allocation_postings (
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    VALUES (
+        _users_id,
+        _node_id,
+        NULL,
+        _value,
+        _currency,
+        _description,
+        jsonb_strip_nulls(
+            jsonb_build_object(
+                'kind', 'transaction',
+                'subkind', 'spend',
+                'origin', 'app',
+                'legacy_category_id_from', _legacy_category_id
+            )
+        )
+    )
+    RETURNING id INTO _allocation_posting_id;
+
+    INSERT INTO public.cash_flow (
+        users_id,
+        category_id_from,
+        value,
+        currency,
+        description
+    )
+    VALUES (
+        _users_id,
+        _legacy_category_id,
+        _value,
+        _currency,
+        _description
+    )
+    RETURNING id INTO _cash_flow_id;
+
+    UPDATE public.allocation_postings
+    SET metadata = jsonb_strip_nulls(
+        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_id)
+    )
+    WHERE id = _allocation_posting_id;
+
+    RETURN 'OK';
+END
+$function$
+;
+
 -- Принимает поля доходов и записывает в таблицу cash_flow
 CREATE OR REPLACE FUNCTION public.insert_revenue(_users_id bigint, _category_to character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
  RETURNS text
@@ -1804,6 +1888,87 @@ begin
     );
     return 'OK';
 end
+$function$
+;
+
+-- Allocation-primary candidate for revenue writes.
+-- Writes allocation_postings first, then mirrors to cash_flow for compatibility/backfill safety.
+CREATE OR REPLACE FUNCTION public.insert_revenue_v2(_users_id bigint, _category_to character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
+ RETURNS text
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _node_id bigint;
+    _legacy_category_id integer;
+    _cash_flow_id bigint;
+    _allocation_posting_id bigint;
+BEGIN
+    IF _value <= 0 THEN
+        RAISE EXCEPTION 'Revenue value must be greater than zero';
+    END IF;
+
+    _node_id := public.find_allocation_category_node_id_by_name(_users_id, _category_to);
+
+    IF _node_id IS NULL THEN
+        RAISE EXCEPTION 'Allocation category node not found for user %, category %', _users_id, _category_to;
+    END IF;
+
+    SELECT legacy_category_id
+    INTO _legacy_category_id
+    FROM public.allocation_nodes
+    WHERE id = _node_id;
+
+    INSERT INTO public.allocation_postings (
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    VALUES (
+        _users_id,
+        NULL,
+        _node_id,
+        _value,
+        _currency,
+        _description,
+        jsonb_strip_nulls(
+            jsonb_build_object(
+                'kind', 'transaction',
+                'subkind', 'revenue',
+                'origin', 'app',
+                'legacy_category_id_to', _legacy_category_id
+            )
+        )
+    )
+    RETURNING id INTO _allocation_posting_id;
+
+    INSERT INTO public.cash_flow (
+        users_id,
+        category_id_to,
+        value,
+        currency,
+        description
+    )
+    VALUES (
+        _users_id,
+        _legacy_category_id,
+        _value,
+        _currency,
+        _description
+    )
+    RETURNING id INTO _cash_flow_id;
+
+    UPDATE public.allocation_postings
+    SET metadata = jsonb_strip_nulls(
+        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_id)
+    )
+    WHERE id = _allocation_posting_id;
+
+    RETURN 'OK';
+END
 $function$
 ;
 
@@ -2204,6 +2369,33 @@ CREATE OR REPLACE FUNCTION public.get_category_id_from_name_v2(_user_id bigint, 
  STABLE
 AS $function$
     SELECT an.legacy_category_id
+    FROM public.allocation_nodes an
+    WHERE an.active
+      AND an.legacy_category_id IS NOT NULL
+      AND an."name" = _category_name
+      AND (
+          an.user_id = _user_id
+          OR an.user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _user_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN an.user_id = _user_id THEN 0 ELSE 1 END,
+        an.id
+    LIMIT 1;
+$function$
+;
+
+-- Finds a writable user/category node by display name.
+CREATE OR REPLACE FUNCTION public.find_allocation_category_node_id_by_name(_user_id bigint, _category_name varchar)
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT an.id
     FROM public.allocation_nodes an
     WHERE an.active
       AND an.legacy_category_id IS NOT NULL

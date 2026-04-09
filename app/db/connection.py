@@ -20,7 +20,9 @@ _ALLOWED_DB_FUNCTIONS = {
     "get_last_transaction_v2",
     "get_remains_v2",
     "insert_revenue",
+    "insert_revenue_v2",
     "insert_spend",
+    "insert_spend_v2",
     "insert_spend_with_exchange",
     "monthly",
 }

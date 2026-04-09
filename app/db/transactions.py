@@ -29,6 +29,16 @@ async def insert_revenue(
     await db_function("insert_revenue", user_id, category, amount, currency, comment)
 
 
+async def insert_revenue_v2(
+    user_id: int,
+    category: str,
+    amount: Decimal,
+    currency: str,
+    comment: str | None = None,
+) -> None:
+    await db_function("insert_revenue_v2", user_id, category, amount, currency, comment)
+
+
 async def insert_spend(
     user_id: int,
     category: str,
@@ -37,6 +47,16 @@ async def insert_spend(
     comment: str | None = None,
 ) -> None:
     await db_function("insert_spend", user_id, category, amount, currency, comment)
+
+
+async def insert_spend_v2(
+    user_id: int,
+    category: str,
+    amount: Decimal,
+    currency: str,
+    comment: str | None = None,
+) -> None:
+    await db_function("insert_spend_v2", user_id, category, amount, currency, comment)
 
 
 async def insert_spend_with_exchange(
