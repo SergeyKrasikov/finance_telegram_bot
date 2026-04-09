@@ -29,7 +29,9 @@ DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text,
 DROP FUNCTION IF EXISTS public.ensure_allocation_compatibility_node(bigint, integer);
 DROP FUNCTION IF EXISTS public.mirror_cash_flow_row_to_allocation_postings(bigint, text, text, text, jsonb);
 DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_categories_name_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_id_from_name(varchar);
+DROP FUNCTION IF EXISTS public.get_category_id_from_name_v2(bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_categories_id(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_currency();
 DROP FUNCTION IF EXISTS public.get_all_users_id();
@@ -1807,7 +1809,8 @@ $function$
 
 
 
--- принимает имя юзера и id группы и возвращает имена категорий этой группы, работает используя функцию get_categories_id
+-- LEGACY categories_category_groups-backed category lookup.
+-- App read-paths use get_categories_name_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.get_categories_name(_user_id bigint, _groyps_id integer)
  RETURNS TABLE("name" varchar)
  LANGUAGE plpgsql
@@ -1815,6 +1818,33 @@ AS $function$
 begin
 return query (select c."name" from public.categories c where c.id in (select public.get_categories_id(_user_id, _groyps_id)));
 		end
+$function$
+;
+
+-- Allocation-backed category lookup for UI category lists.
+CREATE OR REPLACE FUNCTION public.get_categories_name_v2(_user_id bigint, _groyps_id integer)
+ RETURNS TABLE("name" varchar)
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT DISTINCT an."name"
+    FROM public.allocation_nodes an
+    JOIN public.allocation_node_groups ang
+      ON ang.node_id = an.id
+     AND ang.active
+    WHERE an.active
+      AND an.legacy_category_id IS NOT NULL
+      AND ang.legacy_group_id = _groyps_id
+      AND (
+          an.user_id = _user_id
+          OR an.user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _user_id
+                AND ugm.active
+          )
+      )
+    ORDER BY an."name";
 $function$
 ;
 
@@ -2154,7 +2184,8 @@ return format('Курс: %s=%s, %s=%s (за 1 USD)',
 $function$
 ;
 
---получение id категории из имени
+-- LEGACY global category lookup by name.
+-- App read-paths use get_category_id_from_name_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.get_category_id_from_name( _category_name varchar)
  RETURNS int
  LANGUAGE plpgsql
@@ -2163,6 +2194,33 @@ begin
 return (SELECT id FROM categories WHERE "name" = _category_name)
 			  ;
 		end
+$function$
+;
+
+-- Allocation-backed user-aware category lookup by display name.
+CREATE OR REPLACE FUNCTION public.get_category_id_from_name_v2(_user_id bigint, _category_name varchar)
+ RETURNS int
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT an.legacy_category_id
+    FROM public.allocation_nodes an
+    WHERE an.active
+      AND an.legacy_category_id IS NOT NULL
+      AND an."name" = _category_name
+      AND (
+          an.user_id = _user_id
+          OR an.user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _user_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN an.user_id = _user_id THEN 0 ELSE 1 END,
+        an.id
+    LIMIT 1;
 $function$
 ;
 

@@ -74,6 +74,8 @@
   - `/balance` и spend balance checks уже используют v2 balance helpers
   - legacy cash_flow-backed balance helpers оставлены в SQL, но убраны из app allowlist
   - legacy cash_flow-backed `get_last_transaction(...)` оставлен в SQL, но убран из app allowlist
+  - category UI lookup уже использует allocation-backed `get_categories_name_v2` и `get_category_id_from_name_v2`
+  - legacy `categories_category_groups` lookup helpers оставлены в SQL, но убраны из app allowlist
 
 ## Порядок безопасной миграции
 

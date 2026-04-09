@@ -99,6 +99,14 @@ constraint allocation_routes_percent_check
     check (percent > 0 and percent <= 1)
 );
 
+create table if not exists public.allocation_node_groups (
+id bigserial primary key,
+node_id bigint not null references public.allocation_nodes(id) on delete cascade,
+legacy_group_id int not null references category_groups(id),
+active boolean not null default true,
+unique(node_id, legacy_group_id)
+);
+
 create table if not exists public.allocation_postings (
 id bigserial primary key,
 "datetime" timestamp not null default now(),
@@ -175,6 +183,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_nodes_group_slug ON public.alloc
 CREATE INDEX IF NOT EXISTS idx_allocation_routes_source ON public.allocation_routes (source_node_id);
 CREATE INDEX IF NOT EXISTS idx_allocation_routes_target ON public.allocation_routes (target_node_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_routes_source_target ON public.allocation_routes (source_node_id, target_node_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_node_groups_group ON public.allocation_node_groups (legacy_group_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_node_groups_node ON public.allocation_node_groups (node_id);
 CREATE INDEX IF NOT EXISTS idx_allocation_postings_user_datetime ON public.allocation_postings (user_id, datetime DESC);
 CREATE INDEX IF NOT EXISTS idx_allocation_postings_from_node ON public.allocation_postings (from_node_id, datetime DESC) WHERE from_node_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_allocation_postings_to_node ON public.allocation_postings (to_node_id, datetime DESC) WHERE to_node_id IS NOT NULL;

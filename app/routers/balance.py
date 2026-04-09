@@ -66,7 +66,7 @@ async def getting_balance(message: Message, state: FSMContext) -> None:
     elif message.text == "По категориям c валютами":
         balances = []
         for category in await get_categories_name(message.chat.id, GROUP_ALL):
-            category_id = await get_category_id_from_name(category)
+            category_id = await get_category_id_from_name(message.chat.id, category)
             balance = await get_category_balance_with_currency(
                 message.chat.id, category_id
             )

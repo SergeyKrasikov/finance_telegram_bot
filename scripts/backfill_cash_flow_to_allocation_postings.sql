@@ -58,6 +58,31 @@ DO UPDATE SET
     legacy_category_id = EXCLUDED.legacy_category_id,
     active = true;
 
+INSERT INTO public.allocation_node_groups (
+    node_id,
+    legacy_group_id,
+    active
+)
+SELECT DISTINCT
+    an.id,
+    ccg.category_groyps_id,
+    true
+FROM public.categories_category_groups ccg
+JOIN public.allocation_nodes an
+  ON an.active
+ AND an.legacy_category_id = ccg.categories_id
+ AND (
+     an.user_id = ccg.users_id
+     OR an.user_group_id IN (
+         SELECT ugm.user_group_id
+         FROM public.user_group_memberships ugm
+         WHERE ugm.user_id = ccg.users_id
+           AND ugm.active
+     )
+ )
+ON CONFLICT (node_id, legacy_group_id)
+DO UPDATE SET active = EXCLUDED.active;
+
 INSERT INTO public.allocation_postings (
     "datetime",
     user_id,
