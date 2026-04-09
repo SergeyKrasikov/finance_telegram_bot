@@ -62,7 +62,7 @@
   - `transact_from_group_to_category(...)`
   - `get_categories_id(...)`
 - Read-path migration started:
-  - `monthly_distribute_cascade()` уже считает `month_earnings` / `month_spend` из `allocation_postings`
+  - monthly allocation helpers уже считают source balance, `month_earnings` / `month_spend` из `allocation_postings`
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
   - `/history` читает ledger-backed `get_last_transaction_v2(user_id, num)`
   - delete-flow удаляет `allocation_postings` и linked legacy `cash_flow`, если он есть в metadata
@@ -186,10 +186,7 @@
   - `categories.percent`
   - `category_groups`
   - ручных формул из `_sum_value`
-- Допустимо оставить legacy-подсчёт только для:
-  - `month_earnings`
-  - `month_spend`
-  если они по-прежнему читаются из `cash_flow`.
+- `month_earnings` и `month_spend` читаются из `allocation_postings`, а не из `cash_flow`.
 
 ### 4. Reserve rule зафиксирован
 

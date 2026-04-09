@@ -1266,24 +1266,24 @@ BEGIN
     END IF;
 
     _source_amount := COALESCE(
-        public.get_category_balance(_executor_user_id, _category_id_from, _currency),
+        public.get_category_balance_v2(_executor_user_id, _category_id_from, _currency),
         0
     );
 
     _sum_earnings := (
         SELECT COALESCE(SUM(value), 0)
-        FROM public.cash_flow
-        WHERE users_id = _executor_user_id
-          AND category_id_from IS NULL
+        FROM public.allocation_postings
+        WHERE user_id = _executor_user_id
+          AND from_node_id IS NULL
           AND NOT public.is_technical_cashflow_description(description)
           AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month'
     );
 
     _sum_spend := (
         SELECT COALESCE(SUM(value), 0)
-        FROM public.cash_flow
-        WHERE users_id = _executor_user_id
-          AND category_id_to IS NULL
+        FROM public.allocation_postings
+        WHERE user_id = _executor_user_id
+          AND to_node_id IS NULL
           AND NOT public.is_technical_cashflow_description(description)
           AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month'
     );

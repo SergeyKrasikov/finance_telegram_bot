@@ -57,6 +57,8 @@ INSERT INTO allocation_nodes(
 VALUES
     (906011, NULL, 'test_monthly_root', 'test monthly root', 'root node', 'technical', NULL, false, false, true),
     (906011, NULL, 'test_monthly_stage', 'test monthly stage', 'stage node', 'technical', NULL, false, true, true),
+    (906011, NULL, 'test_monthly_source', 'test monthly source', 'source balance node', 'income', 906299, true, false, true),
+    (906011, NULL, 'test_monthly_history', 'test monthly history', 'history bucket node', 'both', 906294, true, false, true),
     (906011, NULL, 'test_monthly_personal', 'test monthly personal', 'personal leaf', 'expense', 906291, true, true, true),
     (906012, NULL, 'test_monthly_partner', 'test monthly partner', 'partner leaf', 'expense', 906293, true, true, true);
 
@@ -129,28 +131,43 @@ JOIN allocation_nodes dst
 WHERE src.user_id = 906011
   AND src.slug = 'test_monthly_stage';
 
-INSERT INTO cash_flow(users_id, category_id_to, value, currency, description)
-VALUES (906011, 906299, 100, 'RUB', 'fixture source balance');
+INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
+SELECT
+    906011,
+    id,
+    100,
+    'RUB',
+    'fixture source balance',
+    jsonb_build_object('kind', 'fixture')
+FROM allocation_nodes
+WHERE user_id = 906011
+  AND slug = 'test_monthly_source';
 
-INSERT INTO cash_flow(users_id, datetime, category_id_to, value, currency, description)
-VALUES (
+INSERT INTO allocation_postings(user_id, datetime, to_node_id, value, currency, description, metadata)
+SELECT
     906011,
     date_trunc('month', now()) - INTERVAL '15 days',
-    906294,
+    id,
     70,
     'RUB',
-    'fixture previous earning'
-);
+    'fixture previous earning',
+    jsonb_build_object('kind', 'fixture')
+FROM allocation_nodes
+WHERE user_id = 906011
+  AND slug = 'test_monthly_history';
 
-INSERT INTO cash_flow(users_id, datetime, category_id_from, value, currency, description)
-VALUES (
+INSERT INTO allocation_postings(user_id, datetime, from_node_id, value, currency, description, metadata)
+SELECT
     906011,
     date_trunc('month', now()) - INTERVAL '10 days',
-    906294,
+    id,
     30,
     'RUB',
-    'fixture previous spend'
-);
+    'fixture previous spend',
+    jsonb_build_object('kind', 'fixture')
+FROM allocation_nodes
+WHERE user_id = 906011
+  AND slug = 'test_monthly_history';
 
 DO $$
 DECLARE
