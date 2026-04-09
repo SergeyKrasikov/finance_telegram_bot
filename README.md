@@ -355,7 +355,7 @@ graph TD
 - Leaf-проводки нового allocation-движка пишутся только в `allocation_postings`; legacy `cash_flow` остаётся historical/backfill source.
 - Простые manual spend/revenue write-paths уже ledger-only и больше не создают новые `cash_flow` rows.
 - Monthly allocation helpers уже читают source balance, `month_earnings` и `month_spend` из `allocation_postings`, а не из `cash_flow`.
-- `monthly_distribute_cascade()` уже читает orchestration balances из ledger-backed `get_category_balance_v2(...)`.
+- `monthly_distribute_cascade()` уже читает source balances через graph-native `get_allocation_node_balance(...)` по source node id.
 - `monthly_distribute_cascade()` уже берёт source category membership из `allocation_node_groups`, а не напрямую из `categories_category_groups`.
 - `free_to_gifts` уже берёт free balance через `get_allocation_node_balance(...)` по remainder node id.
 - `monthly_distribute_cascade()` уже передаёт source category node id в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и основного `salary_primary` split.

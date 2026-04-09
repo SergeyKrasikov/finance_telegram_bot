@@ -62,7 +62,7 @@
   - `get_categories_id(...)`
 - Read-path migration started:
   - monthly allocation helpers уже считают source balance, `month_earnings` / `month_spend` из `allocation_postings`
-  - `monthly_distribute_cascade()` уже читает orchestration balances через `get_category_balance_v2(...)`
+  - `monthly_distribute_cascade()` уже читает source balances через graph-native `get_allocation_node_balance(...)` по source node id
   - `monthly_distribute_cascade()` уже берёт source category membership из `allocation_node_groups`, а не напрямую из `categories_category_groups`
   - `free_to_gifts` уже считает free balance через `get_allocation_node_balance(...)` по remainder node id
   - `monthly_distribute_cascade()` уже передаёт явный source allocation node в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и `salary_primary`

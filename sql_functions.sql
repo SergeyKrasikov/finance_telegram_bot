@@ -748,7 +748,7 @@ BEGIN
         SELECT
             source_node.id AS source_category_node_id,
             source_node.legacy_category_id AS category_id_from,
-            public.get_category_balance_v2(_user_id, source_node.legacy_category_id, 'RUB') AS balance
+            public.get_allocation_node_balance(_user_id, source_node.id, 'RUB') AS balance
         FROM public.allocation_nodes source_node
         JOIN public.allocation_node_groups source_group
           ON source_group.node_id = source_node.id
@@ -787,7 +787,7 @@ BEGIN
         SELECT
             source_node.id AS source_category_node_id,
             source_node.legacy_category_id AS category_id_from,
-            public.get_category_balance_v2(_user_id, source_node.legacy_category_id, 'RUB') AS balance
+            public.get_allocation_node_balance(_user_id, source_node.id, 'RUB') AS balance
         FROM public.allocation_nodes source_node
         JOIN public.allocation_node_groups source_group
           ON source_group.node_id = source_node.id
@@ -876,7 +876,11 @@ BEGIN
           AND personal_group.legacy_group_id = 15
         ORDER BY category_id
     LOOP
-        _balance := public.get_category_balance_v2(_user_id, _source.category_id, 'RUB');
+        _balance := public.get_allocation_node_balance(
+            _user_id,
+            _source.source_category_node_id,
+            'RUB'
+        );
 
         IF COALESCE(_balance, 0) >= 0 THEN
             CONTINUE;
@@ -899,10 +903,6 @@ BEGIN
         );
     END LOOP;
 
-    _sum_value := (
-        SELECT public.get_category_balance_v2(_user_id, _income_category, 'RUB')
-    );
-
     _salary_primary_root_id := public.find_allocation_node_id(_user_id, 'salary_primary');
 
     IF _salary_primary_root_id IS NULL THEN
@@ -922,6 +922,12 @@ BEGIN
             _income_category,
             _user_id;
     END IF;
+
+    _sum_value := public.get_allocation_node_balance(
+        _user_id,
+        _income_source_node_id,
+        'RUB'
+    );
 
     IF _sum_value > 0 THEN
         WITH distributed AS (
@@ -1453,6 +1459,7 @@ CREATE OR REPLACE FUNCTION public.monthly_distribute_allocation(
 AS $function$
 DECLARE
     _source_amount numeric;
+    _source_category_node_id bigint;
     _sum_earnings numeric;
     _sum_spend numeric;
     _report jsonb := '[]'::jsonb;
@@ -1461,8 +1468,20 @@ BEGIN
         RAISE EXCEPTION 'monthly_distribute_allocation requires source category_id_from';
     END IF;
 
+    _source_category_node_id := public.find_allocation_category_node_id_by_legacy(
+        _executor_user_id,
+        _category_id_from
+    );
+
+    IF _source_category_node_id IS NULL THEN
+        RAISE EXCEPTION
+            'Allocation source node for legacy category % not found for user %',
+            _category_id_from,
+            _executor_user_id;
+    END IF;
+
     _source_amount := COALESCE(
-        public.get_category_balance_v2(_executor_user_id, _category_id_from, _currency),
+        public.get_allocation_node_balance(_executor_user_id, _source_category_node_id, _currency),
         0
     );
 
@@ -1493,7 +1512,8 @@ BEGIN
                 _source_amount,
                 _currency,
                 _category_id_from,
-                _description
+                _description,
+                _source_category_node_id
             )
         )
         SELECT COALESCE(

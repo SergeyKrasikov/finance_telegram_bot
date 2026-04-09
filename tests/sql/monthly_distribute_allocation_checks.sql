@@ -172,6 +172,7 @@ WHERE user_id = 906011
 DO $$
 DECLARE
     root_id bigint;
+    source_node_id bigint;
     out jsonb;
     stage_amount numeric;
     personal_amount numeric;
@@ -189,6 +190,12 @@ BEGIN
     FROM allocation_nodes
     WHERE user_id = 906011
       AND slug = 'test_monthly_root';
+
+    SELECT id
+    INTO source_node_id
+    FROM allocation_nodes
+    WHERE user_id = 906011
+      AND slug = 'test_monthly_source';
 
     out := public.monthly_distribute_allocation(
         906011,
@@ -292,6 +299,17 @@ BEGIN
 
     IF abs(source_balance) > 1e-9 THEN
         RAISE EXCEPTION 'Expected source category balance 0 after monthly allocation debit, got %', source_balance;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO posted_rows
+    FROM allocation_postings
+    WHERE user_id IN (906011, 906012)
+      AND description = 'monthly distribute allocation test'
+      AND from_node_id = source_node_id;
+
+    IF posted_rows <> 4 THEN
+        RAISE EXCEPTION 'Expected 4 monthly allocation rows debited from explicit source node, got %', posted_rows;
     END IF;
 
     SELECT COUNT(*)
