@@ -358,6 +358,7 @@ graph TD
 - `monthly_distribute_cascade()` уже читает `month_earnings` и `month_spend` из `allocation_postings`, а не из `cash_flow`.
 - Для безопасного наблюдения за новым ledger добавлен read-only helper:
   - `public.get_last_allocation_postings(user_id, num)`
+  - `public.get_last_transaction_v2(user_id, num)` как ledger-backed candidate для `/history`
   - `public.get_daily_allocation_transactions(user_id)`
   - текущий `/history` пока остаётся на legacy `cash_flow`
 - daily scheduler уже использует ledger-backed `get_daily_transactions()`
