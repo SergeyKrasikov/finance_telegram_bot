@@ -1,9 +1,11 @@
--- checks for insert_spend_with_exchange and conversion invariants
+-- checks for insert_spend_with_exchange_v2 and conversion invariants
 -- Run with: psql -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_checks.sql
 
 BEGIN;
 
 -- Clean and fixture setup
+DELETE FROM allocation_postings WHERE user_id = 900201;
+DELETE FROM allocation_nodes WHERE user_id = 900201 OR legacy_category_id IN (900211, 900212);
 DELETE FROM cash_flow WHERE users_id = 900201;
 DELETE FROM categories_category_groups WHERE users_id = 900201;
 DELETE FROM users_groups WHERE users_id = 900201;
@@ -29,6 +31,17 @@ VALUES
   (900211, 14, 900201),
   (900212, 14, 900201);
 
+INSERT INTO allocation_nodes(id, user_id, slug, "name", description, node_kind, legacy_category_id, visible, include_in_report, active)
+VALUES
+  (900221, 900201, 'reserve_fx', 'Reserve FX', 'test reserve node', 'expense', 900211, true, true, true),
+  (900222, 900201, 'travel', 'Travel', 'test spend node', 'expense', 900212, true, true, true);
+
+INSERT INTO allocation_node_groups(node_id, legacy_group_id, active)
+VALUES
+  (900221, 9, true),
+  (900221, 14, true),
+  (900222, 14, true);
+
 -- Different timestamps: conversion must use latest independent rates
 INSERT INTO exchange_rates("datetime", currency, rate)
 VALUES
@@ -37,12 +50,14 @@ VALUES
   (now() - interval '10 minutes', 'USDT', 1);
 
 -- action
-SELECT public.insert_spend_with_exchange(900201, 'Travel', 100::numeric, 'usdt', 'fx test');
+SELECT public.insert_spend_with_exchange_v2(900201, 'Travel', 100::numeric, 'usdt', 'fx test');
 
 -- assertions
 DO $$
 DECLARE
     flow_rows int;
+    ledger_rows int;
+    linked_legacy_rows int;
     spend_rows int;
     auto_rows int;
     rub_spend numeric;
@@ -52,36 +67,56 @@ BEGIN
     FROM cash_flow
     WHERE users_id = 900201;
 
-    IF flow_rows <> 3 THEN
-        RAISE EXCEPTION 'Expected 3 cash_flow rows, got %', flow_rows;
+    IF flow_rows <> 0 THEN
+        RAISE EXCEPTION 'Expected no cash_flow rows for ledger-only auto exchange spend, got %', flow_rows;
+    END IF;
+
+    SELECT count(*) INTO ledger_rows
+    FROM allocation_postings
+    WHERE user_id = 900201;
+
+    IF ledger_rows <> 3 THEN
+        RAISE EXCEPTION 'Expected 3 ledger rows, got %', ledger_rows;
+    END IF;
+
+    SELECT count(*) INTO linked_legacy_rows
+    FROM allocation_postings
+    WHERE user_id = 900201
+      AND metadata ? 'legacy_cash_flow_id';
+
+    IF linked_legacy_rows <> 0 THEN
+        RAISE EXCEPTION 'Expected no legacy_cash_flow_id for ledger-only auto exchange spend, got %', linked_legacy_rows;
     END IF;
 
     SELECT count(*) INTO spend_rows
-    FROM cash_flow
-    WHERE users_id = 900201
-      AND category_id_from = 900212
-      AND category_id_to IS NULL
+    FROM allocation_postings
+    WHERE user_id = 900201
+      AND from_node_id = 900222
+      AND to_node_id IS NULL
       AND currency = 'USDT'
-      AND value = 100;
+      AND value = 100
+      AND metadata->>'kind' = 'transaction'
+      AND metadata->>'subkind' = 'spend';
 
     IF spend_rows <> 1 THEN
         RAISE EXCEPTION 'Expected 1 spend row in USDT=100, got %', spend_rows;
     END IF;
 
     SELECT count(*) INTO auto_rows
-    FROM cash_flow
-    WHERE users_id = 900201
-      AND description LIKE 'auto exchange%';
+    FROM allocation_postings
+    WHERE user_id = 900201
+      AND metadata->>'kind' = 'exchange'
+      AND metadata->>'subkind' = 'auto';
 
     IF auto_rows <> 2 THEN
         RAISE EXCEPTION 'Expected 2 auto exchange rows, got %', auto_rows;
     END IF;
 
     SELECT value INTO rub_spend
-    FROM cash_flow
-    WHERE users_id = 900201
-      AND category_id_from = 900212
-      AND category_id_to = 900211
+    FROM allocation_postings
+    WHERE user_id = 900201
+      AND from_node_id = 900222
+      AND to_node_id = 900221
       AND currency = 'RUB'
     ORDER BY id DESC
     LIMIT 1;
@@ -90,14 +125,14 @@ BEGIN
         RAISE EXCEPTION 'Expected RUB conversion value 8000, got %', rub_spend;
     END IF;
 
-    SELECT public.get_remains(900201, 'Travel') INTO travel_remains;
+    SELECT public.get_remains_v2(900201, 'Travel') INTO travel_remains;
     IF travel_remains IS NULL OR abs(travel_remains + 8000) > 1e-9 THEN
         RAISE EXCEPTION 'Expected Travel remains = -8000, got %', travel_remains;
     END IF;
 END $$;
 
 -- Scenario 2: different timestamps for RUB and USDT, still should work with latest independent rates
-DELETE FROM cash_flow WHERE users_id = 900201;
+DELETE FROM allocation_postings WHERE user_id = 900201;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
 
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES
@@ -106,23 +141,32 @@ INSERT INTO exchange_rates("datetime", currency, rate) VALUES
   (now() - interval '1 day', 'RUB', 90),
   (now(), 'USDT', 1);
 
-SELECT public.insert_spend_with_exchange(900201, 'Travel', 100::numeric, 'USDT', 'fx test 2');
+SELECT public.insert_spend_with_exchange_v2(900201, 'Travel', 100::numeric, 'USDT', 'fx test 2');
 
 DO $$
 DECLARE
     rub_spend numeric;
+    cash_flow_rows int;
 BEGIN
     SELECT value INTO rub_spend
-    FROM cash_flow
-    WHERE users_id = 900201
-      AND category_id_from = 900212
-      AND category_id_to = 900211
+    FROM allocation_postings
+    WHERE user_id = 900201
+      AND from_node_id = 900222
+      AND to_node_id = 900221
       AND currency = 'RUB'
     ORDER BY id DESC
     LIMIT 1;
 
     IF rub_spend IS NULL OR abs(rub_spend - 9000) > 1e-9 THEN
         RAISE EXCEPTION 'Expected RUB conversion value 9000 with independent rates, got %', rub_spend;
+    END IF;
+
+    SELECT count(*) INTO cash_flow_rows
+    FROM cash_flow
+    WHERE users_id = 900201;
+
+    IF cash_flow_rows <> 0 THEN
+        RAISE EXCEPTION 'Expected no cash_flow rows after second ledger-only scenario, got %', cash_flow_rows;
     END IF;
 END $$;
 

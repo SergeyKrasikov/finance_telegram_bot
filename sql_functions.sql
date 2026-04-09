@@ -2777,8 +2777,8 @@ END
 $function$
 ;
 
--- Allocation-primary candidate for spend writes that require an automatic exchange.
--- Keeps the legacy three-row cash_flow mirror until exchange runtime is fully moved to ledger.
+-- Allocation-primary spend write helper that requires an automatic exchange.
+-- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
 CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange_v2(_users_id bigint, _category_name_from character varying, _value numeric, _currency character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql
@@ -2793,10 +2793,6 @@ DECLARE
     _rate_rub numeric;
     _allocation_exchange_out_id bigint;
     _allocation_exchange_in_id bigint;
-    _allocation_spend_id bigint;
-    _cash_flow_exchange_out_id bigint;
-    _cash_flow_exchange_in_id bigint;
-    _cash_flow_spend_id bigint;
     _currency_norm character varying := upper(_currency);
 BEGIN
     IF _value <= 0 THEN
@@ -2911,30 +2907,6 @@ BEGIN
     )
     RETURNING id INTO _allocation_exchange_out_id;
 
-    INSERT INTO public.cash_flow (
-        users_id,
-        category_id_from,
-        category_id_to,
-        value,
-        currency,
-        description
-    )
-    VALUES (
-        _users_id,
-        _reserve_legacy_category_id,
-        _category_legacy_id,
-        _value,
-        _currency_norm,
-        concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency_norm, ' ', _description)
-    )
-    RETURNING id INTO _cash_flow_exchange_out_id;
-
-    UPDATE public.allocation_postings
-    SET metadata = jsonb_strip_nulls(
-        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_exchange_out_id)
-    )
-    WHERE id = _allocation_exchange_out_id;
-
     INSERT INTO public.allocation_postings (
         user_id,
         from_node_id,
@@ -2964,27 +2936,15 @@ BEGIN
     )
     RETURNING id INTO _allocation_exchange_in_id;
 
-    INSERT INTO public.cash_flow (
-        users_id,
-        category_id_from,
-        category_id_to,
-        value,
-        currency,
-        description
+    UPDATE public.allocation_postings
+    SET metadata = jsonb_strip_nulls(
+        metadata || jsonb_build_object('paired_posting_id', _allocation_exchange_in_id)
     )
-    VALUES (
-        _users_id,
-        _category_legacy_id,
-        _reserve_legacy_category_id,
-        _value_RUB,
-        'RUB',
-        concat('auto exchange ', _value, ' ', _currency_norm, ' to ', _value_RUB, ' RUB', ' ', _description)
-    )
-    RETURNING id INTO _cash_flow_exchange_in_id;
+    WHERE id = _allocation_exchange_out_id;
 
     UPDATE public.allocation_postings
     SET metadata = jsonb_strip_nulls(
-        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_exchange_in_id)
+        metadata || jsonb_build_object('paired_posting_id', _allocation_exchange_out_id)
     )
     WHERE id = _allocation_exchange_in_id;
 
@@ -3015,32 +2975,7 @@ BEGIN
                 'exchange_in_posting_id', _allocation_exchange_in_id
             )
         )
-    )
-    RETURNING id INTO _allocation_spend_id;
-
-    INSERT INTO public.cash_flow (
-        users_id,
-        category_id_from,
-        category_id_to,
-        value,
-        currency,
-        description
-    )
-    VALUES (
-        _users_id,
-        _category_legacy_id,
-        NULL,
-        _value,
-        _currency_norm,
-        _description
-    )
-    RETURNING id INTO _cash_flow_spend_id;
-
-    UPDATE public.allocation_postings
-    SET metadata = jsonb_strip_nulls(
-        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_spend_id)
-    )
-    WHERE id = _allocation_spend_id;
+    );
 
     RETURN 'OK';
 END
