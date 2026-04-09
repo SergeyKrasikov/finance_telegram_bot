@@ -677,12 +677,17 @@ BEGIN
 
     FOR _source IN
         SELECT
-            ccg.categories_id AS category_id_from,
-            public.get_category_balance_v2(_user_id, ccg.categories_id, 'RUB') AS balance
-        FROM public.categories_category_groups ccg
-        WHERE ccg.users_id = _user_id
-          AND ccg.category_groyps_id = 11
-        ORDER BY ccg.categories_id
+            source_node.legacy_category_id AS category_id_from,
+            public.get_category_balance_v2(_user_id, source_node.legacy_category_id, 'RUB') AS balance
+        FROM public.allocation_nodes source_node
+        JOIN public.allocation_node_groups source_group
+          ON source_group.node_id = source_node.id
+         AND source_group.active
+        WHERE source_node.user_id = _user_id
+          AND source_node.active
+          AND source_node.legacy_category_id IS NOT NULL
+          AND source_group.legacy_group_id = 11
+        ORDER BY source_node.legacy_category_id
     LOOP
         IF COALESCE(_source.balance, 0) <= 0 THEN
             CONTINUE;
@@ -709,12 +714,17 @@ BEGIN
 
     FOR _source IN
         SELECT
-            ccg.categories_id AS category_id_from,
-            public.get_category_balance_v2(_user_id, ccg.categories_id, 'RUB') AS balance
-        FROM public.categories_category_groups ccg
-        WHERE ccg.users_id = _user_id
-          AND ccg.category_groyps_id = 12
-        ORDER BY ccg.categories_id
+            source_node.legacy_category_id AS category_id_from,
+            public.get_category_balance_v2(_user_id, source_node.legacy_category_id, 'RUB') AS balance
+        FROM public.allocation_nodes source_node
+        JOIN public.allocation_node_groups source_group
+          ON source_group.node_id = source_node.id
+         AND source_group.active
+        WHERE source_node.user_id = _user_id
+          AND source_node.active
+          AND source_node.legacy_category_id IS NOT NULL
+          AND source_group.legacy_group_id = 12
+        ORDER BY source_node.legacy_category_id
     LOOP
         IF COALESCE(_source.balance, 0) <= 0 THEN
             CONTINUE;
@@ -791,15 +801,20 @@ BEGIN
 
         UNION
 
-        SELECT DISTINCT spend_ccg.categories_id AS category_id
-        FROM public.categories_category_groups spend_ccg
-        JOIN public.categories_category_groups personal_ccg
-          ON personal_ccg.users_id = spend_ccg.users_id
-         AND personal_ccg.categories_id = spend_ccg.categories_id
-        WHERE spend_ccg.users_id = _user_id
+        SELECT DISTINCT spend_node.legacy_category_id AS category_id
+        FROM public.allocation_nodes spend_node
+        JOIN public.allocation_node_groups spend_group
+          ON spend_group.node_id = spend_node.id
+         AND spend_group.active
+        JOIN public.allocation_node_groups personal_group
+          ON personal_group.node_id = spend_node.id
+         AND personal_group.active
+        WHERE spend_node.user_id = _user_id
+          AND spend_node.active
+          AND spend_node.legacy_category_id IS NOT NULL
           AND _user_id NOT IN (249716305, 943915310)
-          AND spend_ccg.category_groyps_id = 8
-          AND personal_ccg.category_groyps_id = 15
+          AND spend_group.legacy_group_id = 8
+          AND personal_group.legacy_group_id = 15
         ORDER BY category_id
     LOOP
         _balance := public.get_category_balance_v2(_user_id, _source.category_id, 'RUB');

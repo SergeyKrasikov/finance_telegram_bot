@@ -358,6 +358,7 @@ graph TD
 - Простые manual spend/revenue write-paths уже ledger-only и больше не создают новые `cash_flow` rows.
 - Monthly allocation helpers уже читают source balance, `month_earnings` и `month_spend` из `allocation_postings`, а не из `cash_flow`.
 - `monthly_distribute_cascade()` уже читает orchestration balances из ledger-backed `get_category_balance_v2(...)`.
+- `monthly_distribute_cascade()` уже берёт source category membership из `allocation_node_groups`, а не напрямую из `categories_category_groups`.
 - Для безопасного наблюдения за новым ledger добавлен read-only helper:
   - `public.get_last_allocation_postings(user_id, num)`
   - `public.get_last_transaction_v2(user_id, num)` как ledger-backed candidate для `/history`

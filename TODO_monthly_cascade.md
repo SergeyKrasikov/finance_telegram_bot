@@ -64,6 +64,7 @@
 - Read-path migration started:
   - monthly allocation helpers уже считают source balance, `month_earnings` / `month_spend` из `allocation_postings`
   - `monthly_distribute_cascade()` уже читает orchestration balances через `get_category_balance_v2(...)`
+  - `monthly_distribute_cascade()` уже берёт source category membership из `allocation_node_groups`, а не напрямую из `categories_category_groups`
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
   - `/history` читает ledger-backed `get_last_transaction_v2(user_id, num)`
   - delete-flow удаляет `allocation_postings` и linked legacy `cash_flow`, если он есть в metadata
