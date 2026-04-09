@@ -60,7 +60,9 @@ VALUES
     (906001, NULL, 'test_cascade_stage', 'test stage', 'stage node', 'technical', NULL, false, true, true),
     (906001, NULL, 'test_cascade_empty_root', 'test empty root', 'route-less technical node', 'technical', NULL, false, false, true),
     (906001, NULL, 'test_cascade_family_root', 'test family root', 'family bridge root', 'technical', NULL, false, false, true),
+    (906001, NULL, 'test_cascade_native_root', 'test native root', 'native leaf root', 'technical', NULL, false, false, true),
     (906001, NULL, 'test_cascade_source', 'test source', 'source balance node', 'income', 906199, true, false, true),
+    (906001, NULL, 'test_cascade_native_leaf', 'test native leaf', 'graph-native leaf without legacy category', 'expense', NULL, true, true, true),
     (906001, NULL, 'test_cascade_personal', 'test personal', 'personal leaf', 'expense', 906101, true, true, true),
     (906002, NULL, 'family_contribution_in', 'test family in', 'family bridge target', 'technical', NULL, false, false, true),
     (906002, NULL, 'test_cascade_family_source', 'test family source', 'family source leaf', 'expense', 906104, true, false, true),
@@ -161,6 +163,15 @@ JOIN allocation_nodes dst
 WHERE src.user_id = 906002
   AND src.slug = 'family_contribution_in';
 
+INSERT INTO allocation_routes(source_node_id, target_node_id, percent, description)
+SELECT src.id, dst.id, 1, 'native root to native leaf'
+FROM allocation_nodes src
+JOIN allocation_nodes dst
+  ON dst.user_id = 906001
+ AND dst.slug = 'test_cascade_native_leaf'
+WHERE src.user_id = 906001
+  AND src.slug = 'test_cascade_native_root';
+
 INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
 SELECT
     906001,
@@ -190,6 +201,10 @@ DECLARE
     family_root_id bigint;
     family_source_node_id bigint;
     family_source_rows integer;
+    native_root_id bigint;
+    native_leaf_id bigint;
+    native_rows integer;
+    native_legacy_metadata_rows integer;
 BEGIN
     SELECT id
     INTO root_id
@@ -329,6 +344,52 @@ BEGIN
         RAISE EXCEPTION 'Expected family bridge row debited from route metadata source node, got %', family_source_rows;
     END IF;
 
+    SELECT id
+    INTO native_root_id
+    FROM allocation_nodes
+    WHERE user_id = 906001
+      AND slug = 'test_cascade_native_root';
+
+    SELECT id
+    INTO native_leaf_id
+    FROM allocation_nodes
+    WHERE user_id = 906001
+      AND slug = 'test_cascade_native_leaf';
+
+    PERFORM *
+    FROM public.allocation_distribute(
+        906001,
+        native_root_id,
+        7::numeric,
+        'RUB',
+        NULL::integer,
+        'test native leaf',
+        source_node_id
+    );
+
+    SELECT COUNT(*)
+    INTO native_rows
+    FROM allocation_postings
+    WHERE user_id = 906001
+      AND description = 'test native leaf'
+      AND from_node_id = source_node_id
+      AND to_node_id = native_leaf_id;
+
+    IF native_rows <> 1 THEN
+        RAISE EXCEPTION 'Expected graph-native leaf without legacy_category_id to create one posting, got %', native_rows;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO native_legacy_metadata_rows
+    FROM allocation_postings
+    WHERE user_id = 906001
+      AND description = 'test native leaf'
+      AND metadata ? 'legacy_category_id_to';
+
+    IF native_legacy_metadata_rows <> 0 THEN
+        RAISE EXCEPTION 'Expected graph-native leaf posting without legacy_category_id_to metadata, got %', native_legacy_metadata_rows;
+    END IF;
+
     SELECT COUNT(*)
     INTO posted_rows
     FROM allocation_postings
@@ -357,7 +418,7 @@ BEGIN
         );
         RAISE EXCEPTION 'Expected route-less technical node to fail';
     EXCEPTION WHEN OTHERS THEN
-        IF POSITION('has no legacy_category_id' IN SQLERRM) = 0 THEN
+        IF POSITION('technical leaf node' IN SQLERRM) = 0 THEN
             RAISE;
         END IF;
     END;

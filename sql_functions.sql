@@ -1127,10 +1127,11 @@ BEGIN
     END IF;
 
     -- Лист определяется отсутствием исходящих активных маршрутов.
+    -- Legacy category id is optional for graph-native leaves; technical nodes still must route onward.
     IF _route_count = 0 THEN
-        IF _node.legacy_category_id IS NULL THEN
+        IF _node.node_kind = 'technical' THEN
             RAISE EXCEPTION
-                'Allocation leaf node % (%) has no legacy_category_id; technical nodes must have outgoing routes',
+                'Allocation technical leaf node % (%) must have outgoing routes',
                 _node.id,
                 _node.slug;
         END IF;

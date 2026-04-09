@@ -363,6 +363,7 @@ graph TD
 - Вызовы `allocation_distribute(...)` из `monthly_distribute_cascade()` больше не передают legacy source category id; он выводится из source node только как compatibility metadata.
 - Internal helper `monthly_distribute_allocation(...)` уже может принимать явный `source_category_node_id` без обязательного legacy category id.
 - Partner bridge `family_contribution_out -> family_contribution_in` берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id.
+- Graph-native leaf-ноды больше не обязаны иметь `legacy_category_id`; он пишется в metadata только если присутствует на source/target node.
 - Household membership helper `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL.
 - Для безопасного наблюдения за новым ledger добавлен read-only helper:
   - `public.get_last_allocation_postings(user_id, num)`

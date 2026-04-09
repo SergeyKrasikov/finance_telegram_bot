@@ -69,6 +69,7 @@
   - `monthly_distribute_cascade()` больше не передаёт legacy source category id в `allocation_distribute(...)`; lower-level функция выводит его из source node только для compatibility metadata
   - `monthly_distribute_allocation(...)` уже поддерживает явный source allocation node без обязательного legacy category id
   - partner bridge уже берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id
+  - graph-native leaf-ноды уже могут писать `allocation_postings` без `legacy_category_id`
   - `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
   - `/history` читает ledger-backed `get_last_transaction_v2(user_id, num)`
