@@ -200,10 +200,19 @@ BEGIN
     out := public.monthly_distribute_allocation(
         906011,
         root_id,
-        906299,
+        NULL::integer,
         'RUB',
-        'monthly distribute allocation test'
+        'monthly distribute allocation test',
+        source_node_id
     );
+
+    IF (out ->> 'source_category_node_id')::bigint <> source_node_id THEN
+        RAISE EXCEPTION 'Expected source_category_node_id %, got %', source_node_id, out ->> 'source_category_node_id';
+    END IF;
+
+    IF (out ->> 'source_category_id')::integer <> 906299 THEN
+        RAISE EXCEPTION 'Expected source_category_id 906299, got %', out ->> 'source_category_id';
+    END IF;
 
     IF abs((out ->> 'source_amount')::numeric - 100) > 1e-9 THEN
         RAISE EXCEPTION 'Expected source_amount 100, got %', out ->> 'source_amount';

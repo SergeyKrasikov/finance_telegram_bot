@@ -58,6 +58,7 @@ DROP FUNCTION IF EXISTS public.allocation_distribute_recursive(bigint, bigint, n
 DROP FUNCTION IF EXISTS public.allocation_distribute(bigint, bigint, numeric, varchar, integer, text);
 DROP FUNCTION IF EXISTS public.allocation_distribute(bigint, bigint, numeric, varchar, integer, text, bigint);
 DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, integer, varchar, text);
+DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, integer, varchar, text, bigint);
 DROP FUNCTION IF EXISTS public.monthly_allocation_report_metrics(bigint, bigint, jsonb);
 DROP FUNCTION IF EXISTS public.monthly_distribute_cascade(bigint, integer);
 
@@ -1450,34 +1451,88 @@ $function$;
 CREATE OR REPLACE FUNCTION public.monthly_distribute_allocation(
     _executor_user_id bigint,
     _source_node_id bigint,
-    _category_id_from integer,
+    _category_id_from integer DEFAULT NULL,
     _currency varchar DEFAULT 'RUB',
-    _description text DEFAULT 'monthly distribute allocation'
+    _description text DEFAULT 'monthly distribute allocation',
+    _source_category_node_id bigint DEFAULT NULL
 )
  RETURNS jsonb
  LANGUAGE plpgsql
 AS $function$
 DECLARE
     _source_amount numeric;
-    _source_category_node_id bigint;
+    _source_category_node public.allocation_nodes%ROWTYPE;
     _sum_earnings numeric;
     _sum_spend numeric;
     _report jsonb := '[]'::jsonb;
 BEGIN
-    IF _category_id_from IS NULL THEN
-        RAISE EXCEPTION 'monthly_distribute_allocation requires source category_id_from';
-    END IF;
-
-    _source_category_node_id := public.find_allocation_category_node_id_by_legacy(
-        _executor_user_id,
-        _category_id_from
-    );
-
     IF _source_category_node_id IS NULL THEN
-        RAISE EXCEPTION
-            'Allocation source node for legacy category % not found for user %',
-            _category_id_from,
-            _executor_user_id;
+        IF _category_id_from IS NULL THEN
+            RAISE EXCEPTION 'monthly_distribute_allocation requires source category id or source allocation node id';
+        END IF;
+
+        _source_category_node_id := public.find_allocation_category_node_id_by_legacy(
+            _executor_user_id,
+            _category_id_from
+        );
+
+        IF _source_category_node_id IS NULL THEN
+            RAISE EXCEPTION
+                'Allocation source node for legacy category % not found for user %',
+                _category_id_from,
+                _executor_user_id;
+        END IF;
+    ELSE
+        SELECT *
+        INTO _source_category_node
+        FROM public.allocation_nodes
+        WHERE id = _source_category_node_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Allocation source node % not found', _source_category_node_id;
+        END IF;
+
+        IF NOT _source_category_node.active THEN
+            RAISE EXCEPTION
+                'Allocation source node % (%) is inactive',
+                _source_category_node.id,
+                _source_category_node.slug;
+        END IF;
+
+        IF _source_category_node.user_id IS NOT NULL
+           AND _source_category_node.user_id <> _executor_user_id THEN
+            RAISE EXCEPTION
+                'Executor user % cannot use source allocation node % owned by user %',
+                _executor_user_id,
+                _source_category_node.id,
+                _source_category_node.user_id;
+        END IF;
+
+        IF _source_category_node.user_group_id IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1
+               FROM public.user_group_memberships ugm
+               WHERE ugm.user_id = _executor_user_id
+                 AND ugm.user_group_id = _source_category_node.user_group_id
+                 AND ugm.active
+           ) THEN
+            RAISE EXCEPTION
+                'Executor user % is not an active member of group % for source allocation node %',
+                _executor_user_id,
+                _source_category_node.user_group_id,
+                _source_category_node.id;
+        END IF;
+
+        IF _category_id_from IS NULL THEN
+            _category_id_from := _source_category_node.legacy_category_id;
+        ELSIF _source_category_node.legacy_category_id IS NOT NULL
+              AND _source_category_node.legacy_category_id <> _category_id_from THEN
+            RAISE EXCEPTION
+                'Source allocation node % legacy category % does not match requested legacy category %',
+                _source_category_node.id,
+                _source_category_node.legacy_category_id,
+                _category_id_from;
+        END IF;
     END IF;
 
     _source_amount := COALESCE(
@@ -1540,6 +1595,7 @@ BEGIN
     RETURN jsonb_build_object(
         'user_id', _executor_user_id,
         'source_node_id', _source_node_id,
+        'source_category_node_id', _source_category_node_id,
         'source_category_id', _category_id_from,
         'source_amount', _source_amount,
         'currency', _currency,
