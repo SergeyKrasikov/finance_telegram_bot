@@ -4,7 +4,7 @@ from app.db.connection import db_function
 
 
 async def get_last_transaction(user_id: int, num: int):
-    return await db_function("get_last_transaction", user_id, num)
+    return await db_function("get_last_transaction_v2", user_id, num)
 
 
 async def get_last_transaction_v2(user_id: int, num: int):

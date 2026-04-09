@@ -17,7 +17,6 @@ _ALLOWED_DB_FUNCTIONS = {
     "get_daily_allocation_transactions",
     "get_daily_transactions",
     "get_group_balance_v2",
-    "get_last_transaction",
     "get_last_transaction_v2",
     "get_remains_v2",
     "insert_revenue",

@@ -1568,7 +1568,8 @@ $function$
 
 
 
--- принимает user_id и порядковый номер транзакции начиная с конца и возвращает транзакцию  
+-- LEGACY cash_flow-backed history helper.
+-- App read-paths use get_last_transaction_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION get_last_transaction(_user_id bigint, _num int)
 RETURNS TABLE (
     id bigint,
