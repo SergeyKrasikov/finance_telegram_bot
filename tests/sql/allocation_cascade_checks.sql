@@ -145,6 +145,7 @@ WHERE user_id = 906001
 DO $$
 DECLARE
     root_id bigint;
+    source_node_id bigint;
     stage_amount numeric;
     personal_amount numeric;
     partner_amount numeric;
@@ -162,6 +163,12 @@ BEGIN
     WHERE user_id = 906001
       AND slug = 'test_cascade_root';
 
+    SELECT id
+    INTO source_node_id
+    FROM allocation_nodes
+    WHERE user_id = 906001
+      AND slug = 'test_cascade_source';
+
     WITH result AS (
         SELECT *
         FROM public.allocation_distribute(
@@ -170,7 +177,8 @@ BEGIN
             100::numeric,
             'RUB',
             906199,
-            'test cascade'
+            'test cascade',
+            source_node_id
         )
     )
     SELECT
@@ -251,6 +259,17 @@ BEGIN
 
     IF abs(source_balance) > 1e-9 THEN
         RAISE EXCEPTION 'Expected source category balance 0 after allocation debit, got %', source_balance;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO posted_rows
+    FROM allocation_postings
+    WHERE user_id IN (906001, 906002)
+      AND description = 'test cascade'
+      AND from_node_id = source_node_id;
+
+    IF posted_rows <> 4 THEN
+        RAISE EXCEPTION 'Expected 4 allocation rows debited from explicit source node, got %', posted_rows;
     END IF;
 
     BEGIN

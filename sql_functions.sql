@@ -56,6 +56,7 @@ DROP FUNCTION IF EXISTS public.validate_allocation_routes(bigint);
 DROP FUNCTION IF EXISTS public.allocation_distribute_recursive(bigint, bigint, numeric, varchar, integer, text, bigint[]);
 DROP FUNCTION IF EXISTS public.allocation_distribute_recursive(bigint, bigint, numeric, varchar, integer, text, bigint[], bigint);
 DROP FUNCTION IF EXISTS public.allocation_distribute(bigint, bigint, numeric, varchar, integer, text);
+DROP FUNCTION IF EXISTS public.allocation_distribute(bigint, bigint, numeric, varchar, integer, text, bigint);
 DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, integer, varchar, text);
 DROP FUNCTION IF EXISTS public.monthly_allocation_report_metrics(bigint, bigint, jsonb);
 DROP FUNCTION IF EXISTS public.monthly_distribute_cascade(bigint, integer);
@@ -726,6 +727,7 @@ DECLARE
     _free_category_id integer;
     _reserve_root_id bigint;
     _salary_primary_root_id bigint;
+    _income_source_node_id bigint;
     _source record;
     _balance numeric;
     _reserve_amount numeric;
@@ -744,6 +746,7 @@ BEGIN
 
     FOR _source IN
         SELECT
+            source_node.id AS source_category_node_id,
             source_node.legacy_category_id AS category_id_from,
             public.get_category_balance_v2(_user_id, source_node.legacy_category_id, 'RUB') AS balance
         FROM public.allocation_nodes source_node
@@ -766,7 +769,8 @@ BEGIN
             _source.balance::numeric,
             'RUB'::varchar,
             _source.category_id_from::integer,
-            'monthly distribute'::text
+            'monthly distribute'::text,
+            _source.source_category_node_id::bigint
         );
     END LOOP;
 
@@ -781,6 +785,7 @@ BEGIN
 
     FOR _source IN
         SELECT
+            source_node.id AS source_category_node_id,
             source_node.legacy_category_id AS category_id_from,
             public.get_category_balance_v2(_user_id, source_node.legacy_category_id, 'RUB') AS balance
         FROM public.allocation_nodes source_node
@@ -803,7 +808,8 @@ BEGIN
             _source.balance::numeric,
             'RUB'::varchar,
             _source.category_id_from::integer,
-            'monthly distribute'::text
+            'monthly distribute'::text,
+            _source.source_category_node_id::bigint
         );
     END LOOP;
 
@@ -838,7 +844,8 @@ BEGIN
             _free_money::numeric,
             'RUB'::varchar,
             _free_category_id,
-            'monthly distribute'::text
+            'monthly distribute'::text,
+            _free_node_id::bigint
         );
     END IF;
 
@@ -852,7 +859,9 @@ BEGIN
     END IF;
 
     FOR _source IN
-        SELECT DISTINCT spend_node.legacy_category_id AS category_id
+        SELECT DISTINCT
+            spend_node.id AS source_category_node_id,
+            spend_node.legacy_category_id AS category_id
         FROM public.allocation_nodes spend_node
         JOIN public.allocation_node_groups spend_group
           ON spend_group.node_id = spend_node.id
@@ -885,7 +894,8 @@ BEGIN
             _reserve_amount::numeric,
             'RUB'::varchar,
             _source.category_id::integer,
-            'monthly distribute'::text
+            'monthly distribute'::text,
+            _source.source_category_node_id::bigint
         );
     END LOOP;
 
@@ -901,6 +911,18 @@ BEGIN
             _user_id;
     END IF;
 
+    _income_source_node_id := public.find_allocation_category_node_id_by_legacy(
+        _user_id,
+        _income_category
+    );
+
+    IF _income_source_node_id IS NULL THEN
+        RAISE EXCEPTION
+            'Allocation source node for income category % is required for user %',
+            _income_category,
+            _user_id;
+    END IF;
+
     IF _sum_value > 0 THEN
         WITH distributed AS (
             SELECT *
@@ -910,7 +932,8 @@ BEGIN
                 _sum_value::numeric,
                 'RUB'::varchar,
                 _income_category::integer,
-                'monthly distribute'::text
+                'monthly distribute'::text,
+                _income_source_node_id::bigint
             )
         )
         SELECT COALESCE(
@@ -1253,7 +1276,8 @@ CREATE OR REPLACE FUNCTION public.allocation_distribute(
     _amount numeric,
     _currency varchar DEFAULT 'RUB',
     _category_id_from integer DEFAULT NULL,
-    _description text DEFAULT 'allocation cascade'
+    _description text DEFAULT 'allocation cascade',
+    _source_category_node_id bigint DEFAULT NULL
 )
  RETURNS TABLE(
     owner_user_id bigint,
@@ -1267,7 +1291,7 @@ CREATE OR REPLACE FUNCTION public.allocation_distribute(
 AS $function$
 DECLARE
     _source_node public.allocation_nodes%ROWTYPE;
-    _source_category_node_id bigint;
+    _source_category_node public.allocation_nodes%ROWTYPE;
 BEGIN
     IF _amount IS NULL OR _amount <= 0 THEN
         RAISE EXCEPTION 'Allocation amount must be greater than zero';
@@ -1309,7 +1333,60 @@ BEGIN
             _source_node.id;
     END IF;
 
-    IF _category_id_from IS NOT NULL THEN
+    IF _source_category_node_id IS NOT NULL THEN
+        SELECT *
+        INTO _source_category_node
+        FROM public.allocation_nodes
+        WHERE id = _source_category_node_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Allocation source category node % not found', _source_category_node_id;
+        END IF;
+
+        IF NOT _source_category_node.active THEN
+            RAISE EXCEPTION
+                'Allocation source category node % (%) is inactive',
+                _source_category_node.id,
+                _source_category_node.slug;
+        END IF;
+
+        IF _source_category_node.user_id IS NOT NULL
+           AND _source_category_node.user_id <> _executor_user_id THEN
+            RAISE EXCEPTION
+                'Executor user % cannot use source category node % owned by user %',
+                _executor_user_id,
+                _source_category_node.id,
+                _source_category_node.user_id;
+        END IF;
+
+        IF _source_category_node.user_group_id IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1
+               FROM public.user_group_memberships ugm
+               WHERE ugm.user_id = _executor_user_id
+                 AND ugm.user_group_id = _source_category_node.user_group_id
+                 AND ugm.active
+           ) THEN
+            RAISE EXCEPTION
+                'Executor user % is not an active member of group % for source category node %',
+                _executor_user_id,
+                _source_category_node.user_group_id,
+                _source_category_node.id;
+        END IF;
+
+        IF _category_id_from IS NULL THEN
+            _category_id_from := _source_category_node.legacy_category_id;
+        ELSIF _source_category_node.legacy_category_id IS NOT NULL
+              AND _source_category_node.legacy_category_id <> _category_id_from THEN
+            RAISE EXCEPTION
+                'Source category node % legacy category % does not match requested legacy category %',
+                _source_category_node.id,
+                _source_category_node.legacy_category_id,
+                _category_id_from;
+        END IF;
+    END IF;
+
+    IF _source_category_node_id IS NULL AND _category_id_from IS NOT NULL THEN
         _source_category_node_id := public.find_allocation_category_node_id_by_legacy(
             _executor_user_id,
             _category_id_from

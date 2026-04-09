@@ -242,6 +242,7 @@ Scheduler:
 4. Из free-category (`group 6`) через root `free_to_gifts` переводится только legacy `group 7` доля free-баланса.
    Для суммы перевода сохраняется старая формула `free_balance * sum(percent(group 7))`, а route уже ведёт эту сумму в canonical gifts leaf пользователя.
 5. После этого основной monthly каскад стартует из `salary_primary` на балансе `_income_category`.
+   Для ledger-проводок cascade передаёт в `allocation_distribute(...)` явный source allocation node, поэтому debit-side уже не выбирается внутри движка только по `legacy_category_id`.
 
 #### Узлы графа
 
@@ -357,6 +358,8 @@ graph TD
 - `monthly_distribute_cascade()` уже читает orchestration balances из ledger-backed `get_category_balance_v2(...)`.
 - `monthly_distribute_cascade()` уже берёт source category membership из `allocation_node_groups`, а не напрямую из `categories_category_groups`.
 - `free_to_gifts` уже берёт free balance через `get_allocation_node_balance(...)` по remainder node id.
+- `monthly_distribute_cascade()` уже передаёт source category node id в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и основного `salary_primary` split.
+  `legacy_category_id` пока остаётся compatibility-полем для балансов, metadata и bridge/backfill, но больше не является единственным способом выбрать debit-node внутри monthly runtime.
 - Household membership helper `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL.
 - Для безопасного наблюдения за новым ledger добавлен read-only helper:
   - `public.get_last_allocation_postings(user_id, num)`
