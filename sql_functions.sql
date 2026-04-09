@@ -57,14 +57,33 @@ DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, int
 DROP FUNCTION IF EXISTS public.monthly_allocation_report_metrics(bigint, bigint, jsonb);
 DROP FUNCTION IF EXISTS public.monthly_distribute_cascade(bigint, integer);
 
--- принимает user_id и возвращает id всех пользьвателей из группы  
-create or replace function get_users_id(_user_id bigint)
- returns table (user_id bigint)
- language plpgsql
-as $function$
-begin
-return query (select ug2.users_id from users_groups ug1 join users_groups ug2 using(users_groups) where ug1.users_id = _user_id);
-		end
+-- Returns active household members for a user.
+-- Runtime membership is graph-native via user_group_memberships; legacy users_groups
+-- remains as a fallback for old fixtures/reference SQL.
+CREATE OR REPLACE FUNCTION public.get_users_id(_user_id bigint)
+ RETURNS TABLE(user_id bigint)
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT DISTINCT member_id AS user_id
+    FROM (
+        SELECT ugm2.user_id AS member_id
+        FROM public.user_group_memberships ugm1
+        JOIN public.user_group_memberships ugm2
+          ON ugm2.user_group_id = ugm1.user_group_id
+         AND ugm2.active
+        WHERE ugm1.user_id = _user_id
+          AND ugm1.active
+
+        UNION ALL
+
+        SELECT ug2.users_id::bigint AS member_id
+        FROM public.users_groups ug1
+        JOIN public.users_groups ug2
+          ON ug2.users_groups = ug1.users_groups
+        WHERE ug1.users_id = _user_id
+    ) members
+    ORDER BY member_id;
 $function$;
 
 
