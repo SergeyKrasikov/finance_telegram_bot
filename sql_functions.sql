@@ -15,10 +15,15 @@ DROP FUNCTION IF EXISTS public.get_last_transaction_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_last_allocation_postings(bigint, integer);
 DROP FUNCTION IF EXISTS public.delete_transaction(bigint[]);
 DROP FUNCTION IF EXISTS public.get_group_balance(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_group_balance_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_all_balances(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_all_balances_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_remains(bigint, character);
+DROP FUNCTION IF EXISTS public.get_remains_v2(bigint, character);
 DROP FUNCTION IF EXISTS public.get_category_balance_with_currency(bigint, integer);
+DROP FUNCTION IF EXISTS public.get_category_balance_with_currency_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
+DROP FUNCTION IF EXISTS public.get_category_balance_v2(bigint, integer, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance(bigint, bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text, varchar);
 DROP FUNCTION IF EXISTS public.ensure_allocation_compatibility_node(bigint, integer);
@@ -97,6 +102,57 @@ BEGIN
         ON src_rate.currency = cf.currency
     JOIN _exchange_rates target_rate
         ON target_rate.currency = _currency;
+
+    RETURN result;
+END;
+$function$;
+
+
+-- Ledger-backed category balance helper.
+-- Mirrors get_category_balance(...) semantics while reading allocation_postings.
+CREATE OR REPLACE FUNCTION public.get_category_balance_v2(
+    _user_id bigint,
+    _category_id integer,
+    _currency CHARACTER VARYING DEFAULT 'RUB'::CHARACTER VARYING
+) RETURNS NUMERIC
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    result NUMERIC;
+BEGIN
+    WITH _exchange_rates AS (
+        SELECT DISTINCT ON (currency)
+            currency,
+            rate
+        FROM public.exchange_rates
+        ORDER BY currency, datetime DESC
+    ),
+    posting_data AS (
+        SELECT
+            CASE
+                WHEN to_node.legacy_category_id = _category_id THEN ap.value
+                ELSE -ap.value
+            END AS value,
+            ap.currency
+        FROM public.allocation_postings ap
+        LEFT JOIN public.allocation_nodes from_node
+          ON from_node.id = ap.from_node_id
+        LEFT JOIN public.allocation_nodes to_node
+          ON to_node.id = ap.to_node_id
+        WHERE ap.user_id IN (SELECT get_users_id(_user_id))
+          AND _category_id IN (
+              from_node.legacy_category_id,
+              to_node.legacy_category_id
+          )
+    )
+    SELECT
+        SUM(p.value / (src_rate.rate / target_rate.rate))
+    INTO result
+    FROM posting_data p
+    JOIN _exchange_rates src_rate
+      ON src_rate.currency = p.currency
+    JOIN _exchange_rates target_rate
+      ON target_rate.currency = _currency;
 
     RETURN result;
 END;
@@ -1855,6 +1911,16 @@ end
 $function$
 ;
 
+-- Ledger-backed candidate for get_group_balance(...).
+CREATE OR REPLACE FUNCTION public.get_group_balance_v2(_user_id bigint, _groyps_id integer)
+ RETURNS TABLE(balance NUMERIC)
+ LANGUAGE sql
+AS $function$
+    SELECT SUM(public.get_category_balance_v2(_user_id, c.categories_id, 'RUB')) AS balance
+    FROM public.get_categories_id(_user_id, _groyps_id) c;
+$function$
+;
+
 -- принимает id пользователя и имя категории, возвращает остаток по этой категории
 CREATE OR REPLACE FUNCTION public.get_remains(_user_id bigint, _category CHARACTER)
  RETURNS numeric
@@ -1868,6 +1934,34 @@ return (select COALESCE (get_category_balance(_user_id,(select c.id from categor
 		end
 $function$
 ;   
+
+-- Ledger-backed candidate for get_remains(...).
+CREATE OR REPLACE FUNCTION public.get_remains_v2(_user_id bigint, _category CHARACTER)
+ RETURNS numeric
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN (
+        SELECT COALESCE(
+            public.get_category_balance_v2(
+                _user_id,
+                (
+                    SELECT c.id
+                    FROM public.categories c
+                    JOIN public.categories_category_groups ccg
+                      ON c.id = ccg.categories_id
+                    WHERE ccg.category_groyps_id = 14
+                      AND ccg.users_id = _user_id
+                      AND c."name" = _category
+                ),
+                'RUB'
+            ),
+            0
+        )
+    );
+END;
+$function$
+;
 
 -- принимает id пользователя и id группы, возвращает сумму всех категорий группы
 CREATE OR REPLACE FUNCTION public.get_all_balances(_user_id bigint, _group_id integer)
@@ -1883,6 +1977,21 @@ BEGIN
         public.categories c
     WHERE 
         c.id IN (SELECT public.get_categories_id(_user_id, _group_id));
+END;
+$function$;
+
+-- Ledger-backed candidate for get_all_balances(...).
+CREATE OR REPLACE FUNCTION public.get_all_balances_v2(_user_id bigint, _group_id integer)
+RETURNS TABLE(category_name varchar, balance numeric(20, 2))
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY
+    SELECT
+        c."name" AS category_name,
+        COALESCE(public.get_category_balance_v2(_user_id, c.id, 'RUB'), 0)::numeric(20, 2) AS balance
+    FROM public.categories c
+    WHERE c.id IN (SELECT public.get_categories_id(_user_id, _group_id));
 END;
 $function$;
 
@@ -2085,6 +2194,36 @@ SELECT
             get_users_id(_user_id))
               ) cf
 GROUP BY cf.currency;
+$function$
+;
+
+-- Ledger-backed candidate for get_category_balance_with_currency(...).
+CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency_v2(_user_id bigint, _category_id integer)
+ RETURNS TABLE (value numeric, currency varchar)
+ LANGUAGE sql
+AS $function$
+SELECT
+    SUM(p.value) AS value,
+    p.currency
+FROM (
+    SELECT
+        CASE
+            WHEN to_node.legacy_category_id = _category_id THEN ap.value
+            ELSE -ap.value
+        END AS value,
+        ap.currency
+    FROM public.allocation_postings ap
+    LEFT JOIN public.allocation_nodes from_node
+      ON from_node.id = ap.from_node_id
+    LEFT JOIN public.allocation_nodes to_node
+      ON to_node.id = ap.to_node_id
+    WHERE ap.user_id IN (SELECT get_users_id(_user_id))
+      AND _category_id IN (
+          from_node.legacy_category_id,
+          to_node.legacy_category_id
+      )
+) p
+GROUP BY p.currency;
 $function$
 ;
 

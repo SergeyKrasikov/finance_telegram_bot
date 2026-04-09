@@ -360,6 +360,11 @@ graph TD
   - `public.get_last_allocation_postings(user_id, num)`
   - `public.get_last_transaction_v2(user_id, num)` как ledger-backed candidate для `/history`
   - `public.get_daily_allocation_transactions(user_id)`
+  - `public.get_category_balance_v2(user_id, category_id, currency)`
+  - `public.get_group_balance_v2(user_id, group_id)`
+  - `public.get_remains_v2(user_id, category_name)`
+  - `public.get_all_balances_v2(user_id, group_id)`
+  - `public.get_category_balance_with_currency_v2(user_id, category_id)`
   - `/history` читает ledger-backed `get_last_transaction_v2()`
   - delete-flow в `/history` удаляет `allocation_postings` и linked legacy `cash_flow`, если он есть в metadata
 - daily scheduler уже использует ledger-backed `get_daily_transactions()`

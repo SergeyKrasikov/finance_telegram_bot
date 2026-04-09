@@ -68,6 +68,9 @@
   - delete-flow удаляет `allocation_postings` и linked legacy `cash_flow`, если он есть в metadata
   - daily scheduler уже читает `get_daily_transactions()` из `allocation_postings`
   - `get_daily_allocation_transactions(user_id)` оставлен как явный alias на ledger-read
+  - добавлены balance candidate helpers:
+    `get_category_balance_v2`, `get_group_balance_v2`, `get_remains_v2`,
+    `get_all_balances_v2`, `get_category_balance_with_currency_v2`
 
 ## Порядок безопасной миграции
 
