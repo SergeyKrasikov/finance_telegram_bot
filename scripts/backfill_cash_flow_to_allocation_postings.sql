@@ -78,9 +78,31 @@ SELECT
     cf.description,
     jsonb_strip_nulls(
         jsonb_build_object(
-            'kind', 'backfill',
-            'subkind', 'cash_flow',
+            'kind', CASE
+                WHEN cf.description ILIKE 'exchange to %'
+                  OR cf.description ILIKE 'exchange from %'
+                  OR cf.description ILIKE 'auto exchange %'
+                    THEN 'exchange'
+                ELSE 'backfill'
+            END,
+            'subkind', CASE
+                WHEN cf.description ILIKE 'auto exchange %' THEN 'auto'
+                WHEN cf.description ILIKE 'exchange to %'
+                  OR cf.description ILIKE 'exchange from %'
+                    THEN 'manual'
+                ELSE 'cash_flow'
+            END,
             'origin', 'migration',
+            'direction', CASE
+                WHEN cf.description ILIKE 'exchange to %'
+                  OR cf.description ILIKE 'auto exchange % to %'
+                    THEN 'out'
+                WHEN cf.description ILIKE 'exchange from %'
+                  OR cf.description ILIKE 'auto exchange % from %'
+                    THEN 'in'
+                ELSE NULL
+            END,
+            'backfill_kind', 'cash_flow',
             'legacy_cash_flow_id', cf.id,
             'legacy_category_id_from', cf.category_id_from,
             'legacy_category_id_to', cf.category_id_to,
@@ -157,3 +179,34 @@ BEGIN
             _cash_flow_count;
     END IF;
 END $$;
+
+-- Reclassify legacy exchange rows that were already backfilled before exchange
+-- metadata was introduced.
+UPDATE public.allocation_postings ap
+SET metadata = jsonb_strip_nulls(
+    ap.metadata
+    || jsonb_build_object(
+        'kind', 'exchange',
+        'subkind', CASE
+            WHEN ap.description ILIKE 'auto exchange %' THEN 'auto'
+            ELSE 'manual'
+        END,
+        'origin', 'migration',
+        'direction', CASE
+            WHEN ap.description ILIKE 'exchange to %'
+              OR ap.description ILIKE 'auto exchange % to %'
+                THEN 'out'
+            WHEN ap.description ILIKE 'exchange from %'
+              OR ap.description ILIKE 'auto exchange % from %'
+                THEN 'in'
+            ELSE NULL
+        END,
+        'backfill_kind', 'cash_flow'
+    )
+)
+WHERE ap.metadata->>'kind' = 'backfill'
+  AND (
+      ap.description ILIKE 'exchange to %'
+      OR ap.description ILIKE 'exchange from %'
+      OR ap.description ILIKE 'auto exchange %'
+  );
