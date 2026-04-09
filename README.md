@@ -360,6 +360,7 @@ graph TD
 - `free_to_gifts` уже берёт free balance через `get_allocation_node_balance(...)` по remainder node id.
 - `monthly_distribute_cascade()` уже передаёт source category node id в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и основного `salary_primary` split.
   `legacy_category_id` пока остаётся compatibility-полем для балансов, metadata и bridge/backfill, но больше не является единственным способом выбрать debit-node внутри monthly runtime.
+- Вызовы `allocation_distribute(...)` из `monthly_distribute_cascade()` больше не передают legacy source category id; он выводится из source node только как compatibility metadata.
 - Internal helper `monthly_distribute_allocation(...)` уже может принимать явный `source_category_node_id` без обязательного legacy category id.
 - Partner bridge `family_contribution_out -> family_contribution_in` берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id.
 - Household membership helper `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL.

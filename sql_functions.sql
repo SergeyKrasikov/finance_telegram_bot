@@ -725,7 +725,6 @@ DECLARE
     _extra_income_root_id bigint;
     _free_to_gifts_root_id bigint;
     _free_node_id bigint;
-    _free_category_id integer;
     _reserve_root_id bigint;
     _salary_primary_root_id bigint;
     _income_source_node_id bigint;
@@ -748,7 +747,6 @@ BEGIN
     FOR _source IN
         SELECT
             source_node.id AS source_category_node_id,
-            source_node.legacy_category_id AS category_id_from,
             public.get_allocation_node_balance(_user_id, source_node.id, 'RUB') AS balance
         FROM public.allocation_nodes source_node
         JOIN public.allocation_node_groups source_group
@@ -756,9 +754,8 @@ BEGIN
          AND source_group.active
         WHERE source_node.user_id = _user_id
           AND source_node.active
-          AND source_node.legacy_category_id IS NOT NULL
           AND source_group.legacy_group_id = 11
-        ORDER BY source_node.legacy_category_id
+        ORDER BY source_node.id
     LOOP
         IF COALESCE(_source.balance, 0) <= 0 THEN
             CONTINUE;
@@ -769,7 +766,7 @@ BEGIN
             _monthly_income_root_id::bigint,
             _source.balance::numeric,
             'RUB'::varchar,
-            _source.category_id_from::integer,
+            NULL::integer,
             'monthly distribute'::text,
             _source.source_category_node_id::bigint
         );
@@ -787,7 +784,6 @@ BEGIN
     FOR _source IN
         SELECT
             source_node.id AS source_category_node_id,
-            source_node.legacy_category_id AS category_id_from,
             public.get_allocation_node_balance(_user_id, source_node.id, 'RUB') AS balance
         FROM public.allocation_nodes source_node
         JOIN public.allocation_node_groups source_group
@@ -795,9 +791,8 @@ BEGIN
          AND source_group.active
         WHERE source_node.user_id = _user_id
           AND source_node.active
-          AND source_node.legacy_category_id IS NOT NULL
           AND source_group.legacy_group_id = 12
-        ORDER BY source_node.legacy_category_id
+        ORDER BY source_node.id
     LOOP
         IF COALESCE(_source.balance, 0) <= 0 THEN
             CONTINUE;
@@ -808,7 +803,7 @@ BEGIN
             _extra_income_root_id::bigint,
             _source.balance::numeric,
             'RUB'::varchar,
-            _source.category_id_from::integer,
+            NULL::integer,
             'monthly distribute'::text,
             _source.source_category_node_id::bigint
         );
@@ -821,11 +816,6 @@ BEGIN
             'self_distribution remainder leaf is required for user %',
             _user_id;
     END IF;
-
-    SELECT legacy_category_id
-    INTO _free_category_id
-    FROM public.allocation_nodes
-    WHERE id = _free_node_id;
 
     _free_money := public.get_allocation_node_balance(_user_id, _free_node_id, 'RUB');
 
@@ -844,7 +834,7 @@ BEGIN
             _free_to_gifts_root_id::bigint,
             _free_money::numeric,
             'RUB'::varchar,
-            _free_category_id,
+            NULL::integer,
             'monthly distribute'::text,
             _free_node_id::bigint
         );
@@ -861,8 +851,7 @@ BEGIN
 
     FOR _source IN
         SELECT DISTINCT
-            spend_node.id AS source_category_node_id,
-            spend_node.legacy_category_id AS category_id
+            spend_node.id AS source_category_node_id
         FROM public.allocation_nodes spend_node
         JOIN public.allocation_node_groups spend_group
           ON spend_group.node_id = spend_node.id
@@ -872,10 +861,9 @@ BEGIN
          AND personal_group.active
         WHERE spend_node.user_id = _user_id
           AND spend_node.active
-          AND spend_node.legacy_category_id IS NOT NULL
           AND spend_group.legacy_group_id = 8
           AND personal_group.legacy_group_id = 15
-        ORDER BY category_id
+        ORDER BY source_category_node_id
     LOOP
         _balance := public.get_allocation_node_balance(
             _user_id,
@@ -898,7 +886,7 @@ BEGIN
             _reserve_root_id::bigint,
             _reserve_amount::numeric,
             'RUB'::varchar,
-            _source.category_id::integer,
+            NULL::integer,
             'monthly distribute'::text,
             _source.source_category_node_id::bigint
         );
@@ -938,7 +926,7 @@ BEGIN
                 _salary_primary_root_id::bigint,
                 _sum_value::numeric,
                 'RUB'::varchar,
-                _income_category::integer,
+                NULL::integer,
                 'monthly distribute'::text,
                 _income_source_node_id::bigint
             )
