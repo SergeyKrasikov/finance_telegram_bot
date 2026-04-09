@@ -1731,31 +1731,6 @@ RETURNS TABLE(transact text)
 LANGUAGE sql
 AS $function$
 SELECT CONCAT_WS(' ',
-    c."name",
-    COALESCE(c2."name", '-'),
-    CASE
-        WHEN ABS(cf.value) >= 1 THEN REPLACE(TO_CHAR(cf.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
-        WHEN cf.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
-        ELSE cf.value::text
-    END,
-    cf.currency
-) AS transact
-FROM cash_flow cf
-LEFT JOIN categories c ON cf.category_id_from = c.id
-LEFT JOIN categories c2 ON cf.category_id_to = c2.id
-WHERE date_trunc('day', cf.datetime) = date_trunc('day', now())
-  AND users_id = _user_id
-ORDER BY cf.datetime;
-$function$;
-
-
--- Read-only daily report helper backed by allocation_postings.
--- Kept separate from get_daily_transactions() until scheduler output is verified.
-CREATE OR REPLACE FUNCTION public.get_daily_allocation_transactions(_user_id bigint)
-RETURNS TABLE(transact text)
-LANGUAGE sql
-AS $function$
-SELECT CONCAT_WS(' ',
     src."name",
     COALESCE(dst."name", '-'),
     CASE
@@ -1771,6 +1746,17 @@ LEFT JOIN public.allocation_nodes dst ON ap.to_node_id = dst.id
 WHERE date_trunc('day', ap.datetime) = date_trunc('day', now())
   AND ap.user_id = _user_id
 ORDER BY ap.datetime;
+$function$;
+
+
+-- Read-only daily report helper backed by allocation_postings.
+-- Kept as an explicit ledger-read alias after get_daily_transactions() switched to allocation_postings.
+CREATE OR REPLACE FUNCTION public.get_daily_allocation_transactions(_user_id bigint)
+RETURNS TABLE(transact text)
+LANGUAGE sql
+AS $function$
+SELECT *
+FROM public.get_daily_transactions(_user_id);
 $function$;
 
 -- возвращает id всех пользователей
