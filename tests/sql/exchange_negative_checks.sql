@@ -3,6 +3,8 @@
 
 BEGIN;
 
+DELETE FROM allocation_postings WHERE user_id = 904001;
+DELETE FROM allocation_nodes WHERE user_id = 904001 OR legacy_category_id = 904011;
 DELETE FROM cash_flow WHERE users_id = 904001;
 DELETE FROM users WHERE id = 904001;
 DELETE FROM categories WHERE id = 904011;
@@ -18,7 +20,7 @@ DECLARE
 BEGIN
     -- 1) non-positive values
     BEGIN
-        PERFORM public.exchange(904001, 904011, 0::numeric, 'USD', 1::numeric, 'USDT');
+        PERFORM public.exchange_v2(904001, 904011, 0::numeric, 'USD', 1::numeric, 'USDT');
         RAISE EXCEPTION 'Expected failure for non-positive values';
     EXCEPTION
         WHEN OTHERS THEN
@@ -29,7 +31,7 @@ BEGIN
 
     -- 2) both rates unknown
     BEGIN
-        PERFORM public.exchange(904001, 904011, 1::numeric, 'AAA', 2::numeric, 'BBB');
+        PERFORM public.exchange_v2(904001, 904011, 1::numeric, 'AAA', 2::numeric, 'BBB');
         RAISE EXCEPTION 'Expected failure for unknown pair AAA/BBB';
     EXCEPTION
         WHEN OTHERS THEN
@@ -46,7 +48,7 @@ BEGIN
     -- 3) paying stablecoin without stable rate
     before_usdt_count := (SELECT count(*) FROM exchange_rates WHERE currency = 'USDT');
     BEGIN
-        PERFORM public.exchange(904001, 904011, 1::numeric, 'USDT', 100::numeric, 'RUB');
+        PERFORM public.exchange_v2(904001, 904011, 1::numeric, 'USDT', 100::numeric, 'RUB');
         RAISE EXCEPTION 'Expected failure for unknown stablecoin rate (out)';
     EXCEPTION
         WHEN OTHERS THEN
@@ -61,7 +63,7 @@ BEGIN
 
     -- 4) receiving stablecoin without stable rate
     BEGIN
-        PERFORM public.exchange(904001, 904011, 100::numeric, 'RUB', 1::numeric, 'USDT');
+        PERFORM public.exchange_v2(904001, 904011, 100::numeric, 'RUB', 1::numeric, 'USDT');
         RAISE EXCEPTION 'Expected failure for unknown stablecoin rate (in)';
     EXCEPTION
         WHEN OTHERS THEN
@@ -72,7 +74,7 @@ BEGIN
 
     -- 5) no stable/USD pair, missing out-rate but in-rate exists
     BEGIN
-        PERFORM public.exchange(904001, 904011, 1::numeric, 'ETH', 100::numeric, 'RUB');
+        PERFORM public.exchange_v2(904001, 904011, 1::numeric, 'ETH', 100::numeric, 'RUB');
         RAISE EXCEPTION 'Expected failure for unknown out-rate ETH';
     EXCEPTION
         WHEN OTHERS THEN

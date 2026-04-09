@@ -4,6 +4,8 @@
 BEGIN;
 
 -- Test fixtures
+DELETE FROM allocation_postings WHERE user_id = 900001;
+DELETE FROM allocation_nodes WHERE user_id = 900001 OR legacy_category_id = 900001;
 DELETE FROM cash_flow WHERE users_id = 900001;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'USDT', 'ETH', 'RUB', 'AAA', 'BBB');
 DELETE FROM categories WHERE id = 900001;
@@ -15,7 +17,7 @@ INSERT INTO categories(id, "name", "percent") VALUES (900001, 'Test Wallet', 0.0
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
 -- 1) USD -> USDT: updates USDT (anchor USD=1)
-SELECT public.exchange(900001, 900001, 100::numeric, 'USD', 99::numeric, 'USDT');
+SELECT public.exchange_v2(900001, 900001, 100::numeric, 'USD', 99::numeric, 'USDT');
 DO $$
 DECLARE r numeric;
 BEGIN
@@ -26,7 +28,7 @@ BEGIN
 END $$;
 
 -- 2) RUB -> USDT: when receiving stablecoin, update non-stable side (RUB)
-SELECT public.exchange(900001, 900001, 80::numeric, 'RUB', 1::numeric, 'USDT');
+SELECT public.exchange_v2(900001, 900001, 80::numeric, 'RUB', 1::numeric, 'USDT');
 DO $$
 DECLARE rub_rate numeric;
 DECLARE usdt_rate numeric;
@@ -44,7 +46,7 @@ BEGIN
 END $$;
 
 -- 3) USDT -> ETH: paying stablecoin updates received non-stable (ETH)
-SELECT public.exchange(900001, 900001, 1::numeric, 'USDT', 0.0004::numeric, 'ETH');
+SELECT public.exchange_v2(900001, 900001, 1::numeric, 'USDT', 0.0004::numeric, 'ETH');
 DO $$
 DECLARE eth_rate numeric;
 BEGIN
@@ -55,7 +57,7 @@ BEGIN
 END $$;
 
 -- 4) ETH -> RUB: no USD/stable in target, update received currency (RUB)
-SELECT public.exchange(900001, 900001, 0.0005::numeric, 'ETH', 100::numeric, 'RUB');
+SELECT public.exchange_v2(900001, 900001, 0.0005::numeric, 'ETH', 100::numeric, 'RUB');
 DO $$
 DECLARE rub_rate numeric;
 BEGIN
@@ -69,7 +71,7 @@ END $$;
 DO $$
 BEGIN
     BEGIN
-        PERFORM public.exchange(900001, 900001, 1::numeric, 'AAA', 2::numeric, 'BBB');
+        PERFORM public.exchange_v2(900001, 900001, 1::numeric, 'AAA', 2::numeric, 'BBB');
         RAISE EXCEPTION 'Test failed: expected exception for unknown pair AAA/BBB';
     EXCEPTION
         WHEN OTHERS THEN
@@ -110,7 +112,19 @@ END $$;
 DO $$
 DECLARE v text;
 DECLARE t text;
+DECLARE ledger_rows int;
 BEGIN
+    SELECT count(*)
+    INTO ledger_rows
+    FROM allocation_postings
+    WHERE user_id = 900001
+      AND metadata->>'kind' = 'exchange'
+      AND metadata->>'subkind' = 'manual';
+
+    IF ledger_rows <> 8 THEN
+        RAISE EXCEPTION 'Test failed: expected 8 manual exchange ledger rows, got %', ledger_rows;
+    END IF;
+
     SELECT value, pg_typeof(value)::text
     INTO v, t
     FROM get_last_transaction(900001, 1)

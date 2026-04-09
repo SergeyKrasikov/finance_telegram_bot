@@ -4,6 +4,8 @@
 BEGIN;
 
 -- Minimal fixture
+DELETE FROM allocation_postings WHERE user_id = 905001;
+DELETE FROM allocation_nodes WHERE user_id = 905001 OR legacy_category_id = 905011;
 DELETE FROM cash_flow WHERE users_id = 905001;
 DELETE FROM categories_category_groups WHERE users_id = 905001;
 DELETE FROM users_groups WHERE users_id = 905001;
@@ -46,12 +48,12 @@ BEGIN
 
     INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
-    msg := public.exchange(905001, 905011, 100::numeric, 'USD', 99::numeric, 'USDT');
+    msg := public.exchange_v2(905001, 905011, 100::numeric, 'USD', 99::numeric, 'USDT');
     IF msg NOT LIKE 'Курс:%USDT%' THEN
         RAISE EXCEPTION 'Unexpected exchange message for USDT: %', msg;
     END IF;
 
-    msg := public.exchange(905001, 905011, 100::numeric, 'USD', 98::numeric, 'FDUSD');
+    msg := public.exchange_v2(905001, 905011, 100::numeric, 'USD', 98::numeric, 'FDUSD');
     IF msg NOT LIKE 'Курс:%FDUSD%' THEN
         RAISE EXCEPTION 'Unexpected exchange message for FDUSD: %', msg;
     END IF;

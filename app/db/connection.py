@@ -6,7 +6,7 @@ from app.config import PG_DATABASE, PG_HOST, PG_PASSWORD, PG_PORT, PG_USER
 
 _ALLOWED_DB_FUNCTIONS = {
     "delete_transaction",
-    "exchange",
+    "exchange_v2",
     "get_all_balances_v2",
     "get_all_users_id",
     "get_last_allocation_postings",

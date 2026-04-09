@@ -4,6 +4,7 @@ DROP FUNCTION IF EXISTS public.monthly_distribute(bigint, integer);
 DROP FUNCTION IF EXISTS public.distribute_to_group(bigint, integer, integer, numeric, varchar);
 DROP FUNCTION IF EXISTS public.transact_from_group_to_category(bigint, integer, integer);
 DROP FUNCTION IF EXISTS public.exchange(bigint, integer, numeric, varchar, numeric, varchar);
+DROP FUNCTION IF EXISTS public.exchange_v2(bigint, integer, numeric, varchar, numeric, varchar);
 DROP FUNCTION IF EXISTS public.insert_spend_with_exchange(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_spend_with_exchange_v2(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_revenue(bigint, varchar, numeric, varchar, text);
@@ -2212,7 +2213,8 @@ end
 $function$
 ;  
 
--- записывает расход одной валюты и доход в той же категории другой валюты
+-- LEGACY cash_flow-primary manual exchange.
+-- App write-paths use exchange_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.exchange(_users_id bigint, _category_id int, _value_out numeric, _currency_out character VARYING, _value_in numeric, _currency_in character varying)
  RETURNS text
  LANGUAGE plpgsql
@@ -2348,6 +2350,231 @@ begin
 return format('Курс: %s=%s, %s=%s (за 1 USD)',
               _currency_out, _rate_out_text,
               _currency_in, _rate_in_text);
+		end
+$function$
+;
+
+-- Allocation-primary manual exchange.
+-- Preserves legacy rate update rules and mirrors two compatibility rows to cash_flow.
+CREATE OR REPLACE FUNCTION public.exchange_v2(_users_id bigint, _category_id int, _value_out numeric, _currency_out character VARYING, _value_in numeric, _currency_in character varying)
+ RETURNS text
+ LANGUAGE plpgsql
+AS $function$
+declare
+    _rate_out numeric;
+    _rate_in numeric;
+    _rate_out_current numeric;
+    _rate_in_current numeric;
+    _rate_out_text text;
+    _rate_in_text text;
+    _category_node_id bigint;
+    _cash_flow_id_out bigint;
+    _cash_flow_id_in bigint;
+    _allocation_posting_id_out bigint;
+    _allocation_posting_id_in bigint;
+    _currency_out_norm varchar := upper(_currency_out);
+    _currency_in_norm varchar := upper(_currency_in);
+    _stable_currencies text[] := array[
+        'USDT','USDC','DAI','BUSD','TUSD','USDP','GUSD','USDN','FRAX','USDD','FDUSD','USDE','SUSD','PYUSD'
+    ];
+    _is_stable_out boolean;
+    _is_stable_in boolean;
+    _ts timestamp := now();
+begin
+    if _value_out <= 0 or _value_in <= 0 then
+        raise exception 'Exchange values must be greater than zero';
+    end if;
+
+    select an.id
+    into _category_node_id
+    from public.allocation_nodes an
+    where an.active
+      and an.legacy_category_id = _category_id
+      and (
+          an.user_id = _users_id
+          or an.user_group_id in (
+              select ugm.user_group_id
+              from public.user_group_memberships ugm
+              where ugm.user_id = _users_id
+                and ugm.active
+          )
+      )
+    order by
+        case when an.user_id = _users_id then 0 else 1 end,
+        an.id
+    limit 1;
+
+    if _category_node_id is null then
+        _category_node_id := public.ensure_allocation_compatibility_node(_users_id, _category_id);
+    end if;
+
+    if _category_node_id is null then
+        raise exception 'Allocation category node for legacy category % not found for user %', _category_id, _users_id;
+    end if;
+
+    select rate into _rate_out
+    from exchange_rates
+    where currency = _currency_out_norm
+    order by datetime desc
+    limit 1;
+
+    select rate into _rate_in
+    from exchange_rates
+    where currency = _currency_in_norm
+    order by datetime desc
+    limit 1;
+
+    if _currency_out_norm = 'USD' then
+        _rate_out := 1;
+    end if;
+    if _currency_in_norm = 'USD' then
+        _rate_in := 1;
+    end if;
+
+    _is_stable_out := _currency_out_norm = ANY(_stable_currencies);
+    _is_stable_in := _currency_in_norm = ANY(_stable_currencies);
+
+    if _rate_out is null and _rate_in is null then
+        raise exception 'Rates for % and % are unknown. Exchange via USD first', _currency_out_norm, _currency_in_norm;
+    end if;
+
+    -- USD is anchor: update the other currency
+    if _currency_out_norm = 'USD' then
+        _rate_out := 1;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in_norm, _rate_in);
+    elsif _currency_in_norm = 'USD' then
+        _rate_in := 1;
+        _rate_out := _rate_in * (_value_out / _value_in);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_out_norm, _rate_out);
+    -- Stablecoin updates only when exchanged with USD
+    elsif _is_stable_out then
+        if _rate_out is null then
+            raise exception 'Stablecoin rate is unknown. Exchange stablecoin with USD first';
+        end if;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in_norm, _rate_in);
+    elsif _is_stable_in then
+        if _rate_in is null then
+            raise exception 'Stablecoin rate is unknown. Exchange stablecoin with USD first';
+        end if;
+        _rate_out := _rate_in * (_value_out / _value_in);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_out_norm, _rate_out);
+    else
+        if _rate_out is null then
+            raise exception 'Rate for % is unknown. Exchange via USD or stablecoin first', _currency_out_norm;
+        end if;
+        _rate_in := _rate_out * (_value_in / _value_out);
+        insert into exchange_rates(datetime, currency, rate)
+        values(_ts, _currency_in_norm, _rate_in);
+    end if;
+
+    insert into public.allocation_postings(
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    values(
+        _users_id,
+        _category_node_id,
+        null,
+        _value_out,
+        _currency_out_norm,
+        concat('exchange to ', _value_in, ' ',  _currency_in_norm),
+        jsonb_build_object(
+            'kind', 'exchange',
+            'subkind', 'manual',
+            'origin', 'app',
+            'direction', 'out',
+            'legacy_category_id_from', _category_id
+        )
+    )
+    returning id into _allocation_posting_id_out;
+
+    insert into cash_flow(users_id, category_id_from, value, currency, description)
+           values(_users_id, _category_id, _value_out, _currency_out_norm, concat('exchange to ', _value_in, ' ',  _currency_in_norm))
+    returning id into _cash_flow_id_out;
+
+    update public.allocation_postings
+    set metadata = metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_id_out)
+    where id = _allocation_posting_id_out;
+
+    insert into public.allocation_postings(
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    values(
+        _users_id,
+        null,
+        _category_node_id,
+        _value_in,
+        _currency_in_norm,
+        concat('exchange from ', _value_out, ' ',  _currency_out_norm),
+        jsonb_build_object(
+            'kind', 'exchange',
+            'subkind', 'manual',
+            'origin', 'app',
+            'direction', 'in',
+            'legacy_category_id_to', _category_id,
+            'paired_posting_id', _allocation_posting_id_out
+        )
+    )
+    returning id into _allocation_posting_id_in;
+
+    insert into cash_flow(users_id, category_id_to, value, currency, description)
+           values(_users_id, _category_id, _value_in, _currency_in_norm, concat('exchange from ', _value_out, ' ',  _currency_out_norm))
+    returning id into _cash_flow_id_in;
+
+    update public.allocation_postings
+    set metadata = metadata || jsonb_build_object(
+        'legacy_cash_flow_id', _cash_flow_id_in,
+        'paired_posting_id', _allocation_posting_id_out
+    )
+    where id = _allocation_posting_id_in;
+
+    update public.allocation_postings
+    set metadata = metadata || jsonb_build_object('paired_posting_id', _allocation_posting_id_in)
+    where id = _allocation_posting_id_out;
+
+    if _currency_out_norm = 'USD' then
+        _rate_out_current := 1;
+    else
+        _rate_out_current := coalesce(_rate_out, (select rate from exchange_rates where currency = _currency_out_norm order by datetime desc limit 1));
+    end if;
+
+    if _currency_in_norm = 'USD' then
+        _rate_in_current := 1;
+    else
+        _rate_in_current := coalesce(_rate_in, (select rate from exchange_rates where currency = _currency_in_norm order by datetime desc limit 1));
+    end if;
+
+    _rate_out_text := case
+        when abs(_rate_out_current) >= 1 then replace(to_char(_rate_out_current, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        when _rate_out_current::text like '%.%' then rtrim(trim(trailing '0' from _rate_out_current::text), '.')
+        else _rate_out_current::text
+    end;
+    _rate_in_text := case
+        when abs(_rate_in_current) >= 1 then replace(to_char(_rate_in_current, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        when _rate_in_current::text like '%.%' then rtrim(trim(trailing '0' from _rate_in_current::text), '.')
+        else _rate_in_current::text
+    end;
+
+return format('Курс: %s=%s, %s=%s (за 1 USD)',
+              _currency_out_norm, _rate_out_text,
+              _currency_in_norm, _rate_in_text);
 		end
 $function$
 ;

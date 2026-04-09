@@ -4,6 +4,10 @@
 BEGIN;
 
 -- cleanup deterministic fixture scope
+DELETE FROM allocation_postings WHERE user_id IN (901101, 901102);
+DELETE FROM allocation_nodes
+WHERE user_id IN (901101, 901102)
+   OR legacy_category_id IN (901111);
 DELETE FROM cash_flow WHERE users_id IN (901101, 901102);
 DELETE FROM users_groups WHERE users_id IN (901101, 901102);
 DELETE FROM users WHERE id IN (901101, 901102);
@@ -69,8 +73,8 @@ END $$;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'USDT', 'RUB');
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
-SELECT public.exchange(901101, 901111, 1::numeric, 'USD', 99::numeric, 'USDT');
-SELECT public.exchange(901101, 901111, 80::numeric, 'RUB', 1::numeric, 'USDT');
+SELECT public.exchange_v2(901101, 901111, 1::numeric, 'USD', 99::numeric, 'USDT');
+SELECT public.exchange_v2(901101, 901111, 80::numeric, 'RUB', 1::numeric, 'USDT');
 
 DO $$
 DECLARE

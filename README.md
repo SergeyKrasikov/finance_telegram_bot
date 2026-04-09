@@ -382,17 +382,17 @@ graph TD
   - `public.insert_spend_v2(...)`
   - `public.insert_revenue_v2(...)`
   - `public.insert_spend_with_exchange_v2(...)`
-  App write-paths for manual spend/revenue and auto-exchange spend already use these v2 functions.
-  Legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)`
+  - `public.exchange_v2(...)`
+  App write-paths for manual spend/revenue, auto-exchange spend, and manual exchange already use these v2 functions.
+  Legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)`
   remain in SQL for reference/compare/rollback.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
 - Новые dual-write записи помечаются в `metadata.legacy_cash_flow_id`, чтобы backfill не создавал дубли.
 - Текущая конвенция `metadata`:
   - monthly runtime: `kind=monthly`, `subkind=leaf_posting`, `origin=allocation_runtime`
   - backfill: `kind=backfill`, `subkind=cash_flow`, `origin=migration`
-  - будущий exchange:
-    - ручной: `kind=exchange`, `subkind=manual`, `origin=app`
-    - авто: `kind=exchange`, `subkind=auto`, `origin=system`
+  - manual exchange runtime: `kind=exchange`, `subkind=manual`, `origin=app`
+  - auto exchange runtime: `kind=exchange`, `subkind=auto`, `origin=system`
 
 ## Заметки
 - Основная точка входа: `app.py`.
