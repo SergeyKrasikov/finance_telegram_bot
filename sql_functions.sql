@@ -30,6 +30,7 @@ DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
 DROP FUNCTION IF EXISTS public.get_category_balance_v2(bigint, integer, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance(bigint, bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text, varchar);
+DROP FUNCTION IF EXISTS public.find_allocation_category_node_id_by_legacy(bigint, integer);
 DROP FUNCTION IF EXISTS public.ensure_allocation_compatibility_node(bigint, integer);
 DROP FUNCTION IF EXISTS public.mirror_cash_flow_row_to_allocation_postings(bigint, text, text, text, jsonb);
 DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
@@ -52,6 +53,7 @@ DROP FUNCTION IF EXISTS public.reserve_negative_personal_expenses_to_allocation_
 DROP FUNCTION IF EXISTS public.insert_monthly_compat_investition_second(bigint, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.validate_allocation_routes(bigint);
 DROP FUNCTION IF EXISTS public.allocation_distribute_recursive(bigint, bigint, numeric, varchar, integer, text, bigint[]);
+DROP FUNCTION IF EXISTS public.allocation_distribute_recursive(bigint, bigint, numeric, varchar, integer, text, bigint[], bigint);
 DROP FUNCTION IF EXISTS public.allocation_distribute(bigint, bigint, numeric, varchar, integer, text);
 DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, integer, varchar, text);
 DROP FUNCTION IF EXISTS public.monthly_allocation_report_metrics(bigint, bigint, jsonb);
@@ -262,6 +264,35 @@ AS $function$
     )
     SELECT public.get_allocation_node_balance(_user_id, id, _currency)
     FROM target_node;
+$function$;
+
+
+-- Finds an active allocation node that represents a legacy category for this user.
+-- Prefer user-owned nodes, then shared group-owned nodes visible to the user.
+CREATE OR REPLACE FUNCTION public.find_allocation_category_node_id_by_legacy(
+    _user_id bigint,
+    _legacy_category_id integer
+) RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $function$
+    SELECT an.id
+    FROM public.allocation_nodes an
+    WHERE an.active
+      AND an.legacy_category_id = _legacy_category_id
+      AND (
+          an.user_id = _user_id
+          OR an.user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _user_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN an.user_id = _user_id THEN 0 ELSE 1 END,
+        an.id
+    LIMIT 1;
 $function$;
 
 
@@ -655,12 +686,13 @@ END;
 $function$;
 
 
--- Переходная версия monthly_distribute():
--- повторяет legacy monthly_distribute() по расчетам и JSON,
--- но постепенно переводит подготовительные шаги и ветки на allocation-граф.
+-- Graph-native monthly distribution.
+-- Preserves the Telegram report shape from legacy monthly_distribute(),
+-- but intentionally uses clean monthly semantics for new paths:
+-- explicit investment, explicit family contribution, then clean remainder split.
 -- Важно:
--- 1) функция должна оставаться эквивалентной legacy monthly_distribute();
--- 2) менять её нужно по одной ветке и после каждого изменения прогонять compare SQL;
+-- 1) не возвращаться к грязным legacy-дублям percent/group formulas;
+-- 2) менять её нужно по одной ветке и после каждого изменения прогонять SQL checks;
 -- 3) legacy monthly_distribute() сохраняется ниже как reference/rollback и не должна вызываться из public.monthly().
 CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(_user_id bigint, _income_category integer)
  RETURNS jsonb
@@ -799,27 +831,6 @@ BEGIN
     END IF;
 
     FOR _source IN
-        WITH canonical_reserve_sources AS (
-            SELECT v.user_id, v.category_id
-            FROM (
-                VALUES
-                    (249716305::bigint, 2::integer),
-                    (249716305::bigint, 8::integer),
-                    (249716305::bigint, 9::integer),
-                    (249716305::bigint, 11::integer),
-                    (943915310::bigint, 17::integer),
-                    (943915310::bigint, 18::integer),
-                    (943915310::bigint, 20::integer),
-                    (943915310::bigint, 21::integer),
-                    (943915310::bigint, 26::integer)
-            ) AS v(user_id, category_id)
-        )
-        SELECT category_id
-        FROM canonical_reserve_sources
-        WHERE user_id = _user_id
-
-        UNION
-
         SELECT DISTINCT spend_node.legacy_category_id AS category_id
         FROM public.allocation_nodes spend_node
         JOIN public.allocation_node_groups spend_group
@@ -831,7 +842,6 @@ BEGIN
         WHERE spend_node.user_id = _user_id
           AND spend_node.active
           AND spend_node.legacy_category_id IS NOT NULL
-          AND _user_id NOT IN (249716305, 943915310)
           AND spend_group.legacy_group_id = 8
           AND personal_group.legacy_group_id = 15
         ORDER BY category_id
@@ -1004,7 +1014,8 @@ CREATE OR REPLACE FUNCTION public.allocation_distribute_recursive(
     _currency varchar DEFAULT 'RUB',
     _category_id_from integer DEFAULT NULL,
     _description text DEFAULT 'allocation cascade',
-    _path bigint[] DEFAULT ARRAY[]::bigint[]
+    _path bigint[] DEFAULT ARRAY[]::bigint[],
+    _source_category_node_id bigint DEFAULT NULL
 )
  RETURNS TABLE(
     owner_user_id bigint,
@@ -1027,6 +1038,7 @@ DECLARE
     _posting_from_node_id bigint;
     _next_executor_user_id bigint;
     _next_category_id_from integer;
+    _next_source_category_node_id bigint;
 BEGIN
     IF _amount IS NULL OR _amount <= 0 THEN
         RETURN;
@@ -1077,12 +1089,21 @@ BEGIN
 
     -- Лист определяется отсутствием исходящих активных маршрутов.
     IF _route_count = 0 THEN
+        IF _node.legacy_category_id IS NULL THEN
+            RAISE EXCEPTION
+                'Allocation leaf node % (%) has no legacy_category_id; technical nodes must have outgoing routes',
+                _node.id,
+                _node.slug;
+        END IF;
+
+        IF _category_id_from IS NOT NULL AND _source_category_node_id IS NULL THEN
+            RAISE EXCEPTION
+                'Source allocation category node for legacy category % is required',
+                _category_id_from;
+        END IF;
+
         _posting_user_id := COALESCE(_node.user_id, _executor_user_id);
-        _posting_from_node_id := CASE
-            WHEN COALESCE(array_length(_path, 1), 0) > 0
-                THEN _path[array_length(_path, 1)]
-            ELSE NULL
-        END;
+        _posting_from_node_id := _source_category_node_id;
 
         INSERT INTO public.allocation_postings(
             user_id,
@@ -1159,8 +1180,27 @@ BEGIN
         -- Сохраняем legacy source-category в metadata при входе в family_contribution_in.
         IF _target_node.slug = 'family_contribution_in' THEN
             _next_category_id_from := 15;
+            _next_source_category_node_id := public.find_allocation_category_node_id_by_legacy(
+                _next_executor_user_id,
+                _next_category_id_from
+            );
+
+            IF _next_source_category_node_id IS NULL THEN
+                _next_source_category_node_id := public.ensure_allocation_compatibility_node(
+                    _next_executor_user_id,
+                    _next_category_id_from
+                );
+            END IF;
+
+            IF _next_source_category_node_id IS NULL THEN
+                RAISE EXCEPTION
+                    'Allocation source node for partner legacy category % not found for user %',
+                    _next_category_id_from,
+                    _next_executor_user_id;
+            END IF;
         ELSE
             _next_category_id_from := _category_id_from;
+            _next_source_category_node_id := _source_category_node_id;
         END IF;
 
         RETURN QUERY
@@ -1172,7 +1212,8 @@ BEGIN
             _currency,
             _next_category_id_from,
             _description,
-            _path || _source_node_id
+            _path || _source_node_id,
+            _next_source_category_node_id
         );
     END LOOP;
 END;
@@ -1205,6 +1246,7 @@ CREATE OR REPLACE FUNCTION public.allocation_distribute(
 AS $function$
 DECLARE
     _source_node public.allocation_nodes%ROWTYPE;
+    _source_category_node_id bigint;
 BEGIN
     IF _amount IS NULL OR _amount <= 0 THEN
         RAISE EXCEPTION 'Allocation amount must be greater than zero';
@@ -1246,6 +1288,27 @@ BEGIN
             _source_node.id;
     END IF;
 
+    IF _category_id_from IS NOT NULL THEN
+        _source_category_node_id := public.find_allocation_category_node_id_by_legacy(
+            _executor_user_id,
+            _category_id_from
+        );
+
+        IF _source_category_node_id IS NULL THEN
+            _source_category_node_id := public.ensure_allocation_compatibility_node(
+                _executor_user_id,
+                _category_id_from
+            );
+        END IF;
+
+        IF _source_category_node_id IS NULL THEN
+            RAISE EXCEPTION
+                'Allocation source node for legacy category % not found for user %',
+                _category_id_from,
+                _executor_user_id;
+        END IF;
+    END IF;
+
     RETURN QUERY
     SELECT
         distributed.owner_user_id,
@@ -1261,7 +1324,8 @@ BEGIN
         _currency,
         _category_id_from,
         _description,
-        ARRAY[]::bigint[]
+        ARRAY[]::bigint[],
+        _source_category_node_id
     ) distributed
     GROUP BY
         distributed.owner_user_id,

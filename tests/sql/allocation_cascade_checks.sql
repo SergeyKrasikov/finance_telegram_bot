@@ -56,6 +56,8 @@ INSERT INTO allocation_nodes(
 VALUES
     (906001, NULL, 'test_cascade_root', 'test root', 'root node', 'technical', NULL, false, false, true),
     (906001, NULL, 'test_cascade_stage', 'test stage', 'stage node', 'technical', NULL, false, true, true),
+    (906001, NULL, 'test_cascade_empty_root', 'test empty root', 'route-less technical node', 'technical', NULL, false, false, true),
+    (906001, NULL, 'test_cascade_source', 'test source', 'source balance node', 'income', 906199, true, false, true),
     (906001, NULL, 'test_cascade_personal', 'test personal', 'personal leaf', 'expense', 906101, true, true, true),
     (906002, NULL, 'test_cascade_partner', 'test partner', 'partner leaf', 'expense', 906103, true, true, true);
 
@@ -128,6 +130,18 @@ JOIN allocation_nodes dst
 WHERE src.user_id = 906001
   AND src.slug = 'test_cascade_stage';
 
+INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
+SELECT
+    906001,
+    id,
+    100,
+    'RUB',
+    'fixture source balance',
+    jsonb_build_object('kind', 'fixture')
+FROM allocation_nodes
+WHERE user_id = 906001
+  AND slug = 'test_cascade_source';
+
 DO $$
 DECLARE
     root_id bigint;
@@ -138,6 +152,7 @@ DECLARE
     posted_personal numeric;
     posted_partner numeric;
     posted_common numeric;
+    source_balance numeric;
     posted_rows integer;
     linked_legacy_rows integer;
 BEGIN
@@ -230,6 +245,35 @@ BEGIN
     IF abs(posted_common - 80) > 1e-9 THEN
         RAISE EXCEPTION 'Expected posted common amount 80, got %', posted_common;
     END IF;
+
+    SELECT public.get_category_balance_v2(906001, 906199, 'RUB')
+    INTO source_balance;
+
+    IF abs(source_balance) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected source category balance 0 after allocation debit, got %', source_balance;
+    END IF;
+
+    BEGIN
+        PERFORM *
+        FROM public.allocation_distribute(
+            906001,
+            (
+                SELECT id
+                FROM allocation_nodes
+                WHERE user_id = 906001
+                  AND slug = 'test_cascade_empty_root'
+            ),
+            1::numeric,
+            'RUB',
+            906199,
+            'test technical leaf guard'
+        );
+        RAISE EXCEPTION 'Expected route-less technical node to fail';
+    EXCEPTION WHEN OTHERS THEN
+        IF POSITION('has no legacy_category_id' IN SQLERRM) = 0 THEN
+            RAISE;
+        END IF;
+    END;
 
     SELECT COUNT(*)
     INTO posted_rows

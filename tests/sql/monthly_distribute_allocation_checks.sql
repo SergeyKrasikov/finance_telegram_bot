@@ -180,6 +180,7 @@ DECLARE
     posted_personal numeric;
     posted_partner numeric;
     posted_common numeric;
+    source_balance numeric;
     posted_rows integer;
     linked_legacy_rows integer;
 BEGIN
@@ -284,6 +285,13 @@ BEGIN
 
     IF abs(posted_common - 80) > 1e-9 THEN
         RAISE EXCEPTION 'Expected posted common amount 80, got %', posted_common;
+    END IF;
+
+    SELECT public.get_category_balance_v2(906011, 906299, 'RUB')
+    INTO source_balance;
+
+    IF abs(source_balance) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected source category balance 0 after monthly allocation debit, got %', source_balance;
     END IF;
 
     SELECT COUNT(*)

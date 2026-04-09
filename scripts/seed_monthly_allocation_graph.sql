@@ -182,6 +182,53 @@ WHERE NOT EXISTS (
       AND an.slug = CONCAT('cat_', common_ids.categories_id)
 );
 
+-- Keep monthly allocation group memberships in sync with legacy category mappings.
+-- The backfill script also does this globally, but the monthly seed should be
+-- self-contained because monthly_distribute_cascade() reads groups 8/11/12/15
+-- from allocation_node_groups at runtime.
+INSERT INTO public.allocation_node_groups (
+    node_id,
+    legacy_group_id,
+    active
+)
+SELECT DISTINCT
+    an.id,
+    ccg.category_groyps_id,
+    true
+FROM public.categories_category_groups ccg
+JOIN public.allocation_nodes an
+  ON an.active
+ AND an.legacy_category_id = ccg.categories_id
+ AND (
+     an.user_id = ccg.users_id
+     OR an.user_group_id IN (
+         SELECT ugm.user_group_id
+         FROM public.user_group_memberships ugm
+         WHERE ugm.user_id = ccg.users_id
+           AND ugm.active
+     )
+ )
+WHERE ccg.users_id IN (249716305, 943915310)
+ON CONFLICT (node_id, legacy_group_id)
+DO UPDATE SET active = EXCLUDED.active;
+
+-- A category can move out of legacy group 4 during cleanup. Keep old shared
+-- common leaves from being preferred over the current user-owned leaf.
+UPDATE public.allocation_nodes an
+SET active = false
+WHERE an.user_group_id = (
+        SELECT id
+        FROM public.user_groups
+        WHERE slug = 'monthly_pair_249716305_943915310'
+    )
+  AND an.slug ~ '^cat_[0-9]+$'
+  AND an.legacy_category_id NOT IN (
+      SELECT DISTINCT ccg.categories_id
+      FROM public.categories_category_groups ccg
+      WHERE ccg.users_id IN (249716305, 943915310)
+        AND ccg.category_groyps_id = 4
+  );
+
 -- Rebuild managed monthly routes from scratch.
 -- Older seed versions could leave stale remainder routes on the same source nodes,
 -- and validate_allocation_routes() treats every percent = 1 route as a remainder route.
@@ -496,28 +543,7 @@ INSERT INTO public.allocation_routes (
 SELECT
     src.id,
     COALESCE(common_dst.id, user_dst.id),
-    c.percent / COALESCE(
-        NULLIF(
-            1 - (
-                SELECT inv_c.percent
-                FROM (
-                    VALUES
-                        (249716305::bigint, 1::integer),
-                        (943915310::bigint, 22::integer)
-                ) AS invest_leaf(user_id, category_id)
-                JOIN public.categories_category_groups inv_ccg
-                  ON inv_ccg.users_id = invest_leaf.user_id
-                 AND inv_ccg.category_groyps_id = 2
-                 AND inv_ccg.categories_id = invest_leaf.category_id
-                JOIN public.categories inv_c
-                  ON inv_c.id = invest_leaf.category_id
-                WHERE invest_leaf.user_id = ccg.users_id
-                LIMIT 1
-            ),
-            0
-        ),
-        1
-    ),
+    c.percent,
     CONCAT('self_distribution -> cat_', ccg.categories_id),
     true
 FROM public.categories_category_groups ccg
@@ -533,9 +559,11 @@ LEFT JOIN public.allocation_nodes common_dst
          WHERE slug = 'monthly_pair_249716305_943915310'
      )
  AND common_dst.slug = CONCAT('cat_', ccg.categories_id)
+ AND common_dst.active
 LEFT JOIN public.allocation_nodes user_dst
   ON user_dst.user_id = ccg.users_id
  AND user_dst.slug = CONCAT('cat_', ccg.categories_id)
+ AND user_dst.active
 WHERE ccg.users_id IN (249716305, 943915310)
   AND ccg.category_groyps_id = 2
   AND COALESCE(c.percent, 0) > 0
@@ -624,9 +652,11 @@ LEFT JOIN public.allocation_nodes common_dst
          WHERE slug = 'monthly_pair_249716305_943915310'
      )
  AND common_dst.slug = CONCAT('cat_', ccg.categories_id)
+ AND common_dst.active
 LEFT JOIN public.allocation_nodes user_dst
   ON user_dst.user_id = ccg.users_id
  AND user_dst.slug = CONCAT('cat_', ccg.categories_id)
+ AND user_dst.active
 WHERE ccg.users_id IN (249716305, 943915310)
   AND ccg.category_groyps_id = 3
   AND COALESCE(c.percent, 0) > 0

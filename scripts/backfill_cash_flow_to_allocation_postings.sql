@@ -13,6 +13,15 @@ WITH legacy_categories AS (
     ) AS x(legacy_category_id)
     WHERE cf.users_id IS NOT NULL
       AND x.legacy_category_id IS NOT NULL
+
+    UNION
+
+    SELECT DISTINCT
+        ccg.users_id::bigint AS user_id,
+        ccg.categories_id AS legacy_category_id
+    FROM public.categories_category_groups ccg
+    WHERE ccg.users_id IS NOT NULL
+      AND ccg.categories_id IS NOT NULL
 )
 INSERT INTO public.allocation_nodes (
     user_id,

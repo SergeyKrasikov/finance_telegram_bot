@@ -217,8 +217,8 @@ Scheduler:
 ## Monthly Migration
 - Для поэтапного перевода месячной логики используется `public.monthly_distribute_cascade(...)`.
 - Legacy `public.monthly_distribute(...)` сохранена в базе как reference/rollback функция и больше не используется из `public.monthly()`.
-- `public.monthly_distribute_cascade(...)` должна оставаться эквивалентной ей по JSON-результату.
-- Каскадные ветки и подготовительные шаги переводятся по одной, с compare SQL после каждого изменения.
+- `public.monthly_distribute_cascade(...)` сохраняет форму Telegram JSON, но использует clean monthly semantics: investment и family contribution отделяются явно, дальше распределяется clean remainder.
+- Каскадные ветки и подготовительные шаги переводятся по одной, с SQL checks после каждого изменения.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `public.monthly_distribute_cascade(...)`; monthly-path больше не зависит от переходных helper-вызовов.
 - `monthly_allocation_report_metrics(...)` уже определяет shared leaves и investment leaves через `allocation_nodes` / `allocation_routes`, а не через legacy `group 4` / `group 1`.
 - free-category для шага `free_to_gifts` теперь тоже берётся из allocation-графа через remainder leaf `self_distribution`, а не через legacy `get_categories_id(group 6)`.
@@ -238,9 +238,7 @@ Scheduler:
 1. `group 11` доходы консолидируются через root `monthly_income_sources` в legacy income bucket пользователя (`group 13`).
 2. `group 12` дополнительные доходы консолидируются через root `extra_income_sources` в legacy extra bucket пользователя (`group 7`).
 3. Отрицательные personal-spend категории резервируются через root `debt_reserve` в reserve bucket пользователя (`group 9`) по правилу `1%` от отрицательного баланса.
-   Для тестовой пары источники reserve зафиксированы канонически:
-   `249716305 -> cat_2, cat_8, cat_9, cat_11`;
-   `943915310 -> cat_17, cat_18, cat_20, cat_21, cat_26`.
+   Source category должна быть одновременно в legacy spend `group 8` и personal `group 15`.
 4. Из free-category (`group 6`) через root `free_to_gifts` переводится только legacy `group 7` доля free-баланса.
    Для суммы перевода сохраняется старая формула `free_balance * sum(percent(group 7))`, а route уже ведёт эту сумму в canonical gifts leaf пользователя.
 5. После этого основной monthly каскад стартует из `salary_primary` на балансе `_income_category`.
@@ -308,6 +306,7 @@ graph TD
   - remainder.
 - `self_distribution`
   - категории из `group 2` с `0 < percent < 1`;
+  - route percent равен legacy percent: после явных `10%` investment и `40%` family split распределяется только clean remainder;
   - если категория является общей, маршрут идёт в shared leaf пары (`group 4`);
   - если категория личная, маршрут идёт в user-owned leaf;
   - один remainder route уходит в free leaf пользователя (`group 6`).
@@ -338,9 +337,7 @@ graph TD
   - `salary_primary`
 - Пока тестируем миграцию на restored legacy data, seed для single-target roots (`monthly_income_sources`, `extra_income_sources`, `debt_reserve`, `invest_*_report`) использует явные канонические leaf-категории для пользователей `249716305` и `943915310`.
   Это защищает граф от грязных legacy group mappings вроде попадания `cat_15` в investment group.
-- Источники reserve для этой пары тоже зафиксированы канонически в `monthly_distribute_cascade()`:
-  `249716305 -> cat_2, cat_8, cat_9, cat_11`;
-  `943915310 -> cat_17, cat_18, cat_20, cat_21, cat_26`.
+- Источники reserve определяются динамически как пересечение legacy spend `group 8` и personal `group 15`.
 
 ### Allocation Ledger
 

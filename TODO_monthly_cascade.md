@@ -6,8 +6,8 @@
 
 - Legacy reference/rollback функция: `public.monthly_distribute(_user_id, _income_category)`.
 - Переходная функция: `public.monthly_distribute_cascade(_user_id, _income_category)`.
-- Проверка эквивалентности старой и переходной функций уже собрана отдельным compare SQL.
-- Переходная функция совпадает со старой по возвращаемому JSON для пользователей `943915310` и `249716305`.
+- Новая функция сохраняет форму Telegram JSON, но использует clean monthly semantics вместо полного повторения грязных legacy percent/group formulas.
+- Compare SQL остаётся справочным инструментом для понимания расхождений со старой функцией.
 
 ## Что уже переведено
 
@@ -33,9 +33,8 @@
   - `debt_reserve`
 - `free_to_gifts` сохраняет legacy сумму перевода:
   - `free_balance * sum(percent(group 7))`
-- Для test-пары reserve-source categories канонизированы:
-  - `249716305 -> cat_2, cat_8, cat_9, cat_11`
-  - `943915310 -> cat_17, cat_18, cat_20, cat_21, cat_26`
+- Reserve считается по clean rule:
+  - `1%` от отрицательных категорий, которые одновременно входят в spend `group 8` и personal `group 15`.
 - main roots:
   - `salary_primary`
   - `family_contribution_in`
@@ -55,8 +54,8 @@
 ## Инварианты до полного переключения
 
 - `monthly_distribute()` остаётся legacy reference/rollback функцией.
-- `monthly_distribute_cascade()` должна оставаться эквивалентной по JSON-результату.
-- Любое изменение новой логики сначала проверяется compare SQL между старой и переходной функциями.
+- `monthly_distribute_cascade()` должна сохранять Telegram JSON contract, но не обязана повторять старые странности вроде эффективного распределения `group 2` от `60%` income.
+- Любое изменение новой логики проверяется SQL checks; compare со старой функцией используется только как диагностический срез.
 - До полного переноса нельзя убирать legacy helper'ы:
   - `distribute_to_group(...)`
   - `transact_from_group_to_category(...)`
@@ -86,29 +85,29 @@
 
 1. Ветка `salary_primary`
 - Проверить, что root существует и маршруты до `invest_self_report`, `family_contribution_out` и `self_distribution` корректны.
-- Прогнать compare SQL.
+- Прогнать SQL checks.
 
 2. Ветка `family_contribution_out -> family_contribution_in`
 - Отдельно проверить межпользовательский сценарий.
-- Прогнать compare SQL.
+- Прогнать SQL checks.
 
 3. Ветка `partner_contribution_split`
 - Проверить split входящего семейного взноса на `invest_partner_report` и `partner_distribution`.
-- Прогнать compare SQL.
+- Прогнать SQL checks.
 
 4. Ветки `self_distribution` и `partner_distribution`
 - Проверить leaf/report-ноды личных и общих категорий.
 - Проверить remainder route в free-category.
-- Прогнать compare SQL.
+- Прогнать SQL checks.
 
 5. Подготовительные шаги до каскада
 - `11 -> 13`
   Статус: allocation-only, logic inlined в `monthly_distribute_cascade()`.
 - `12 -> 7`
   Статус: allocation-only, logic inlined в `monthly_distribute_cascade()`.
-- 1% с должников в резерв
+- 1% от отрицательных personal-spend категорий в резерв
   Статус: allocation-only, logic inlined в `monthly_distribute_cascade()`.
-- После каждого изменения прогонять compare SQL.
+- После каждого изменения прогонять SQL checks.
 
 6. Отчёт
 - Начать замену legacy расчётов `общие_категории`, `second_user_pay`, `investition`, `investition_second` на суммы из report-нод.
@@ -138,7 +137,7 @@
 ## Что нельзя делать пока рано
 
 - Удалять `monthly_distribute()`.
-- Удалять compare SQL.
+- Удалять SQL/compare checks.
 - Переводить сразу несколько веток без промежуточной проверки.
 - Менять Telegram-формат отчёта до завершения миграции бизнес-логики.
 
@@ -193,16 +192,17 @@
 
 ### 4. Reserve rule зафиксирован
 
-- Явно выбран и задокументирован один вариант:
-  - `legacy-compatible reserve`
-  - `personal-spend-only reserve`
+- Выбран вариант `personal-spend-only reserve`:
+  - source category должна быть одновременно в legacy `group 8` и `group 15`;
+  - amount = `abs(balance) * 0.01`;
+  - destination = reserve bucket пользователя (`group 9`).
 - Тесты проверяют именно выбранное правило.
 - В коде нет скрытого смешанного поведения reserve.
 
-### 5. Compare tests зелёные
+### 5. SQL checks зелёные
 
-- Основной compare old vs cascade проходит на фиксированном fixture.
-- Reserve compare проходит на отдельном fixture/срезе.
+- Основной monthly/allocation check проходит на фиксированном fixture.
+- Reserve check проходит на отдельном fixture/срезе.
 - Тесты не зависят от продового `cash_flow`.
 - При необходимости отдельно зафиксирован и test bridge для legacy category ids.
 
@@ -219,7 +219,7 @@
 - `monthly()` использует `monthly_distribute_cascade()`.
 - Старая `monthly_distribute()` оставлена как legacy reference/rollback.
 - Переходные helper'ы переименованы или удалены.
-- TODO migration можно закрыть только после зелёного compare на финальной реализации.
+- TODO migration можно закрыть только после зелёных SQL checks на финальной реализации.
 
 ### Definition of done
 
