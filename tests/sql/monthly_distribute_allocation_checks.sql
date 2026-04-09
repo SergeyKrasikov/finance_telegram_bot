@@ -33,6 +33,9 @@ INSERT INTO categories(id, "name", "percent") VALUES
     (906294, 'monthly history bucket', 0.00),
     (906299, 'monthly source category', 0.00);
 
+INSERT INTO exchange_rates("datetime", currency, rate)
+VALUES (now(), 'RUB', 1);
+
 INSERT INTO user_groups(slug, "name", description)
 VALUES ('test_monthly_group', 'test monthly group', 'fixture');
 
