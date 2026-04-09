@@ -64,6 +64,7 @@
   - monthly allocation helpers уже считают source balance, `month_earnings` / `month_spend` из `allocation_postings`
   - `monthly_distribute_cascade()` уже читает orchestration balances через `get_category_balance_v2(...)`
   - `monthly_distribute_cascade()` уже берёт source category membership из `allocation_node_groups`, а не напрямую из `categories_category_groups`
+  - `free_to_gifts` уже считает free balance через `get_allocation_node_balance(...)` по remainder node id
   - `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
   - `/history` читает ledger-backed `get_last_transaction_v2(user_id, num)`
@@ -124,7 +125,7 @@
 ## Что ещё нужно сделать в схеме
 
 - Финально убрать зависимость движка от legacy category/group функций.
-- Free-category для `free_to_gifts` уже определяется через allocation remainder leaf, а не через `get_categories_id(group 6)`.
+- Free-balance для `free_to_gifts` уже определяется через allocation remainder leaf node, а не через legacy category balance.
 - Legacy share для `free_to_gifts` перенесён из orchestrator в allocation route.
 - В схему добавлена `allocation_postings`; leaf-проводки allocation-движка уже пишутся туда ledger-only, без новых rows в `cash_flow`.
 - Добавлены read-helper'ы для нового ledger: `get_allocation_node_balance(...)` и `get_allocation_node_balance_by_slug(...)`.

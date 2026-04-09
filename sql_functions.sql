@@ -45,6 +45,7 @@ DROP FUNCTION IF EXISTS public.get_all_users_id();
 DROP FUNCTION IF EXISTS public.is_technical_cashflow_description(text);
 DROP FUNCTION IF EXISTS public.get_users_id(bigint);
 DROP FUNCTION IF EXISTS public.find_allocation_node_id(bigint, text);
+DROP FUNCTION IF EXISTS public.find_allocation_remainder_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_legacy_category_id(bigint, text);
 DROP FUNCTION IF EXISTS public.get_group_percent_sum(bigint, integer);
 DROP FUNCTION IF EXISTS public.distribute_with_allocation_fallback(bigint, text, integer, integer, numeric, varchar, text);
@@ -511,14 +512,14 @@ AS $function$
 $function$;
 
 
--- Возвращает legacy_category_id remainder-leaf ноды, подключенной к source slug пользователя.
--- Используется в переходной monthly-логике, чтобы брать free-category уже из allocation-графа.
-CREATE OR REPLACE FUNCTION public.find_allocation_remainder_legacy_category_id(_user_id bigint, _source_slug text)
- RETURNS integer
+-- Возвращает id remainder-leaf ноды, подключенной к source slug пользователя.
+-- Используется в monthly runtime, чтобы считать баланс по allocation node id.
+CREATE OR REPLACE FUNCTION public.find_allocation_remainder_node_id(_user_id bigint, _source_slug text)
+ RETURNS bigint
  LANGUAGE sql
  STABLE
 AS $function$
-    SELECT target.legacy_category_id
+    SELECT target.id
     FROM public.allocation_nodes source
     JOIN public.allocation_routes ar
       ON ar.source_node_id = source.id
@@ -531,6 +532,20 @@ AS $function$
       AND source.active
       AND target.active
     ORDER BY ar.id
+    LIMIT 1;
+$function$;
+
+
+-- LEGACY bridge: returns legacy_category_id of the remainder leaf.
+-- Keep for reference/compatibility while source metadata still carries legacy ids.
+CREATE OR REPLACE FUNCTION public.find_allocation_remainder_legacy_category_id(_user_id bigint, _source_slug text)
+ RETURNS integer
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT target.legacy_category_id
+    FROM public.allocation_nodes target
+    WHERE target.id = public.find_allocation_remainder_node_id(_user_id, _source_slug)
     LIMIT 1;
 $function$;
 
@@ -707,6 +722,7 @@ DECLARE
     _monthly_income_root_id bigint;
     _extra_income_root_id bigint;
     _free_to_gifts_root_id bigint;
+    _free_node_id bigint;
     _free_category_id integer;
     _reserve_root_id bigint;
     _salary_primary_root_id bigint;
@@ -791,15 +807,20 @@ BEGIN
         );
     END LOOP;
 
-    _free_category_id := public.find_allocation_remainder_legacy_category_id(_user_id, 'self_distribution');
+    _free_node_id := public.find_allocation_remainder_node_id(_user_id, 'self_distribution');
 
-    IF _free_category_id IS NULL THEN
+    IF _free_node_id IS NULL THEN
         RAISE EXCEPTION
-            'self_distribution remainder leaf with legacy_category_id is required for user %',
+            'self_distribution remainder leaf is required for user %',
             _user_id;
     END IF;
 
-    _free_money := public.get_category_balance_v2(_user_id, _free_category_id, 'RUB');
+    SELECT legacy_category_id
+    INTO _free_category_id
+    FROM public.allocation_nodes
+    WHERE id = _free_node_id;
+
+    _free_money := public.get_allocation_node_balance(_user_id, _free_node_id, 'RUB');
 
     -- Шаг 2.5. Allocation-only перевод free money в gifts bucket.
     _free_to_gifts_root_id := public.find_allocation_node_id(_user_id, 'free_to_gifts');
