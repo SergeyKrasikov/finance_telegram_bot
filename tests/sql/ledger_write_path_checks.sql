@@ -9,7 +9,7 @@ DELETE FROM cash_flow WHERE users_id = 907001;
 DELETE FROM categories WHERE id IN (907011, 907012);
 DELETE FROM users WHERE id = 907001;
 
-INSERT INTO users(id, nickname) VALUES (907001, 'ledger_write_u');
+INSERT INTO users(id, nickname) VALUES (907001, 'ledger_u');
 INSERT INTO categories(id, "name", "percent") VALUES
     (907011, 'Ledger Spend', 0.00),
     (907012, 'Ledger Revenue', 0.00);
