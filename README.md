@@ -241,7 +241,7 @@ Scheduler:
    Source category должна быть одновременно в legacy spend `group 8` и personal `group 15`.
 4. Из free-category (`group 6`) через root `free_to_gifts` переводится только legacy `group 7` доля free-баланса.
    Для суммы перевода сохраняется старая формула `free_balance * sum(percent(group 7))`, а route уже ведёт эту сумму в canonical gifts leaf пользователя.
-5. После этого основной monthly каскад стартует из `salary_primary` на балансе `_income_category`.
+5. После этого основной monthly каскад стартует из `salary_primary` на балансе income leaf, записанной в `allocation_nodes.metadata.source_category_node_id`.
    Для ledger-проводок cascade передаёт в `allocation_distribute(...)` явный source allocation node, поэтому debit-side уже не выбирается внутри движка только по `legacy_category_id`.
 
 #### Узлы графа
@@ -361,6 +361,8 @@ graph TD
 - `monthly_distribute_cascade()` уже передаёт source category node id в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и основного `salary_primary` split.
   `legacy_category_id` пока остаётся compatibility-полем для балансов, metadata и bridge/backfill, но больше не является единственным способом выбрать debit-node внутри monthly runtime.
 - Вызовы `allocation_distribute(...)` из `monthly_distribute_cascade()` больше не передают legacy source category id; он выводится из source node только как compatibility metadata.
+- `monthly()` больше не передаёт hard-coded income category id; `salary_primary` берёт стартовую income leaf из `allocation_nodes.metadata.source_category_node_id`.
+  Старый параметр `_income_category` в `monthly_distribute_cascade()` сохранён как fallback на время миграции.
 - Internal helper `monthly_distribute_allocation(...)` уже может принимать явный `source_category_node_id` без обязательного legacy category id.
 - Partner bridge `family_contribution_out -> family_contribution_in` берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id.
 - Graph-native leaf-ноды больше не обязаны иметь `legacy_category_id`; он пишется в metadata только если присутствует на source/target node.

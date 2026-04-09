@@ -711,7 +711,10 @@ $function$;
 -- 1) не возвращаться к грязным legacy-дублям percent/group formulas;
 -- 2) менять её нужно по одной ветке и после каждого изменения прогонять SQL checks;
 -- 3) legacy monthly_distribute() сохраняется ниже как reference/rollback и не должна вызываться из public.monthly().
-CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(_user_id bigint, _income_category integer)
+CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(
+    _user_id bigint,
+    _income_category integer DEFAULT NULL
+)
  RETURNS jsonb
  LANGUAGE plpgsql
 AS $function$
@@ -728,6 +731,7 @@ DECLARE
     _reserve_root_id bigint;
     _salary_primary_root_id bigint;
     _income_source_node_id bigint;
+    _income_source_node public.allocation_nodes%ROWTYPE;
     _source record;
     _balance numeric;
     _reserve_amount numeric;
@@ -900,12 +904,78 @@ BEGIN
             _user_id;
     END IF;
 
-    _income_source_node_id := public.find_allocation_category_node_id_by_legacy(
-        _user_id,
-        _income_category
-    );
+    SELECT NULLIF(salary_root.metadata->>'source_category_node_id', '')::bigint
+    INTO _income_source_node_id
+    FROM public.allocation_nodes salary_root
+    WHERE salary_root.id = _salary_primary_root_id;
 
-    IF _income_source_node_id IS NULL THEN
+    IF _income_source_node_id IS NOT NULL THEN
+        SELECT *
+        INTO _income_source_node
+        FROM public.allocation_nodes
+        WHERE id = _income_source_node_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION
+                'salary_primary source_category_node_id % is not found for user %',
+                _income_source_node_id,
+                _user_id;
+        END IF;
+
+        IF NOT _income_source_node.active THEN
+            RAISE EXCEPTION
+                'salary_primary source node % (%) is inactive for user %',
+                _income_source_node.id,
+                _income_source_node.slug,
+                _user_id;
+        END IF;
+
+        IF _income_source_node.user_id IS NOT NULL
+           AND _income_source_node.user_id <> _user_id THEN
+            RAISE EXCEPTION
+                'salary_primary source node % is owned by user %, expected user %',
+                _income_source_node.id,
+                _income_source_node.user_id,
+                _user_id;
+        END IF;
+
+        IF _income_source_node.user_group_id IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1
+               FROM public.user_group_memberships ugm
+               WHERE ugm.user_id = _user_id
+                 AND ugm.user_group_id = _income_source_node.user_group_id
+                 AND ugm.active
+           ) THEN
+            RAISE EXCEPTION
+                'User % is not an active member of group % for salary_primary source node %',
+                _user_id,
+                _income_source_node.user_group_id,
+                _income_source_node.id;
+        END IF;
+
+        IF _income_category IS NULL THEN
+            _income_category := _income_source_node.legacy_category_id;
+        ELSIF _income_source_node.legacy_category_id IS NOT NULL
+              AND _income_source_node.legacy_category_id <> _income_category THEN
+            RAISE EXCEPTION
+                'salary_primary source node % legacy category % does not match requested income category %',
+                _income_source_node.id,
+                _income_source_node.legacy_category_id,
+                _income_category;
+        END IF;
+    ELSIF _income_category IS NOT NULL THEN
+        _income_source_node_id := public.find_allocation_category_node_id_by_legacy(
+            _user_id,
+            _income_category
+        );
+    END IF;
+
+    IF _income_source_node_id IS NULL AND _income_category IS NULL THEN
+        RAISE EXCEPTION
+            'salary_primary metadata.source_category_node_id is required for user %',
+            _user_id;
+    ELSIF _income_source_node_id IS NULL THEN
         RAISE EXCEPTION
             'Allocation source node for income category % is required for user %',
             _income_category,
@@ -2400,9 +2470,9 @@ CREATE OR REPLACE FUNCTION public.monthly()
 AS $function$
 BEGIN
     RETURN QUERY
-        SELECT public.monthly_distribute_cascade(943915310, 37)
+        SELECT public.monthly_distribute_cascade(943915310)
         UNION ALL
-        SELECT public.monthly_distribute_cascade(249716305, 16);
+        SELECT public.monthly_distribute_cascade(249716305);
 end
 $function$
 ;  

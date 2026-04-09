@@ -81,12 +81,26 @@ node_kind varchar(16) not null,
 legacy_category_id int references categories(id),
 visible boolean not null default true,
 include_in_report boolean not null default false,
+metadata jsonb not null default '{}'::jsonb,
 active boolean not null default true,
 constraint allocation_nodes_owner_check
     check ((user_id is not null) <> (user_group_id is not null)),
 constraint allocation_nodes_node_kind_check
     check (node_kind in ('technical', 'income', 'expense', 'both', 'neutral', 'storage'))
 );
+
+alter table public.allocation_nodes
+    add column if not exists metadata jsonb not null default '{}'::jsonb;
+
+alter table public.allocation_nodes
+    alter column metadata set default '{}'::jsonb;
+
+update public.allocation_nodes
+set metadata = '{}'::jsonb
+where metadata is null;
+
+alter table public.allocation_nodes
+    alter column metadata set not null;
 
 create table if not exists public.allocation_routes (
 id bigserial primary key,

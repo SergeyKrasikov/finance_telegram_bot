@@ -212,6 +212,27 @@ WHERE ccg.users_id IN (249716305, 943915310)
 ON CONFLICT (node_id, legacy_group_id)
 DO UPDATE SET active = EXCLUDED.active;
 
+-- Graph-native monthly entrypoint config.
+-- salary_primary debits the canonical salary income leaf from node metadata,
+-- so public.monthly() no longer needs hard-coded legacy category ids.
+UPDATE public.allocation_nodes root
+SET metadata = jsonb_strip_nulls(
+    COALESCE(root.metadata, '{}'::jsonb)
+    || jsonb_build_object('source_category_node_id', source_node.id)
+)
+FROM (
+    VALUES
+        (249716305::bigint, 'cat_16'::text),
+        (943915310::bigint, 'cat_37'::text)
+) AS m(user_id, source_slug)
+JOIN public.allocation_nodes source_node
+  ON source_node.user_id = m.user_id
+ AND source_node.slug = m.source_slug
+ AND source_node.active
+WHERE root.user_id = m.user_id
+  AND root.slug = 'salary_primary'
+  AND root.active;
+
 -- A category can move out of legacy group 4 during cleanup. Keep old shared
 -- common leaves from being preferred over the current user-owned leaf.
 UPDATE public.allocation_nodes an

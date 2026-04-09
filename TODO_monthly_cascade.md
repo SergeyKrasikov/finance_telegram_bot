@@ -5,7 +5,7 @@
 ## Текущее состояние
 
 - Legacy reference/rollback функция: `public.monthly_distribute(_user_id, _income_category)`.
-- Переходная функция: `public.monthly_distribute_cascade(_user_id, _income_category)`.
+- Переходная функция: `public.monthly_distribute_cascade(_user_id, _income_category DEFAULT NULL)`.
 - Новая функция сохраняет форму Telegram JSON, но использует clean monthly semantics вместо полного повторения грязных legacy percent/group formulas.
 - Compare SQL остаётся справочным инструментом для понимания расхождений со старой функцией.
 
@@ -67,6 +67,7 @@
   - `free_to_gifts` уже считает free balance через `get_allocation_node_balance(...)` по remainder node id
   - `monthly_distribute_cascade()` уже передаёт явный source allocation node в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и `salary_primary`
   - `monthly_distribute_cascade()` больше не передаёт legacy source category id в `allocation_distribute(...)`; lower-level функция выводит его из source node только для compatibility metadata
+  - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` без hard-coded legacy income category id; source leaf для `salary_primary` хранится в `allocation_nodes.metadata.source_category_node_id`
   - `monthly_distribute_allocation(...)` уже поддерживает явный source allocation node без обязательного legacy category id
   - partner bridge уже берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id
   - graph-native leaf-ноды уже могут писать `allocation_postings` без `legacy_category_id`
@@ -136,10 +137,9 @@
 - Добавлены read-helper'ы для нового ledger: `get_allocation_node_balance(...)` и `get_allocation_node_balance_by_slug(...)`.
 - Deploy now runs idempotent backfill `cash_flow -> allocation_postings`; historical/backfill rows may carry `metadata.legacy_cash_flow_id`.
 - Определить финальную модель источника для monthly run:
-  - либо старт от одной root-ноды,
-  - либо orchestrator, который запускает несколько веток.
-- Текущий переходный вариант: orchestrator запускает несколько roots, но debit-side для ledger-проводок уже передаётся как source allocation node, а `legacy_category_id` остаётся compatibility/metadata bridge.
+  Текущий переходный вариант: orchestrator запускает несколько roots, `salary_primary` берёт source leaf из `allocation_nodes.metadata.source_category_node_id`, остальные prep/reserve ветки находят source nodes по `allocation_node_groups`.
 - `allocation_routes.metadata` уже используется для route-level graph config, например source leaf partner bridge.
+- `allocation_nodes.metadata` уже используется для node-level graph config, например salary source leaf у `salary_primary`.
 - Финально решить, остаётся ли `cash_flow` на legacy category ids или переводится на `allocation_nodes.id`.
 
 ## Что нельзя делать пока рано
