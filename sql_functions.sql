@@ -678,7 +678,7 @@ BEGIN
     FOR _source IN
         SELECT
             ccg.categories_id AS category_id_from,
-            public.get_category_balance(_user_id, ccg.categories_id, 'RUB') AS balance
+            public.get_category_balance_v2(_user_id, ccg.categories_id, 'RUB') AS balance
         FROM public.categories_category_groups ccg
         WHERE ccg.users_id = _user_id
           AND ccg.category_groyps_id = 11
@@ -710,7 +710,7 @@ BEGIN
     FOR _source IN
         SELECT
             ccg.categories_id AS category_id_from,
-            public.get_category_balance(_user_id, ccg.categories_id, 'RUB') AS balance
+            public.get_category_balance_v2(_user_id, ccg.categories_id, 'RUB') AS balance
         FROM public.categories_category_groups ccg
         WHERE ccg.users_id = _user_id
           AND ccg.category_groyps_id = 12
@@ -738,7 +738,7 @@ BEGIN
             _user_id;
     END IF;
 
-    _free_money := public.get_category_balance(_user_id, _free_category_id, 'RUB');
+    _free_money := public.get_category_balance_v2(_user_id, _free_category_id, 'RUB');
 
     -- Шаг 2.5. Allocation-only перевод free money в gifts bucket.
     _free_to_gifts_root_id := public.find_allocation_node_id(_user_id, 'free_to_gifts');
@@ -802,7 +802,7 @@ BEGIN
           AND personal_ccg.category_groyps_id = 15
         ORDER BY category_id
     LOOP
-        _balance := public.get_category_balance(_user_id, _source.category_id, 'RUB');
+        _balance := public.get_category_balance_v2(_user_id, _source.category_id, 'RUB');
 
         IF COALESCE(_balance, 0) >= 0 THEN
             CONTINUE;
@@ -825,7 +825,7 @@ BEGIN
     END LOOP;
 
     _sum_value := (
-        SELECT get_category_balance(_user_id, _income_category, 'RUB')
+        SELECT public.get_category_balance_v2(_user_id, _income_category, 'RUB')
     );
 
     _salary_primary_root_id := public.find_allocation_node_id(_user_id, 'salary_primary');
