@@ -8,18 +8,19 @@ DELETE FROM cash_flow WHERE users_id IN (906001, 906002);
 
 DELETE FROM allocation_routes
 WHERE source_node_id IN (
-    SELECT id FROM allocation_nodes WHERE slug LIKE 'test_cascade_%'
+    SELECT id FROM allocation_nodes WHERE user_id IN (906001, 906002) OR slug LIKE 'test_cascade_%'
 )
    OR target_node_id IN (
-    SELECT id FROM allocation_nodes WHERE slug LIKE 'test_cascade_%'
+    SELECT id FROM allocation_nodes WHERE user_id IN (906001, 906002) OR slug LIKE 'test_cascade_%'
 );
 
 DELETE FROM allocation_nodes
-WHERE slug LIKE 'test_cascade_%';
+WHERE user_id IN (906001, 906002)
+   OR slug LIKE 'test_cascade_%';
 
 DELETE FROM user_group_memberships WHERE user_id IN (906001, 906002);
 DELETE FROM user_groups WHERE slug = 'test_cascade_group';
-DELETE FROM categories WHERE id IN (906101, 906102, 906103, 906199);
+DELETE FROM categories WHERE id IN (906101, 906102, 906103, 906104, 906199);
 DELETE FROM users WHERE id IN (906001, 906002);
 
 INSERT INTO users(id, nickname) VALUES
@@ -30,6 +31,7 @@ INSERT INTO categories(id, "name", "percent") VALUES
     (906101, 'test personal leaf', 0.00),
     (906102, 'test shared leaf', 0.00),
     (906103, 'test partner leaf', 0.00),
+    (906104, 'test family source leaf', 0.00),
     (906199, 'test source category', 0.00);
 
 INSERT INTO user_groups(slug, "name", description)
@@ -57,8 +59,11 @@ VALUES
     (906001, NULL, 'test_cascade_root', 'test root', 'root node', 'technical', NULL, false, false, true),
     (906001, NULL, 'test_cascade_stage', 'test stage', 'stage node', 'technical', NULL, false, true, true),
     (906001, NULL, 'test_cascade_empty_root', 'test empty root', 'route-less technical node', 'technical', NULL, false, false, true),
+    (906001, NULL, 'test_cascade_family_root', 'test family root', 'family bridge root', 'technical', NULL, false, false, true),
     (906001, NULL, 'test_cascade_source', 'test source', 'source balance node', 'income', 906199, true, false, true),
     (906001, NULL, 'test_cascade_personal', 'test personal', 'personal leaf', 'expense', 906101, true, true, true),
+    (906002, NULL, 'family_contribution_in', 'test family in', 'family bridge target', 'technical', NULL, false, false, true),
+    (906002, NULL, 'test_cascade_family_source', 'test family source', 'family source leaf', 'expense', 906104, true, false, true),
     (906002, NULL, 'test_cascade_partner', 'test partner', 'partner leaf', 'expense', 906103, true, true, true);
 
 INSERT INTO allocation_nodes(
@@ -130,6 +135,32 @@ JOIN allocation_nodes dst
 WHERE src.user_id = 906001
   AND src.slug = 'test_cascade_stage';
 
+INSERT INTO allocation_routes(source_node_id, target_node_id, percent, description, metadata)
+SELECT
+    src.id,
+    dst.id,
+    1,
+    'family bridge route',
+    jsonb_build_object('source_category_node_id', source_node.id)
+FROM allocation_nodes src
+JOIN allocation_nodes dst
+  ON dst.user_id = 906002
+ AND dst.slug = 'family_contribution_in'
+JOIN allocation_nodes source_node
+  ON source_node.user_id = 906002
+ AND source_node.slug = 'test_cascade_family_source'
+WHERE src.user_id = 906001
+  AND src.slug = 'test_cascade_family_root';
+
+INSERT INTO allocation_routes(source_node_id, target_node_id, percent, description)
+SELECT src.id, dst.id, 1, 'family bridge to partner leaf'
+FROM allocation_nodes src
+JOIN allocation_nodes dst
+  ON dst.user_id = 906002
+ AND dst.slug = 'test_cascade_partner'
+WHERE src.user_id = 906002
+  AND src.slug = 'family_contribution_in';
+
 INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
 SELECT
     906001,
@@ -156,6 +187,9 @@ DECLARE
     source_balance numeric;
     posted_rows integer;
     linked_legacy_rows integer;
+    family_root_id bigint;
+    family_source_node_id bigint;
+    family_source_rows integer;
 BEGIN
     SELECT id
     INTO root_id
@@ -259,6 +293,40 @@ BEGIN
 
     IF abs(source_balance) > 1e-9 THEN
         RAISE EXCEPTION 'Expected source category balance 0 after allocation debit, got %', source_balance;
+    END IF;
+
+    SELECT id
+    INTO family_root_id
+    FROM allocation_nodes
+    WHERE user_id = 906001
+      AND slug = 'test_cascade_family_root';
+
+    SELECT id
+    INTO family_source_node_id
+    FROM allocation_nodes
+    WHERE user_id = 906002
+      AND slug = 'test_cascade_family_source';
+
+    PERFORM *
+    FROM public.allocation_distribute(
+        906001,
+        family_root_id,
+        25::numeric,
+        'RUB',
+        906199,
+        'test family bridge',
+        source_node_id
+    );
+
+    SELECT COUNT(*)
+    INTO family_source_rows
+    FROM allocation_postings
+    WHERE user_id = 906002
+      AND description = 'test family bridge'
+      AND from_node_id = family_source_node_id;
+
+    IF family_source_rows <> 1 THEN
+        RAISE EXCEPTION 'Expected family bridge row debited from route metadata source node, got %', family_source_rows;
     END IF;
 
     SELECT COUNT(*)

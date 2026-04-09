@@ -94,10 +94,14 @@ source_node_id bigint not null references public.allocation_nodes(id) on delete 
 target_node_id bigint not null references public.allocation_nodes(id) on delete cascade,
 percent numeric(10,6) not null,
 description text,
+metadata jsonb not null default '{}'::jsonb,
 active boolean not null default true,
 constraint allocation_routes_percent_check
     check (percent > 0 and percent <= 1)
 );
+
+alter table public.allocation_routes
+    add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 create table if not exists public.allocation_node_groups (
 id bigserial primary key,

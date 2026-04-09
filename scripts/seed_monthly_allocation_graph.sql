@@ -469,12 +469,13 @@ WHERE src.user_id IN (249716305, 943915310)
 ON CONFLICT DO NOTHING;
 
 -- partner bridge and split
-INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, active)
+INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, metadata, active)
 SELECT
     src.id,
     dst.id,
     1.0,
     'family_contribution_out -> partner family_contribution_in',
+    jsonb_build_object('source_category_node_id', source_node.id),
     true
 FROM (
     VALUES
@@ -487,6 +488,9 @@ JOIN public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = p.dst_user_id
  AND dst.slug = 'family_contribution_in'
+JOIN public.allocation_nodes source_node
+  ON source_node.user_id = p.dst_user_id
+ AND source_node.slug = 'cat_15'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, active)

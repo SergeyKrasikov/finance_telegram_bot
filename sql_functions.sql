@@ -1227,26 +1227,36 @@ BEGIN
         -- а не всегда от исходного executor_user_id.
         _next_executor_user_id := COALESCE(_target_node.user_id, _executor_user_id);
 
-        -- В old monthly_distribute() partner-ветка всегда шла из family contribution category 15.
-        -- Сохраняем legacy source-category в metadata при входе в family_contribution_in.
+        -- Partner bridge source is route-level graph config, not a hard-coded legacy category.
         IF _target_node.slug = 'family_contribution_in' THEN
-            _next_category_id_from := 15;
-            _next_source_category_node_id := public.find_allocation_category_node_id_by_legacy(
-                _next_executor_user_id,
-                _next_category_id_from
-            );
-
-            IF _next_source_category_node_id IS NULL THEN
-                _next_source_category_node_id := public.ensure_allocation_compatibility_node(
-                    _next_executor_user_id,
-                    _next_category_id_from
-                );
-            END IF;
+            _next_source_category_node_id := NULLIF(_route.metadata->>'source_category_node_id', '')::bigint;
 
             IF _next_source_category_node_id IS NULL THEN
                 RAISE EXCEPTION
-                    'Allocation source node for partner legacy category % not found for user %',
-                    _next_category_id_from,
+                    'family_contribution_in route % must define metadata.source_category_node_id',
+                    _route.id;
+            END IF;
+
+            SELECT legacy_category_id
+            INTO _next_category_id_from
+            FROM public.allocation_nodes
+            WHERE id = _next_source_category_node_id
+              AND active
+              AND (
+                  user_id = _next_executor_user_id
+                  OR user_group_id IN (
+                      SELECT ugm.user_group_id
+                      FROM public.user_group_memberships ugm
+                      WHERE ugm.user_id = _next_executor_user_id
+                        AND ugm.active
+                  )
+              );
+
+            IF NOT FOUND THEN
+                RAISE EXCEPTION
+                    'family_contribution_in route % source category node % is not available for user %',
+                    _route.id,
+                    _next_source_category_node_id,
                     _next_executor_user_id;
             END IF;
         ELSE
