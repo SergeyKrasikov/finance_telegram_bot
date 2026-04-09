@@ -3,6 +3,7 @@
 
 BEGIN;
 
+DELETE FROM allocation_postings WHERE user_id IN (906001, 906002);
 DELETE FROM cash_flow WHERE users_id IN (906001, 906002);
 
 DELETE FROM allocation_routes
@@ -138,6 +139,7 @@ DECLARE
     posted_partner numeric;
     posted_common numeric;
     posted_rows integer;
+    linked_legacy_rows integer;
 BEGIN
     SELECT id
     INTO root_id
@@ -186,9 +188,13 @@ BEGIN
 
     SELECT COALESCE(SUM(value), 0)
     INTO posted_personal
-    FROM cash_flow
-    WHERE users_id = 906001
-      AND category_id_to = 906101
+    FROM allocation_postings
+    WHERE user_id = 906001
+      AND to_node_id = (
+          SELECT id
+          FROM allocation_nodes
+          WHERE slug = 'test_cascade_personal'
+      )
       AND description = 'test cascade';
 
     IF abs(posted_personal - 10) > 1e-9 THEN
@@ -197,9 +203,13 @@ BEGIN
 
     SELECT COALESCE(SUM(value), 0)
     INTO posted_partner
-    FROM cash_flow
-    WHERE users_id = 906002
-      AND category_id_to = 906103
+    FROM allocation_postings
+    WHERE user_id = 906002
+      AND to_node_id = (
+          SELECT id
+          FROM allocation_nodes
+          WHERE slug = 'test_cascade_partner'
+      )
       AND description = 'test cascade';
 
     IF abs(posted_partner - 10) > 1e-9 THEN
@@ -208,9 +218,13 @@ BEGIN
 
     SELECT COALESCE(SUM(value), 0)
     INTO posted_common
-    FROM cash_flow
-    WHERE users_id = 906001
-      AND category_id_to = 906102
+    FROM allocation_postings
+    WHERE user_id = 906001
+      AND to_node_id = (
+          SELECT id
+          FROM allocation_nodes
+          WHERE slug = 'test_cascade_common'
+      )
       AND description = 'test cascade';
 
     IF abs(posted_common - 80) > 1e-9 THEN
@@ -219,22 +233,43 @@ BEGIN
 
     SELECT COUNT(*)
     INTO posted_rows
-    FROM cash_flow
-    WHERE users_id = 906001
+    FROM allocation_postings
+    WHERE user_id = 906001
       AND description = 'test cascade';
 
     IF posted_rows <> 3 THEN
-        RAISE EXCEPTION 'Expected 3 inserted cash_flow rows for executor user, got %', posted_rows;
+        RAISE EXCEPTION 'Expected 3 inserted ledger rows for executor user, got %', posted_rows;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO posted_rows
+    FROM allocation_postings
+    WHERE user_id = 906002
+      AND description = 'test cascade';
+
+    IF posted_rows <> 1 THEN
+        RAISE EXCEPTION 'Expected 1 inserted ledger row for partner user, got %', posted_rows;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO linked_legacy_rows
+    FROM allocation_postings
+    WHERE user_id IN (906001, 906002)
+      AND description = 'test cascade'
+      AND metadata ? 'legacy_cash_flow_id';
+
+    IF linked_legacy_rows <> 0 THEN
+        RAISE EXCEPTION 'Expected no legacy_cash_flow_id for ledger-only allocation rows, got %', linked_legacy_rows;
     END IF;
 
     SELECT COUNT(*)
     INTO posted_rows
     FROM cash_flow
-    WHERE users_id = 906002
+    WHERE users_id IN (906001, 906002)
       AND description = 'test cascade';
 
-    IF posted_rows <> 1 THEN
-        RAISE EXCEPTION 'Expected 1 inserted cash_flow row for partner user, got %', posted_rows;
+    IF posted_rows <> 0 THEN
+        RAISE EXCEPTION 'Expected no cash_flow rows for ledger-only allocation, got %', posted_rows;
     END IF;
 END $$;
 

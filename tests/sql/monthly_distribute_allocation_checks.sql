@@ -3,6 +3,7 @@
 
 BEGIN;
 
+DELETE FROM allocation_postings WHERE user_id IN (906011, 906012);
 DELETE FROM cash_flow WHERE users_id IN (906011, 906012);
 
 DELETE FROM allocation_routes
@@ -163,6 +164,7 @@ DECLARE
     posted_partner numeric;
     posted_common numeric;
     posted_rows integer;
+    linked_legacy_rows integer;
 BEGIN
     SELECT id
     INTO root_id
@@ -224,9 +226,13 @@ BEGIN
 
     SELECT COALESCE(SUM(value), 0)
     INTO posted_personal
-    FROM cash_flow
-    WHERE users_id = 906011
-      AND category_id_to = 906291
+    FROM allocation_postings
+    WHERE user_id = 906011
+      AND to_node_id = (
+          SELECT id
+          FROM allocation_nodes
+          WHERE slug = 'test_monthly_personal'
+      )
       AND description = 'monthly distribute allocation test';
 
     IF abs(posted_personal - 10) > 1e-9 THEN
@@ -235,9 +241,13 @@ BEGIN
 
     SELECT COALESCE(SUM(value), 0)
     INTO posted_partner
-    FROM cash_flow
-    WHERE users_id = 906012
-      AND category_id_to = 906293
+    FROM allocation_postings
+    WHERE user_id = 906012
+      AND to_node_id = (
+          SELECT id
+          FROM allocation_nodes
+          WHERE slug = 'test_monthly_partner'
+      )
       AND description = 'monthly distribute allocation test';
 
     IF abs(posted_partner - 10) > 1e-9 THEN
@@ -246,9 +256,13 @@ BEGIN
 
     SELECT COALESCE(SUM(value), 0)
     INTO posted_common
-    FROM cash_flow
-    WHERE users_id = 906011
-      AND category_id_to = 906292
+    FROM allocation_postings
+    WHERE user_id = 906011
+      AND to_node_id = (
+          SELECT id
+          FROM allocation_nodes
+          WHERE slug = 'test_monthly_common'
+      )
       AND description = 'monthly distribute allocation test';
 
     IF abs(posted_common - 80) > 1e-9 THEN
@@ -257,22 +271,43 @@ BEGIN
 
     SELECT COUNT(*)
     INTO posted_rows
-    FROM cash_flow
-    WHERE users_id = 906011
+    FROM allocation_postings
+    WHERE user_id = 906011
       AND description = 'monthly distribute allocation test';
 
     IF posted_rows <> 3 THEN
-        RAISE EXCEPTION 'Expected 3 inserted cash_flow rows for executor user, got %', posted_rows;
+        RAISE EXCEPTION 'Expected 3 inserted ledger rows for executor user, got %', posted_rows;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO posted_rows
+    FROM allocation_postings
+    WHERE user_id = 906012
+      AND description = 'monthly distribute allocation test';
+
+    IF posted_rows <> 1 THEN
+        RAISE EXCEPTION 'Expected 1 inserted ledger row for partner user, got %', posted_rows;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO linked_legacy_rows
+    FROM allocation_postings
+    WHERE user_id IN (906011, 906012)
+      AND description = 'monthly distribute allocation test'
+      AND metadata ? 'legacy_cash_flow_id';
+
+    IF linked_legacy_rows <> 0 THEN
+        RAISE EXCEPTION 'Expected no legacy_cash_flow_id for ledger-only monthly allocation rows, got %', linked_legacy_rows;
     END IF;
 
     SELECT COUNT(*)
     INTO posted_rows
     FROM cash_flow
-    WHERE users_id = 906012
+    WHERE users_id IN (906011, 906012)
       AND description = 'monthly distribute allocation test';
 
-    IF posted_rows <> 1 THEN
-        RAISE EXCEPTION 'Expected 1 inserted cash_flow row for partner user, got %', posted_rows;
+    IF posted_rows <> 0 THEN
+        RAISE EXCEPTION 'Expected no cash_flow rows for ledger-only monthly allocation, got %', posted_rows;
     END IF;
 END $$;
 

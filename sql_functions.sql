@@ -960,10 +960,9 @@ $function$;
 
 
 -- Рекурсивно распределяет сумму по allocation_routes.
--- Пишет реальные проводки в cash_flow только на листьях.
--- Для совместимости с текущим cash_flow leaf-нода должна иметь legacy_category_id.
+-- Пишет реальные проводки в allocation_postings только на листьях.
 -- На переходном этапе mixed-node запрещена:
--- нода либо промежуточная и имеет детей, либо лист и пишет в cash_flow.
+-- нода либо промежуточная и имеет детей, либо лист и пишет в ledger.
 CREATE OR REPLACE FUNCTION public.allocation_distribute_recursive(
     _executor_user_id bigint,
     _source_node_id bigint,
@@ -992,7 +991,6 @@ DECLARE
     _child_amount numeric;
     _posting_user_id bigint;
     _posting_from_node_id bigint;
-    _legacy_cash_flow_id bigint;
     _next_executor_user_id bigint;
     _next_category_id_from integer;
 BEGIN
@@ -1045,37 +1043,12 @@ BEGIN
 
     -- Лист определяется отсутствием исходящих активных маршрутов.
     IF _route_count = 0 THEN
-        IF _node.legacy_category_id IS NULL THEN
-            RAISE EXCEPTION
-                'Leaf allocation node % (%) must have legacy_category_id while cash_flow still uses categories',
-                _node.id,
-                _node.slug;
-        END IF;
-
         _posting_user_id := COALESCE(_node.user_id, _executor_user_id);
         _posting_from_node_id := CASE
             WHEN COALESCE(array_length(_path, 1), 0) > 0
                 THEN _path[array_length(_path, 1)]
             ELSE NULL
         END;
-
-        INSERT INTO public.cash_flow(
-            users_id,
-            category_id_from,
-            category_id_to,
-            value,
-            currency,
-            description
-        )
-        VALUES (
-            _posting_user_id,
-            _category_id_from,
-            _node.legacy_category_id,
-            _amount,
-            _currency,
-            COALESCE(_description, 'allocation cascade')
-        )
-        RETURNING id INTO _legacy_cash_flow_id;
 
         INSERT INTO public.allocation_postings(
             user_id,
@@ -1098,7 +1071,6 @@ BEGIN
                     'kind', 'monthly',
                     'subkind', 'leaf_posting',
                     'origin', 'allocation_runtime',
-                    'legacy_cash_flow_id', _legacy_cash_flow_id,
                     'legacy_category_id_from', _category_id_from,
                     'legacy_category_id_to', _node.legacy_category_id,
                     'leaf_slug', _node.slug
@@ -1149,8 +1121,8 @@ BEGIN
         -- а не всегда от исходного executor_user_id.
         _next_executor_user_id := COALESCE(_target_node.user_id, _executor_user_id);
 
-        -- В old monthly_distribute() partner-ветка всегда писалась из family contribution category 15.
-        -- Сохраняем этот cash_flow-контракт при входе в family_contribution_in.
+        -- В old monthly_distribute() partner-ветка всегда шла из family contribution category 15.
+        -- Сохраняем legacy source-category в metadata при входе в family_contribution_in.
         IF _target_node.slug = 'family_contribution_in' THEN
             _next_category_id_from := 15;
         ELSE

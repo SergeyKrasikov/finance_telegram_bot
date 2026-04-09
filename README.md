@@ -354,7 +354,7 @@ graph TD
   - `currency`
   - `description`
   - `metadata`
-- Leaf-проводки нового allocation-движка пишутся в `allocation_postings`; legacy `cash_flow` остаётся historical/backfill source.
+- Leaf-проводки нового allocation-движка пишутся только в `allocation_postings`; legacy `cash_flow` остаётся historical/backfill source.
 - Простые manual spend/revenue write-paths уже ledger-only и больше не создают новые `cash_flow` rows.
 - `monthly_distribute_cascade()` уже читает `month_earnings` и `month_spend` из `allocation_postings`, а не из `cash_flow`.
 - Для безопасного наблюдения за новым ledger добавлен read-only helper:
@@ -392,7 +392,7 @@ graph TD
   Legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)`
   remain in SQL for reference/compare/rollback.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
-- Dual-write записи, которые ещё зеркалятся в `cash_flow`, помечаются в `metadata.legacy_cash_flow_id`, чтобы backfill не создавал дубли.
+- Historical/backfill rows may carry `metadata.legacy_cash_flow_id`; new runtime ledger-only writes do not.
 - Текущая конвенция `metadata`:
   - monthly runtime: `kind=monthly`, `subkind=leaf_posting`, `origin=allocation_runtime`
   - backfill: `kind=backfill`, `subkind=cash_flow`, `origin=migration`

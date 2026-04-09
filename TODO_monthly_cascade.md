@@ -124,9 +124,9 @@
 - Финально убрать зависимость движка от legacy category/group функций.
 - Free-category для `free_to_gifts` уже определяется через allocation remainder leaf, а не через `get_categories_id(group 6)`.
 - Legacy share для `free_to_gifts` перенесён из orchestrator в allocation route.
-- В схему добавлена `allocation_postings`; leaf-проводки allocation-движка уже пишутся туда в dual-write с `cash_flow`.
+- В схему добавлена `allocation_postings`; leaf-проводки allocation-движка уже пишутся туда ledger-only, без новых rows в `cash_flow`.
 - Добавлены read-helper'ы для нового ledger: `get_allocation_node_balance(...)` и `get_allocation_node_balance_by_slug(...)`.
-- Deploy now runs idempotent backfill `cash_flow -> allocation_postings`; новые mirror-строки помечаются `metadata.legacy_cash_flow_id`.
+- Deploy now runs idempotent backfill `cash_flow -> allocation_postings`; historical/backfill rows may carry `metadata.legacy_cash_flow_id`.
 - Определить финальную модель источника для monthly run:
   - либо старт от одной root-ноды,
   - либо orchestrator, который запускает несколько веток.
