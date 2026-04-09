@@ -212,9 +212,37 @@ WHERE ccg.users_id IN (249716305, 943915310)
 ON CONFLICT (node_id, legacy_group_id)
 DO UPDATE SET active = EXCLUDED.active;
 
--- Graph-native monthly entrypoint config.
--- salary_primary debits the canonical salary income leaf from node metadata,
--- so public.monthly() no longer needs hard-coded legacy category ids.
+-- Graph-native monthly runtime config.
+-- The monthly orchestrator reads these root settings from node metadata instead
+-- of hard-coding legacy group/category ids inside public.monthly().
+UPDATE public.allocation_nodes root
+SET metadata = jsonb_strip_nulls(
+    COALESCE(root.metadata, '{}'::jsonb)
+    || jsonb_build_object('source_legacy_group_id', config.source_legacy_group_id)
+)
+FROM (
+    VALUES
+        (249716305::bigint, 'monthly_income_sources'::text, 11::integer),
+        (943915310::bigint, 'monthly_income_sources'::text, 11::integer),
+        (249716305::bigint, 'extra_income_sources'::text, 12::integer),
+        (943915310::bigint, 'extra_income_sources'::text, 12::integer)
+) AS config(user_id, root_slug, source_legacy_group_id)
+WHERE root.user_id = config.user_id
+  AND root.slug = config.root_slug
+  AND root.active;
+
+UPDATE public.allocation_nodes root
+SET metadata = jsonb_strip_nulls(
+    COALESCE(root.metadata, '{}'::jsonb)
+    || jsonb_build_object(
+        'spend_legacy_group_id', 8,
+        'personal_legacy_group_id', 15
+    )
+)
+WHERE root.user_id IN (249716305, 943915310)
+  AND root.slug = 'debt_reserve'
+  AND root.active;
+
 UPDATE public.allocation_nodes root
 SET metadata = jsonb_strip_nulls(
     COALESCE(root.metadata, '{}'::jsonb)

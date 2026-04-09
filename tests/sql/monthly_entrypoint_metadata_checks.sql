@@ -46,6 +46,19 @@ BEGIN
         RAISE EXCEPTION 'Expected monthly_distribute_cascade() to read salary source from salary_primary metadata';
     END IF;
 
+    IF POSITION('source_legacy_group_id' IN cascade_def) = 0
+       OR POSITION('spend_legacy_group_id' IN cascade_def) = 0
+       OR POSITION('personal_legacy_group_id' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to read monthly source group config from root metadata';
+    END IF;
+
+    IF POSITION('legacy_group_id = 11' IN cascade_def) > 0
+       OR POSITION('legacy_group_id = 12' IN cascade_def) > 0
+       OR POSITION('legacy_group_id = 8' IN cascade_def) > 0
+       OR POSITION('legacy_group_id = 15' IN cascade_def) > 0 THEN
+        RAISE EXCEPTION 'monthly_distribute_cascade() still hard-codes monthly legacy group ids';
+    END IF;
+
     IF POSITION('find_allocation_category_node_id_by_legacy' IN cascade_def) = 0 THEN
         RAISE EXCEPTION 'Expected monthly_distribute_cascade() to keep legacy income category fallback during migration';
     END IF;

@@ -725,10 +725,14 @@ DECLARE
     _sum_earnings numeric;
     _sum_spend numeric;
     _monthly_income_root_id bigint;
+    _monthly_income_source_group_id integer;
     _extra_income_root_id bigint;
+    _extra_income_source_group_id integer;
     _free_to_gifts_root_id bigint;
     _free_node_id bigint;
     _reserve_root_id bigint;
+    _reserve_spend_group_id integer;
+    _reserve_personal_group_id integer;
     _salary_primary_root_id bigint;
     _income_source_node_id bigint;
     _income_source_node public.allocation_nodes%ROWTYPE;
@@ -739,12 +743,23 @@ DECLARE
     _branch_report jsonb := '[]'::jsonb;
     _report_metrics jsonb := '{}'::jsonb;
 BEGIN
-    -- Шаг 1. Allocation-only подготовка monthly incomes (group 11 -> monthly_income_sources).
+    -- Шаг 1. Allocation-only подготовка monthly incomes via monthly_income_sources root config.
     _monthly_income_root_id := public.find_allocation_node_id(_user_id, 'monthly_income_sources');
 
     IF _monthly_income_root_id IS NULL THEN
         RAISE EXCEPTION
             'monthly_income_sources allocation root is required for user %',
+            _user_id;
+    END IF;
+
+    SELECT NULLIF(root.metadata->>'source_legacy_group_id', '')::integer
+    INTO _monthly_income_source_group_id
+    FROM public.allocation_nodes root
+    WHERE root.id = _monthly_income_root_id;
+
+    IF _monthly_income_source_group_id IS NULL THEN
+        RAISE EXCEPTION
+            'monthly_income_sources metadata.source_legacy_group_id is required for user %',
             _user_id;
     END IF;
 
@@ -758,7 +773,7 @@ BEGIN
          AND source_group.active
         WHERE source_node.user_id = _user_id
           AND source_node.active
-          AND source_group.legacy_group_id = 11
+          AND source_group.legacy_group_id = _monthly_income_source_group_id
         ORDER BY source_node.id
     LOOP
         IF COALESCE(_source.balance, 0) <= 0 THEN
@@ -776,12 +791,23 @@ BEGIN
         );
     END LOOP;
 
-    -- Шаг 2. Allocation-only подготовка extra incomes (group 12 -> extra_income_sources).
+    -- Шаг 2. Allocation-only подготовка extra incomes via extra_income_sources root config.
     _extra_income_root_id := public.find_allocation_node_id(_user_id, 'extra_income_sources');
 
     IF _extra_income_root_id IS NULL THEN
         RAISE EXCEPTION
             'extra_income_sources allocation root is required for user %',
+            _user_id;
+    END IF;
+
+    SELECT NULLIF(root.metadata->>'source_legacy_group_id', '')::integer
+    INTO _extra_income_source_group_id
+    FROM public.allocation_nodes root
+    WHERE root.id = _extra_income_root_id;
+
+    IF _extra_income_source_group_id IS NULL THEN
+        RAISE EXCEPTION
+            'extra_income_sources metadata.source_legacy_group_id is required for user %',
             _user_id;
     END IF;
 
@@ -795,7 +821,7 @@ BEGIN
          AND source_group.active
         WHERE source_node.user_id = _user_id
           AND source_node.active
-          AND source_group.legacy_group_id = 12
+          AND source_group.legacy_group_id = _extra_income_source_group_id
         ORDER BY source_node.id
     LOOP
         IF COALESCE(_source.balance, 0) <= 0 THEN
@@ -853,6 +879,22 @@ BEGIN
             _user_id;
     END IF;
 
+    SELECT
+        NULLIF(root.metadata->>'spend_legacy_group_id', '')::integer,
+        NULLIF(root.metadata->>'personal_legacy_group_id', '')::integer
+    INTO
+        _reserve_spend_group_id,
+        _reserve_personal_group_id
+    FROM public.allocation_nodes root
+    WHERE root.id = _reserve_root_id;
+
+    IF _reserve_spend_group_id IS NULL
+       OR _reserve_personal_group_id IS NULL THEN
+        RAISE EXCEPTION
+            'debt_reserve metadata.spend_legacy_group_id and metadata.personal_legacy_group_id are required for user %',
+            _user_id;
+    END IF;
+
     FOR _source IN
         SELECT DISTINCT
             spend_node.id AS source_category_node_id
@@ -865,8 +907,8 @@ BEGIN
          AND personal_group.active
         WHERE spend_node.user_id = _user_id
           AND spend_node.active
-          AND spend_group.legacy_group_id = 8
-          AND personal_group.legacy_group_id = 15
+          AND spend_group.legacy_group_id = _reserve_spend_group_id
+          AND personal_group.legacy_group_id = _reserve_personal_group_id
         ORDER BY source_category_node_id
     LOOP
         _balance := public.get_allocation_node_balance(
