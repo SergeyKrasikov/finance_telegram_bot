@@ -381,7 +381,8 @@ graph TD
 - Allocation-primary write candidates are available for manual transactions:
   - `public.insert_spend_v2(...)`
   - `public.insert_revenue_v2(...)`
-  Existing app write-paths still use the original dual-write functions until v2 is verified.
+  App write-paths for manual spend/revenue already use these v2 functions.
+  Legacy `insert_spend(...)` / `insert_revenue(...)` remain in SQL for reference/compare/rollback.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
 - Новые dual-write записи помечаются в `metadata.legacy_cash_flow_id`, чтобы backfill не создавал дубли.
 - Текущая конвенция `metadata`:

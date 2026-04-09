@@ -1756,7 +1756,8 @@ $function$
 ;
 
 
--- Принимает поля трат и записывает в таблицу cash_flow
+-- LEGACY cash_flow-primary spend write helper.
+-- App write-paths use insert_spend_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.insert_spend(_users_id bigint, _category_name_from character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql
@@ -1864,7 +1865,8 @@ END
 $function$
 ;
 
--- Принимает поля доходов и записывает в таблицу cash_flow
+-- LEGACY cash_flow-primary revenue write helper.
+-- App write-paths use insert_revenue_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.insert_revenue(_users_id bigint, _category_to character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql

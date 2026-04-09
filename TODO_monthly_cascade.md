@@ -76,7 +76,8 @@
   - legacy cash_flow-backed `get_last_transaction(...)` оставлен в SQL, но убран из app allowlist
   - category UI lookup уже использует allocation-backed `get_categories_name_v2` и `get_category_id_from_name_v2`
   - legacy `categories_category_groups` lookup helpers оставлены в SQL, но убраны из app allowlist
-  - добавлены allocation-primary write candidates `insert_spend_v2` и `insert_revenue_v2`; app write-paths пока не переключены
+  - manual spend/revenue app write-paths уже используют allocation-primary `insert_spend_v2` / `insert_revenue_v2`
+  - legacy `insert_spend(...)` / `insert_revenue(...)` оставлены в SQL как reference/compare/rollback
 
 ## Порядок безопасной миграции
 

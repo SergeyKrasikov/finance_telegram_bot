@@ -26,7 +26,7 @@ async def insert_revenue(
     currency: str,
     comment: str | None = None,
 ) -> None:
-    await db_function("insert_revenue", user_id, category, amount, currency, comment)
+    await db_function("insert_revenue_v2", user_id, category, amount, currency, comment)
 
 
 async def insert_revenue_v2(
@@ -46,7 +46,7 @@ async def insert_spend(
     currency: str,
     comment: str | None = None,
 ) -> None:
-    await db_function("insert_spend", user_id, category, amount, currency, comment)
+    await db_function("insert_spend_v2", user_id, category, amount, currency, comment)
 
 
 async def insert_spend_v2(
