@@ -67,7 +67,7 @@ async def insert_spend_with_exchange(
     comment: str | None = None,
 ) -> None:
     await db_function(
-        "insert_spend_with_exchange", user_id, category, amount, currency, comment
+        "insert_spend_with_exchange_v2", user_id, category, amount, currency, comment
     )
 
 

@@ -2498,8 +2498,8 @@ SELECT DISTINCT currency FROM cash_flow);
 $function$
 ;
 
--- записывает расход при и меняет валюту если это не основная валюта
-
+-- LEGACY cash_flow-primary spend with automatic exchange.
+-- App write-paths use insert_spend_with_exchange_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange(_users_id bigint, _category_name_from character varying, _value numeric, _currency character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql
