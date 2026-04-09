@@ -71,6 +71,7 @@
   - добавлены balance candidate helpers:
     `get_category_balance_v2`, `get_group_balance_v2`, `get_remains_v2`,
     `get_all_balances_v2`, `get_category_balance_with_currency_v2`
+  - `/balance` и spend balance checks уже используют v2 balance helpers
 
 ## Порядок безопасной миграции
 
