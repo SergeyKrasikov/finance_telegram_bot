@@ -64,6 +64,7 @@
 - Read-path migration started:
   - `monthly_distribute_cascade()` уже считает `month_earnings` / `month_spend` из `allocation_postings`
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
+  - добавлен read-only helper `get_daily_allocation_transactions(user_id)` для сравнения daily report до переключения scheduler
 
 ## Порядок безопасной миграции
 

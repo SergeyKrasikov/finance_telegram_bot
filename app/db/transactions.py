@@ -52,5 +52,10 @@ async def get_daily_transactions(user_id: int) -> list[str]:
     return [record[0] for record in records]
 
 
+async def get_daily_allocation_transactions(user_id: int) -> list[str]:
+    records = await db_function("get_daily_allocation_transactions", user_id)
+    return [record[0] for record in records]
+
+
 async def monthly_summary():
     return await db_function("monthly")

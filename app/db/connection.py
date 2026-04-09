@@ -14,6 +14,7 @@ _ALLOWED_DB_FUNCTIONS = {
     "get_category_balance_with_currency",
     "get_category_id_from_name",
     "get_currency",
+    "get_daily_allocation_transactions",
     "get_daily_transactions",
     "get_group_balance",
     "get_last_transaction",

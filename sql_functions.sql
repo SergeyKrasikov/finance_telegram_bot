@@ -9,6 +9,7 @@ DROP FUNCTION IF EXISTS public.insert_revenue(bigint, varchar, numeric, varchar,
 DROP FUNCTION IF EXISTS public.insert_spend(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_in_cash_flow(bigint, timestamp, integer, integer, integer, varchar, text);
 DROP FUNCTION IF EXISTS public.get_daily_transactions(bigint);
+DROP FUNCTION IF EXISTS public.get_daily_allocation_transactions(bigint);
 DROP FUNCTION IF EXISTS public.get_last_transaction(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_last_allocation_postings(bigint, integer);
 DROP FUNCTION IF EXISTS public.delete_transaction(bigint[]);
@@ -1745,6 +1746,31 @@ LEFT JOIN categories c2 ON cf.category_id_to = c2.id
 WHERE date_trunc('day', cf.datetime) = date_trunc('day', now())
   AND users_id = _user_id
 ORDER BY cf.datetime;
+$function$;
+
+
+-- Read-only daily report helper backed by allocation_postings.
+-- Kept separate from get_daily_transactions() until scheduler output is verified.
+CREATE OR REPLACE FUNCTION public.get_daily_allocation_transactions(_user_id bigint)
+RETURNS TABLE(transact text)
+LANGUAGE sql
+AS $function$
+SELECT CONCAT_WS(' ',
+    src."name",
+    COALESCE(dst."name", '-'),
+    CASE
+        WHEN ABS(ap.value) >= 1 THEN REPLACE(TO_CHAR(ap.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
+        WHEN ap.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM ap.value::text), '.')
+        ELSE ap.value::text
+    END,
+    ap.currency
+) AS transact
+FROM public.allocation_postings ap
+LEFT JOIN public.allocation_nodes src ON ap.from_node_id = src.id
+LEFT JOIN public.allocation_nodes dst ON ap.to_node_id = dst.id
+WHERE date_trunc('day', ap.datetime) = date_trunc('day', now())
+  AND ap.user_id = _user_id
+ORDER BY ap.datetime;
 $function$;
 
 -- возвращает id всех пользователей
