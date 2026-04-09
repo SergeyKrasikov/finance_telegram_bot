@@ -3,7 +3,7 @@ import logging
 from typing import Tuple
 from psycopg2 import Error
 
-from app.db.transactions import get_last_transaction as db_get_last_transaction
+from app.db.transactions import get_last_transaction_v2 as db_get_last_transaction
 
 
 async def get_last_transaction(user_id: int, num: int) -> Tuple[list[str], list[int]]:

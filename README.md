@@ -360,7 +360,8 @@ graph TD
   - `public.get_last_allocation_postings(user_id, num)`
   - `public.get_last_transaction_v2(user_id, num)` как ledger-backed candidate для `/history`
   - `public.get_daily_allocation_transactions(user_id)`
-  - текущий `/history` пока остаётся на legacy `cash_flow`
+  - `/history` читает ledger-backed `get_last_transaction_v2()`
+  - delete-flow в `/history` временно отключён, потому что старое удаление работает только с `cash_flow`
 - daily scheduler уже использует ledger-backed `get_daily_transactions()`
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
 - Новые dual-write записи помечаются в `metadata.legacy_cash_flow_id`, чтобы backfill не создавал дубли.

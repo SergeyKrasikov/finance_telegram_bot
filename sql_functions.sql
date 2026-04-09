@@ -1761,7 +1761,9 @@ $function$
 ;
 
 
--- пирнимает id транзакций и удаляет их
+-- LEGACY cash_flow-only delete helper.
+-- Disabled in the app while /history is moving to allocation_postings.
+-- Kept only as a reference/rollback function; do not use in new ledger flows.
 CREATE OR REPLACE FUNCTION public.delete_transaction(_transactions_id bigint[])
  RETURNS text
  LANGUAGE plpgsql

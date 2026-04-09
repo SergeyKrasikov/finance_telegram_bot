@@ -64,7 +64,8 @@
 - Read-path migration started:
   - `monthly_distribute_cascade()` уже считает `month_earnings` / `month_spend` из `allocation_postings`
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
-  - добавлен ledger-backed candidate `get_last_transaction_v2(user_id, num)` для будущего переключения `/history`
+  - `/history` читает ledger-backed `get_last_transaction_v2(user_id, num)`
+  - delete-flow временно отключён; legacy `delete_transaction(...)` оставлен только как cash_flow-only reference/rollback
   - daily scheduler уже читает `get_daily_transactions()` из `allocation_postings`
   - `get_daily_allocation_transactions(user_id)` оставлен как явный alias на ledger-read
 

@@ -5,7 +5,6 @@ from psycopg2 import Error
 from app.config import PG_DATABASE, PG_HOST, PG_PASSWORD, PG_PORT, PG_USER
 
 _ALLOWED_DB_FUNCTIONS = {
-    "delete_transaction",
     "exchange",
     "get_all_balances",
     "get_all_users_id",
