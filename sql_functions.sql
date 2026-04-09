@@ -1761,17 +1761,38 @@ $function$
 ;
 
 
--- LEGACY cash_flow-only delete helper.
--- Disabled in the app while /history is moving to allocation_postings.
--- Kept only as a reference/rollback function; do not use in new ledger flows.
+-- Ledger-aware delete helper used by /history.
+-- Input ids are allocation_postings.id values. If a ledger row mirrors legacy cash_flow,
+-- the linked cash_flow row is deleted as well to prevent future backfill resurrection.
 CREATE OR REPLACE FUNCTION public.delete_transaction(_transactions_id bigint[])
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
-begin 
-	delete from cash_flow where id = ANY(_transactions_id);
-return 'OK';
-		end
+DECLARE
+    _legacy_cash_flow_ids bigint[];
+BEGIN
+    SELECT COALESCE(
+        ARRAY_AGG((ap.metadata->>'legacy_cash_flow_id')::bigint)
+            FILTER (
+                WHERE ap.metadata ? 'legacy_cash_flow_id'
+                  AND ap.metadata->>'legacy_cash_flow_id' ~ '^[0-9]+$'
+            ),
+        ARRAY[]::bigint[]
+    )
+    INTO _legacy_cash_flow_ids
+    FROM public.allocation_postings ap
+    WHERE ap.id = ANY(_transactions_id);
+
+    DELETE FROM public.allocation_postings
+    WHERE id = ANY(_transactions_id);
+
+    IF COALESCE(array_length(_legacy_cash_flow_ids, 1), 0) > 0 THEN
+        DELETE FROM public.cash_flow
+        WHERE id = ANY(_legacy_cash_flow_ids);
+    END IF;
+
+    RETURN 'OK';
+END
 $function$
 ;
 
