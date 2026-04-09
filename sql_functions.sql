@@ -60,7 +60,8 @@ return query (select ug2.users_id from users_groups ug1 join users_groups ug2 us
 $function$;
 
 
--- принимает user_id, id категории, валюту в которой вернуть баланс и возвращает остаток по ней  
+-- LEGACY cash_flow-backed category balance helper.
+-- App read-paths use get_category_balance_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.get_category_balance(
     _user_id bigint,
     _category_id integer,
@@ -1897,7 +1898,8 @@ return query (SELECT u.id FROM users u );
 $function$
 ;	
 
--- принимает id пользователя и id пруппы, возвращает сумму всех категорий группы
+-- LEGACY cash_flow-backed group balance helper.
+-- App read-paths use get_group_balance_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.get_group_balance(_user_id bigint, _groyps_id integer)
  RETURNS TABLE(balance NUMERIC)
  LANGUAGE plpgsql
@@ -1921,7 +1923,8 @@ AS $function$
 $function$
 ;
 
--- принимает id пользователя и имя категории, возвращает остаток по этой категории
+-- LEGACY cash_flow-backed category remains helper.
+-- App read-paths use get_remains_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.get_remains(_user_id bigint, _category CHARACTER)
  RETURNS numeric
  LANGUAGE plpgsql
@@ -1963,7 +1966,8 @@ END;
 $function$
 ;
 
--- принимает id пользователя и id группы, возвращает сумму всех категорий группы
+-- LEGACY cash_flow-backed all balances helper.
+-- App read-paths use get_all_balances_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.get_all_balances(_user_id bigint, _group_id integer)
 RETURNS TABLE(category_name varchar, balance numeric(20, 2))
 LANGUAGE plpgsql
@@ -2161,7 +2165,8 @@ return (SELECT id FROM categories WHERE "name" = _category_name)
 $function$
 ;
 
--- получить баланс категории с разбивкой по валютам
+-- LEGACY cash_flow-backed category balance split by currency.
+-- App read-paths use get_category_balance_with_currency_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency(_user_id bigint, _category_id integer)
  RETURNS TABLE (value numeric, currency varchar)
  LANGUAGE sql

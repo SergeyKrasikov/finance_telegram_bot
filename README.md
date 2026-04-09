@@ -369,6 +369,8 @@ graph TD
   - delete-flow в `/history` удаляет `allocation_postings` и linked legacy `cash_flow`, если он есть в metadata
 - daily scheduler уже использует ledger-backed `get_daily_transactions()`
 - `/balance` и spend balance checks уже используют ledger-backed v2 balance helpers.
+- Legacy cash_flow-backed balance helpers remain in SQL for reference/compare/rollback,
+  but are no longer exposed through the app DB allowlist.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
 - Новые dual-write записи помечаются в `metadata.legacy_cash_flow_id`, чтобы backfill не создавал дубли.
 - Текущая конвенция `metadata`:
