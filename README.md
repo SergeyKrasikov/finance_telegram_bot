@@ -365,6 +365,7 @@ graph TD
   - `public.get_remains_v2(user_id, category_name)`
   - `public.get_all_balances_v2(user_id, group_id)`
   - `public.get_category_balance_with_currency_v2(user_id, category_id)`
+  - `public.get_currency_v2()`
   - `/history` читает ledger-backed `get_last_transaction_v2()`
   - delete-flow в `/history` удаляет `allocation_postings` и linked legacy `cash_flow`, если он есть в metadata
 - daily scheduler уже использует ledger-backed `get_daily_transactions()`
@@ -378,6 +379,8 @@ graph TD
   but is no longer exposed through the app DB allowlist.
 - Legacy `categories_category_groups` category lookup helpers remain in SQL for reference/compare/rollback,
   but are no longer exposed through the app DB allowlist.
+- Legacy cash_flow-backed `get_currency(...)` remains in SQL for reference/compare/rollback,
+  but is no longer exposed through the app DB allowlist.
 - Allocation-primary write candidates are available for manual transactions:
   - `public.insert_spend_v2(...)`
   - `public.insert_revenue_v2(...)`

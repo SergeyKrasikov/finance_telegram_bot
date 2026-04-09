@@ -65,6 +65,14 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Expected cash_flow rows with long currency codes';
     END IF;
+
+    IF (
+        SELECT count(DISTINCT transact)
+        FROM public.get_currency_v2()
+        WHERE transact IN ('USDT', 'FDUSD')
+    ) <> 2 THEN
+        RAISE EXCEPTION 'Expected ledger-backed currency list to include long currency codes';
+    END IF;
 END $$;
 
 ROLLBACK;

@@ -13,7 +13,7 @@ _ALLOWED_DB_FUNCTIONS = {
     "get_categories_name_v2",
     "get_category_balance_with_currency_v2",
     "get_category_id_from_name_v2",
-    "get_currency",
+    "get_currency_v2",
     "get_daily_allocation_transactions",
     "get_daily_transactions",
     "get_group_balance_v2",

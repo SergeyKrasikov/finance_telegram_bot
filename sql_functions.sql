@@ -39,6 +39,7 @@ DROP FUNCTION IF EXISTS public.get_category_id_from_name_v2(bigint, varchar);
 DROP FUNCTION IF EXISTS public.find_allocation_category_node_id_by_name(bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_categories_id(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_currency();
+DROP FUNCTION IF EXISTS public.get_currency_v2();
 DROP FUNCTION IF EXISTS public.get_all_users_id();
 DROP FUNCTION IF EXISTS public.is_technical_cashflow_description(text);
 DROP FUNCTION IF EXISTS public.get_users_id(bigint);
@@ -2713,7 +2714,8 @@ GROUP BY p.currency;
 $function$
 ;
 
--- возвращает все валюты которые есть в базе
+-- LEGACY cash_flow-backed currency list.
+-- App read-paths use get_currency_v2(...); keep this for reference/compare/rollback.
 CREATE OR REPLACE FUNCTION public.get_currency()
  RETURNS TABLE(transact varchar)
  LANGUAGE plpgsql
@@ -2722,6 +2724,18 @@ begin
 return query (
 SELECT DISTINCT currency FROM cash_flow);
 	end
+$function$
+;
+
+-- Ledger-backed currency list.
+CREATE OR REPLACE FUNCTION public.get_currency_v2()
+ RETURNS TABLE(transact varchar)
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT DISTINCT ap.currency AS transact
+    FROM public.allocation_postings ap
+    ORDER BY ap.currency;
 $function$
 ;
 

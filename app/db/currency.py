@@ -4,7 +4,12 @@ from app.db.connection import db_function
 
 
 async def get_currency_list() -> list[str]:
-    records = await db_function("get_currency")
+    records = await db_function("get_currency_v2")
+    return [record[0] for record in records]
+
+
+async def get_currency_list_v2() -> list[str]:
+    records = await db_function("get_currency_v2")
     return [record[0] for record in records]
 
 
