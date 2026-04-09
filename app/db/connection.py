@@ -24,6 +24,7 @@ _ALLOWED_DB_FUNCTIONS = {
     "insert_spend",
     "insert_spend_v2",
     "insert_spend_with_exchange",
+    "insert_spend_with_exchange_v2",
     "monthly",
 }
 

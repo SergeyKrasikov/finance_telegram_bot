@@ -5,6 +5,7 @@ DROP FUNCTION IF EXISTS public.distribute_to_group(bigint, integer, integer, num
 DROP FUNCTION IF EXISTS public.transact_from_group_to_category(bigint, integer, integer);
 DROP FUNCTION IF EXISTS public.exchange(bigint, integer, numeric, varchar, numeric, varchar);
 DROP FUNCTION IF EXISTS public.insert_spend_with_exchange(bigint, varchar, numeric, varchar, text);
+DROP FUNCTION IF EXISTS public.insert_spend_with_exchange_v2(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_revenue(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_revenue_v2(bigint, varchar, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.insert_spend(bigint, varchar, numeric, varchar, text);
@@ -2596,6 +2597,276 @@ BEGIN
         'app',
         jsonb_build_object('exchange_subkind', 'auto')
     );
+
+    RETURN 'OK';
+END
+$function$
+;
+
+-- Allocation-primary candidate for spend writes that require an automatic exchange.
+-- Keeps the legacy three-row cash_flow mirror until exchange runtime is fully moved to ledger.
+CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange_v2(_users_id bigint, _category_name_from character varying, _value numeric, _currency character varying, _description text DEFAULT NULL::text)
+ RETURNS text
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _value_RUB NUMERIC(10,2);
+    _reserve_node_id bigint;
+    _reserve_legacy_category_id int;
+    _category_node_id bigint;
+    _category_legacy_id int;
+    _rate_src numeric;
+    _rate_rub numeric;
+    _allocation_exchange_out_id bigint;
+    _allocation_exchange_in_id bigint;
+    _allocation_spend_id bigint;
+    _cash_flow_exchange_out_id bigint;
+    _cash_flow_exchange_in_id bigint;
+    _cash_flow_spend_id bigint;
+    _currency_norm character varying := upper(_currency);
+BEGIN
+    IF _value <= 0 THEN
+        RAISE EXCEPTION 'Spend value must be greater than zero';
+    END IF;
+
+    IF _currency_norm = 'RUB' THEN
+        _value_RUB := _value;
+    ELSE
+        SELECT rate INTO _rate_src
+        FROM exchange_rates
+        WHERE currency = _currency_norm
+        ORDER BY datetime DESC
+        LIMIT 1;
+
+        SELECT rate INTO _rate_rub
+        FROM exchange_rates
+        WHERE currency = 'RUB'
+        ORDER BY datetime DESC
+        LIMIT 1;
+
+        IF _rate_src IS NULL OR _rate_rub IS NULL THEN
+            RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency_norm;
+        END IF;
+
+        _value_RUB := _value / (_rate_src / _rate_rub);
+    END IF;
+
+    IF _value_RUB IS NULL THEN
+        RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency_norm;
+    END IF;
+
+    SELECT an.id, an.legacy_category_id
+    INTO _reserve_node_id, _reserve_legacy_category_id
+    FROM public.allocation_nodes an
+    JOIN public.allocation_node_groups ang ON ang.node_id = an.id
+    WHERE an.active
+      AND ang.active
+      AND an.legacy_category_id IS NOT NULL
+      AND ang.legacy_group_id = 9
+      AND (
+          an.user_id = _users_id
+          OR an.user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _users_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN an.user_id = _users_id THEN 0 ELSE 1 END,
+        an.id
+    LIMIT 1;
+
+    IF _reserve_node_id IS NULL THEN
+        RAISE EXCEPTION 'Reserve allocation category node (group 9) not found for user %', _users_id;
+    END IF;
+
+    SELECT an.id, an.legacy_category_id
+    INTO _category_node_id, _category_legacy_id
+    FROM public.allocation_nodes an
+    JOIN public.allocation_node_groups ang ON ang.node_id = an.id
+    WHERE an.active
+      AND ang.active
+      AND an.legacy_category_id IS NOT NULL
+      AND an."name" = _category_name_from
+      AND ang.legacy_group_id = 14
+      AND (
+          an.user_id = _users_id
+          OR an.user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _users_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN an.user_id = _users_id THEN 0 ELSE 1 END,
+        an.id
+    LIMIT 1;
+
+    IF _category_node_id IS NULL THEN
+        RAISE EXCEPTION 'Allocation category node % in group 14 not found for user %', _category_name_from, _users_id;
+    END IF;
+
+    INSERT INTO public.allocation_postings (
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    VALUES (
+        _users_id,
+        _reserve_node_id,
+        _category_node_id,
+        _value,
+        _currency_norm,
+        concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency_norm, ' ', _description),
+        jsonb_strip_nulls(
+            jsonb_build_object(
+                'kind', 'exchange',
+                'subkind', 'auto',
+                'origin', 'system',
+                'direction', 'out',
+                'legacy_category_id_from', _reserve_legacy_category_id,
+                'legacy_category_id_to', _category_legacy_id
+            )
+        )
+    )
+    RETURNING id INTO _allocation_exchange_out_id;
+
+    INSERT INTO public.cash_flow (
+        users_id,
+        category_id_from,
+        category_id_to,
+        value,
+        currency,
+        description
+    )
+    VALUES (
+        _users_id,
+        _reserve_legacy_category_id,
+        _category_legacy_id,
+        _value,
+        _currency_norm,
+        concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency_norm, ' ', _description)
+    )
+    RETURNING id INTO _cash_flow_exchange_out_id;
+
+    UPDATE public.allocation_postings
+    SET metadata = jsonb_strip_nulls(
+        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_exchange_out_id)
+    )
+    WHERE id = _allocation_exchange_out_id;
+
+    INSERT INTO public.allocation_postings (
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    VALUES (
+        _users_id,
+        _category_node_id,
+        _reserve_node_id,
+        _value_RUB,
+        'RUB',
+        concat('auto exchange ', _value, ' ', _currency_norm, ' to ', _value_RUB, ' RUB', ' ', _description),
+        jsonb_strip_nulls(
+            jsonb_build_object(
+                'kind', 'exchange',
+                'subkind', 'auto',
+                'origin', 'system',
+                'direction', 'in',
+                'legacy_category_id_from', _category_legacy_id,
+                'legacy_category_id_to', _reserve_legacy_category_id
+            )
+        )
+    )
+    RETURNING id INTO _allocation_exchange_in_id;
+
+    INSERT INTO public.cash_flow (
+        users_id,
+        category_id_from,
+        category_id_to,
+        value,
+        currency,
+        description
+    )
+    VALUES (
+        _users_id,
+        _category_legacy_id,
+        _reserve_legacy_category_id,
+        _value_RUB,
+        'RUB',
+        concat('auto exchange ', _value, ' ', _currency_norm, ' to ', _value_RUB, ' RUB', ' ', _description)
+    )
+    RETURNING id INTO _cash_flow_exchange_in_id;
+
+    UPDATE public.allocation_postings
+    SET metadata = jsonb_strip_nulls(
+        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_exchange_in_id)
+    )
+    WHERE id = _allocation_exchange_in_id;
+
+    INSERT INTO public.allocation_postings (
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    VALUES (
+        _users_id,
+        _category_node_id,
+        NULL,
+        _value,
+        _currency_norm,
+        _description,
+        jsonb_strip_nulls(
+            jsonb_build_object(
+                'kind', 'transaction',
+                'subkind', 'spend',
+                'origin', 'app',
+                'exchange_subkind', 'auto',
+                'legacy_category_id_from', _category_legacy_id,
+                'exchange_out_posting_id', _allocation_exchange_out_id,
+                'exchange_in_posting_id', _allocation_exchange_in_id
+            )
+        )
+    )
+    RETURNING id INTO _allocation_spend_id;
+
+    INSERT INTO public.cash_flow (
+        users_id,
+        category_id_from,
+        category_id_to,
+        value,
+        currency,
+        description
+    )
+    VALUES (
+        _users_id,
+        _category_legacy_id,
+        NULL,
+        _value,
+        _currency_norm,
+        _description
+    )
+    RETURNING id INTO _cash_flow_spend_id;
+
+    UPDATE public.allocation_postings
+    SET metadata = jsonb_strip_nulls(
+        metadata || jsonb_build_object('legacy_cash_flow_id', _cash_flow_spend_id)
+    )
+    WHERE id = _allocation_spend_id;
 
     RETURN 'OK';
 END
