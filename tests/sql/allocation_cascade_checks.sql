@@ -5,6 +5,16 @@ BEGIN;
 
 DELETE FROM allocation_postings WHERE user_id IN (906001, 906002);
 DELETE FROM cash_flow WHERE users_id IN (906001, 906002);
+DELETE FROM public.allocation_scenario_node_bindings
+WHERE scenario_id IN (
+    SELECT id
+    FROM public.allocation_scenarios
+    WHERE owner_user_id IN (906001, 906002)
+       OR slug LIKE 'test_cascade_%'
+);
+DELETE FROM public.allocation_scenarios
+WHERE owner_user_id IN (906001, 906002)
+   OR slug LIKE 'test_cascade_%';
 
 DELETE FROM allocation_routes
 WHERE source_node_id IN (
@@ -94,10 +104,52 @@ SELECT
 FROM user_groups
 WHERE slug = 'test_cascade_group';
 
-UPDATE allocation_nodes
-SET metadata = jsonb_build_object('partner_source_category_slug', 'test_cascade_family_source')
-WHERE user_id = 906001
-  AND slug = 'test_cascade_family_root';
+INSERT INTO public.allocation_scenarios(
+    owner_user_id,
+    scenario_kind,
+    schedule_cron,
+    slug,
+    "name",
+    description,
+    active
+)
+VALUES (
+    906001,
+    'monthly',
+    NULL,
+    'test_cascade_monthly',
+    'test cascade monthly',
+    'fixture scenario for bridge binding',
+    true
+);
+
+INSERT INTO public.allocation_scenario_node_bindings(
+    scenario_id,
+    root_node_id,
+    binding_kind,
+    bound_node_id,
+    priority,
+    active,
+    metadata
+)
+SELECT
+    scenario.id,
+    root.id,
+    'bridge_source',
+    bound.id,
+    100,
+    true,
+    jsonb_build_object('origin', 'allocation_cascade_checks')
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = 906001
+ AND root.slug = 'test_cascade_family_root'
+JOIN public.allocation_nodes bound
+  ON bound.user_id = 906002
+ AND bound.slug = 'test_cascade_family_source'
+WHERE scenario.owner_user_id = 906001
+  AND scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'test_cascade_monthly';
 
 INSERT INTO allocation_routes(source_node_id, target_node_id, percent, description)
 SELECT src.id, dst.id, 0.40, 'root to stage'
@@ -342,7 +394,7 @@ BEGIN
       AND from_node_id = family_source_node_id;
 
     IF family_source_rows <> 1 THEN
-        RAISE EXCEPTION 'Expected family bridge row debited from source node metadata config, got %', family_source_rows;
+        RAISE EXCEPTION 'Expected family bridge row debited from source node bridge_source binding, got %', family_source_rows;
     END IF;
 
     SELECT id
