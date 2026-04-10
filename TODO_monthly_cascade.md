@@ -19,8 +19,7 @@
   - `allocation_scenario_node_bindings`
   Он уже поддерживает owner-level (`user`) и household-level (`user_group`) сценарии,
   а также ручной и cron-based запуск сценария через `schedule_cron` (`NULL` = manual).
-  Monthly runtime уже читает оттуда `branch_source` и `bridge_source`, а single-target roots seed'ятся через `root_target`;
-  полный отказ от metadata fallback ещё не завершён.
+  Monthly runtime уже жёстко читает оттуда `branch_source` и `bridge_source`, а single-target roots seed'ятся через `root_target`.
 - Добавлены transition/helper-функции:
   - `find_allocation_node_id(...)`
   - `get_group_percent_sum(...)`
@@ -74,11 +73,11 @@
   - `free_to_gifts` уже считает free balance через `get_allocation_node_balance(...)` по remainder node id
   - `monthly_distribute_cascade()` уже передаёт явный source allocation node в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и `salary_primary`
   - `monthly_distribute_cascade()` больше не передаёт legacy source category id в `allocation_distribute(...)`; lower-level функция выводит его из source node только для compatibility metadata
-  - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots, без hard-coded monthly users и legacy income category id; `salary_primary` сначала ищет source leaf через scenario binding `branch_source`, а metadata `source_category_node_id` оставлена как fallback
+  - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots, без hard-coded monthly users и legacy income category id; `salary_primary` требует source leaf через scenario binding `branch_source`
   - prep/reserve roots уже хранят legacy group bridge в metadata, а `monthly_distribute_cascade()` больше не hard-code'ит group ids `11/12/8/15`
   - single-target monthly roots и `family_contribution_out` уже seed'ятся через `allocation_scenario_node_bindings`, а не через hard-coded target/source leaf в route insert logic
   - `monthly_distribute_allocation(...)` уже поддерживает явный source allocation node без обязательного legacy category id
-  - partner bridge уже сначала резолвит source leaf через scenario binding `bridge_source`, а metadata `partner_source_category_slug` оставлена как fallback
+  - partner bridge уже жёстко резолвит source leaf через scenario binding `bridge_source`
   - graph-native leaf-ноды уже могут писать `allocation_postings` без `legacy_category_id`
   - `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
@@ -146,16 +145,16 @@
 ## Что ещё нужно сделать в схеме
 
 - Финально убрать зависимость движка от legacy category/group функций.
-- Довести monthly runtime до полного ухода с root metadata на `allocation_scenarios` / `allocation_scenario_node_bindings`.
+- Довести monthly runtime до полного ухода с root metadata на `allocation_scenarios` / `allocation_scenario_node_bindings` для prep/reserve веток.
 - Free-balance для `free_to_gifts` уже определяется через allocation remainder leaf node, а не через legacy category balance.
 - Legacy share для `free_to_gifts` перенесён из orchestrator в allocation route.
 - В схему добавлена `allocation_postings`; leaf-проводки allocation-движка уже пишутся туда ledger-only, без новых rows в `cash_flow`.
 - Добавлены read-helper'ы для нового ledger: `get_allocation_node_balance(...)` и `get_allocation_node_balance_by_slug(...)`.
 - Deploy now runs idempotent backfill `cash_flow -> allocation_postings`; historical/backfill rows may carry `metadata.legacy_cash_flow_id`.
 - Определить финальную модель источника для monthly run:
-  Текущий переходный вариант: orchestrator запускает несколько roots, `salary_primary` и `family_contribution_out` уже сначала ищут scenario bindings, а затем используют metadata fallback; остальные prep/reserve ветки находят source nodes по `allocation_node_groups`, а legacy group ids берут из metadata root-ноды.
+  Текущий переходный вариант: orchestrator запускает несколько roots, `salary_primary` и `family_contribution_out` уже полностью сидят на scenario bindings; остальные prep/reserve ветки находят source nodes по `allocation_node_groups`, а legacy group ids берут из metadata root-ноды.
 - `allocation_routes.metadata` уже используется для route-level graph config, например source leaf partner bridge.
-- `allocation_nodes.metadata` всё ещё используется как fallback/bridge-конфиг на переходном этапе, например для `salary_primary.source_category_node_id` и `family_contribution_out.partner_source_category_slug`.
+- `allocation_nodes.metadata` всё ещё используется как переходный config только для prep/reserve веток (`source_legacy_group_id`, `spend_legacy_group_id`, `personal_legacy_group_id`).
 - Финально решить, остаётся ли `cash_flow` на legacy category ids или переводится на `allocation_nodes.id`.
 
 ## Что нельзя делать пока рано

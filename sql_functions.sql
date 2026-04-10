@@ -993,13 +993,6 @@ BEGIN
     )
     INTO _income_source_node_id;
 
-    IF _income_source_node_id IS NULL THEN
-        SELECT NULLIF(salary_root.metadata->>'source_category_node_id', '')::bigint
-        INTO _income_source_node_id
-        FROM public.allocation_nodes salary_root
-        WHERE salary_root.id = _salary_primary_root_id;
-    END IF;
-
     IF _income_source_node_id IS NOT NULL THEN
         SELECT *
         INTO _income_source_node
@@ -1008,7 +1001,7 @@ BEGIN
 
         IF NOT FOUND THEN
             RAISE EXCEPTION
-                'salary_primary source_category_node_id % is not found for user %',
+                'salary_primary branch_source binding node % is not found for user %',
                 _income_source_node_id,
                 _user_id;
         END IF;
@@ -1064,7 +1057,7 @@ BEGIN
 
     IF _income_source_node_id IS NULL AND _income_category IS NULL THEN
         RAISE EXCEPTION
-            'salary_primary branch_source binding or metadata.source_category_node_id is required for user %',
+            'salary_primary branch_source binding is required for user %',
             _user_id;
     ELSIF _income_source_node_id IS NULL THEN
         RAISE EXCEPTION
@@ -1239,7 +1232,6 @@ DECLARE
     _next_executor_user_id bigint;
     _next_category_id_from integer;
     _next_source_category_node_id bigint;
-    _partner_source_category_slug text;
 BEGIN
     IF _amount IS NULL OR _amount <= 0 THEN
         RETURN;
@@ -1389,64 +1381,33 @@ BEGIN
             )
             INTO _next_source_category_node_id;
 
-            IF _next_source_category_node_id IS NOT NULL THEN
-                SELECT legacy_category_id
-                INTO _next_category_id_from
-                FROM public.allocation_nodes
-                WHERE id = _next_source_category_node_id
-                  AND active
-                  AND (
-                      user_id = _next_executor_user_id
-                      OR user_group_id IN (
-                          SELECT ugm.user_group_id
-                          FROM public.user_group_memberships ugm
-                          WHERE ugm.user_id = _next_executor_user_id
-                            AND ugm.active
-                      )
-                  );
+            IF _next_source_category_node_id IS NULL THEN
+                RAISE EXCEPTION
+                    'family_contribution_out node % must define bridge_source binding',
+                    _node.id;
+            END IF;
 
-                IF NOT FOUND THEN
-                    RAISE EXCEPTION
-                        'family_contribution_in target node % cannot use bridge_source binding node % for user %',
-                        _target_node.id,
-                        _next_source_category_node_id,
-                        _next_executor_user_id;
-                END IF;
-            ELSE
-                _partner_source_category_slug := NULLIF(_node.metadata->>'partner_source_category_slug', '');
-
-                IF _partner_source_category_slug IS NULL THEN
-                    RAISE EXCEPTION
-                        'family_contribution_out node % must define bridge_source binding or metadata.partner_source_category_slug',
-                        _node.id;
-                END IF;
-
-                SELECT id, legacy_category_id
-                INTO _next_source_category_node_id, _next_category_id_from
-                FROM public.allocation_nodes
-                WHERE slug = _partner_source_category_slug
-                  AND active
-                  AND (
-                      user_id = _next_executor_user_id
-                      OR user_group_id IN (
-                          SELECT ugm.user_group_id
-                          FROM public.user_group_memberships ugm
-                          WHERE ugm.user_id = _next_executor_user_id
-                            AND ugm.active
-                      )
+            SELECT legacy_category_id
+            INTO _next_category_id_from
+            FROM public.allocation_nodes
+            WHERE id = _next_source_category_node_id
+              AND active
+              AND (
+                  user_id = _next_executor_user_id
+                  OR user_group_id IN (
+                      SELECT ugm.user_group_id
+                      FROM public.user_group_memberships ugm
+                      WHERE ugm.user_id = _next_executor_user_id
+                        AND ugm.active
                   )
-                ORDER BY
-                    CASE WHEN user_id = _next_executor_user_id THEN 0 ELSE 1 END,
-                    id
-                LIMIT 1;
+              );
 
-                IF NOT FOUND THEN
-                    RAISE EXCEPTION
-                        'family_contribution_in target node % cannot resolve partner source slug % for user %',
-                        _target_node.id,
-                        _partner_source_category_slug,
-                        _next_executor_user_id;
-                END IF;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION
+                    'family_contribution_in target node % cannot use bridge_source binding node % for user %',
+                    _target_node.id,
+                    _next_source_category_node_id,
+                    _next_executor_user_id;
             END IF;
         ELSE
             _next_category_id_from := _category_id_from;

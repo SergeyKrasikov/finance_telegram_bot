@@ -19,8 +19,8 @@
 
 ## Что ещё нельзя считать завершённым
 
-- Пока не принято отдельное доменное решение по связке `invest_*_report -> Н.З.`.
-- Пока monthly runtime ещё допускает metadata fallback, перенос на прод должен считаться переходным, а не финальной очисткой legacy-конфига.
+- Пока не принята финальная доменная модель для `allocation_scenarios` / `allocation_scenario_node_bindings`.
+- Prep/reserve ветки всё ещё используют metadata-конфиг root-нод и не переведены полностью на scenario-layer.
 
 ## Порядок продового переезда
 
@@ -105,7 +105,7 @@
 
 Важно:
 - не удалять legacy `monthly_distribute()`
-- не убирать metadata fallback до подтверждения, что scenario bindings полностью покрывают прод
+- `branch_source` и `bridge_source` уже обязательны; перед продовым включением нужно подтвердить, что bindings существуют для всех monthly users
 
 ## Пост-deploy проверки
 
@@ -128,12 +128,17 @@
 
 ## Условия для удаления fallback и legacy
 
-Убирать metadata fallback можно только после того, как на проде подтверждено:
+`branch_source` и `bridge_source` уже должны быть подтверждены на проде:
 - все monthly users покрыты `allocation_scenarios`
 - все required roots покрыты `allocation_scenario_node_bindings`
 - `branch_source` найден для всех `salary_primary`
 - `bridge_source` найден для всех `family_contribution_out`
 - single-target roots полностью materialize'ятся из `root_target`
+
+Отдельно для полного ухода от metadata у prep/reserve веток нужно подтвердить:
+- replacement config-layer для `source_legacy_group_id`
+- replacement config-layer для `spend_legacy_group_id`
+- replacement config-layer для `personal_legacy_group_id`
 
 Убирать legacy `cash_flow` monthly dependence можно только после того, как подтверждено:
 - balances читаются из ledger
@@ -156,7 +161,6 @@
 
 Если проблема только в scenario config:
 - поправить seed/bindings
-- metadata fallback временно оставлять включённым
 - не откатывать весь ledger migration, если write/read path уже стабилен
 
 ## Что ещё нужно подготовить перед финальным прод-переездом

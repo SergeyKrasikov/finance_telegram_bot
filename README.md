@@ -242,8 +242,7 @@ Scheduler:
    Source category должна быть одновременно в legacy spend `group 8` и personal `group 15`.
 4. Из free-category (`group 6`) через root `free_to_gifts` переводится только legacy `group 7` доля free-баланса.
    Для суммы перевода сохраняется старая формула `free_balance * sum(percent(group 7))`, а route уже ведёт эту сумму в canonical gifts leaf пользователя.
-5. После этого основной monthly каскад стартует из `salary_primary` на балансе income leaf, связанной через scenario binding `branch_source`.
-   На время миграции сохранён fallback в `allocation_nodes.metadata.source_category_node_id`.
+5. После этого основной monthly каскад стартует из `salary_primary` на балансе income leaf, связанной через обязательный scenario binding `branch_source`.
    Для ledger-проводок cascade передаёт в `allocation_distribute(...)` явный source allocation node, поэтому debit-side уже не выбирается внутри движка только по `legacy_category_id`.
 
 #### Узлы графа
@@ -367,12 +366,12 @@ graph TD
   `legacy_category_id` пока остаётся compatibility-полем для балансов, metadata и bridge/backfill, но больше не является единственным способом выбрать debit-node внутри monthly runtime.
 - Вызовы `allocation_distribute(...)` из `monthly_distribute_cascade()` больше не передают legacy source category id; он выводится из source node только как compatibility metadata.
 - `monthly()` больше не содержит hard-coded monthly users и income category id; entrypoint запускает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots.
-  `salary_primary` сначала ищет source leaf через `allocation_scenario_node_bindings` (`binding_kind = branch_source`), затем только при отсутствии binding использует fallback `allocation_nodes.metadata.source_category_node_id`.
+  `salary_primary` требует source leaf через `allocation_scenario_node_bindings` (`binding_kind = branch_source`).
   Prep/reserve roots пока читают legacy group bridge из своей metadata (`source_legacy_group_id`, `spend_legacy_group_id`, `personal_legacy_group_id`), а не из hard-coded условий в function body.
-  `family_contribution_out` сначала ищет partner source leaf через `allocation_scenario_node_bindings` (`binding_kind = bridge_source`), затем только при отсутствии binding использует fallback `metadata.partner_source_category_slug`.
+  `family_contribution_out` требует partner source leaf через `allocation_scenario_node_bindings` (`binding_kind = bridge_source`).
   Старый параметр `_income_category` в `monthly_distribute_cascade()` сохранён как fallback на время миграции.
 - Internal helper `monthly_distribute_allocation(...)` уже может принимать явный `source_category_node_id` без обязательного legacy category id.
-- Partner bridge `family_contribution_out -> family_contribution_in` primary-path резолвит source leaf через `allocation_scenario_node_bindings`, а metadata `partner_source_category_slug` оставлена как fallback на время миграции.
+- Partner bridge `family_contribution_out -> family_contribution_in` резолвит source leaf через `allocation_scenario_node_bindings`, без metadata fallback.
 - Graph-native leaf-ноды больше не обязаны иметь `legacy_category_id`; он пишется в metadata только если присутствует на source/target node.
 - Household membership helper `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL.
 - Для безопасного наблюдения за новым ledger добавлен read-only helper:
@@ -449,7 +448,7 @@ graph TD
   - какой leaf использовать как source для bridge
 - Monthly runtime уже использует этот слой для `salary_primary.branch_source` и `family_contribution_out.bridge_source`;
   single-target monthly roots в seed уже materialize'ятся из `root_target`.
-  Metadata fallback пока сохранён на время миграции.
+  Для этих двух веток metadata fallback уже убран.
 - Пока monthly runtime ещё не переключён на эти таблицы; они введены как schema contract для следующего шага миграции.
 
 ## Заметки

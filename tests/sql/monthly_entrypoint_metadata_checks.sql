@@ -55,8 +55,12 @@ BEGIN
         RAISE EXCEPTION 'Expected monthly_distribute_cascade() to resolve salary source via scenario bindings';
     END IF;
 
-    IF POSITION('source_category_node_id' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to keep metadata salary source fallback during migration';
+    IF POSITION('branch_source' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to require branch_source binding';
+    END IF;
+
+    IF POSITION('metadata->>''source_category_node_id''' IN cascade_def) > 0 THEN
+        RAISE EXCEPTION 'monthly_distribute_cascade() still reads salary source from metadata fallback';
     END IF;
 
     IF POSITION('source_legacy_group_id' IN cascade_def) = 0
@@ -77,7 +81,7 @@ BEGIN
     END IF;
 
     SELECT pg_get_functiondef(
-        'public.allocation_distribute_recursive(bigint,bigint,numeric,varchar,integer,text,bigint[])'::regprocedure
+        'public.allocation_distribute_recursive(bigint,bigint,numeric,varchar,integer,text,bigint[],bigint)'::regprocedure
     )
     INTO recursive_def;
 
@@ -85,9 +89,12 @@ BEGIN
         RAISE EXCEPTION 'Expected allocation_distribute_recursive() to resolve bridge source via scenario bindings';
     END IF;
 
-    IF POSITION('metadata.partner_source_category_slug' IN recursive_def) = 0
-       AND POSITION('partner_source_category_slug' IN recursive_def) = 0 THEN
-        RAISE EXCEPTION 'Expected allocation_distribute_recursive() to keep metadata bridge fallback during migration';
+    IF POSITION('bridge_source' IN recursive_def) = 0 THEN
+        RAISE EXCEPTION 'Expected allocation_distribute_recursive() to require bridge_source binding';
+    END IF;
+
+    IF POSITION('partner_source_category_slug' IN recursive_def) > 0 THEN
+        RAISE EXCEPTION 'allocation_distribute_recursive() still reads partner bridge source from metadata fallback';
     END IF;
 
     IF POSITION('owner_user_id := COALESCE(_node.user_id, _executor_user_id)' IN recursive_def) = 0 THEN

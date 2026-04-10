@@ -244,36 +244,14 @@ WHERE root.user_id IN (249716305, 943915310)
   AND root.active;
 
 UPDATE public.allocation_nodes root
-SET metadata = jsonb_strip_nulls(
-    COALESCE(root.metadata, '{}'::jsonb)
-    || jsonb_build_object(
-        'partner_source_category_slug', config.partner_source_category_slug
-    )
-)
-FROM (
-    VALUES
-        (249716305::bigint, 'cat_15'::text),
-        (943915310::bigint, 'cat_15'::text)
-) AS config(user_id, partner_source_category_slug)
-WHERE root.user_id = config.user_id
+SET metadata = COALESCE(root.metadata, '{}'::jsonb) - 'partner_source_category_slug'
+WHERE root.user_id IN (249716305, 943915310)
   AND root.slug = 'family_contribution_out'
   AND root.active;
 
 UPDATE public.allocation_nodes root
-SET metadata = jsonb_strip_nulls(
-    COALESCE(root.metadata, '{}'::jsonb)
-    || jsonb_build_object('source_category_node_id', source_node.id)
-)
-FROM (
-    VALUES
-        (249716305::bigint, 'cat_16'::text),
-        (943915310::bigint, 'cat_37'::text)
-) AS m(user_id, source_slug)
-JOIN public.allocation_nodes source_node
-  ON source_node.user_id = m.user_id
- AND source_node.slug = m.source_slug
- AND source_node.active
-WHERE root.user_id = m.user_id
+SET metadata = COALESCE(root.metadata, '{}'::jsonb) - 'source_category_node_id'
+WHERE root.user_id IN (249716305, 943915310)
   AND root.slug = 'salary_primary'
   AND root.active;
 
