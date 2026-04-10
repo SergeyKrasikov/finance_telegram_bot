@@ -8,6 +8,8 @@ DECLARE
     has_node_metadata boolean;
     monthly_def text;
     cascade_def text;
+    recursive_def text;
+    binding_helper_def text;
 BEGIN
     SELECT EXISTS (
         SELECT 1
@@ -41,9 +43,20 @@ BEGIN
     SELECT pg_get_functiondef('public.monthly_distribute_cascade(bigint,integer)'::regprocedure)
     INTO cascade_def;
 
-    IF POSITION('metadata' IN cascade_def) = 0
-       OR POSITION('source_category_node_id' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to read salary source from salary_primary metadata';
+    SELECT pg_get_functiondef('public.find_allocation_scenario_binding_node_id(bigint,text,bigint,text)'::regprocedure)
+    INTO binding_helper_def;
+
+    IF POSITION('allocation_scenarios' IN binding_helper_def) = 0
+       OR POSITION('allocation_scenario_node_bindings' IN binding_helper_def) = 0 THEN
+        RAISE EXCEPTION 'Expected scenario binding helper to read allocation_scenarios and allocation_scenario_node_bindings';
+    END IF;
+
+    IF POSITION('find_allocation_scenario_binding_node_id' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to resolve salary source via scenario bindings';
+    END IF;
+
+    IF POSITION('source_category_node_id' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to keep metadata salary source fallback during migration';
     END IF;
 
     IF POSITION('source_legacy_group_id' IN cascade_def) = 0
@@ -63,7 +76,21 @@ BEGIN
         RAISE EXCEPTION 'Expected monthly_distribute_cascade() to keep legacy income category fallback during migration';
     END IF;
 
-    IF POSITION('owner_user_id := COALESCE(_node.user_id, _executor_user_id)' IN cascade_def) = 0 THEN
+    SELECT pg_get_functiondef(
+        'public.allocation_distribute_recursive(bigint,bigint,numeric,varchar,integer,text,bigint[])'::regprocedure
+    )
+    INTO recursive_def;
+
+    IF POSITION('find_allocation_scenario_binding_node_id' IN recursive_def) = 0 THEN
+        RAISE EXCEPTION 'Expected allocation_distribute_recursive() to resolve bridge source via scenario bindings';
+    END IF;
+
+    IF POSITION('metadata.partner_source_category_slug' IN recursive_def) = 0
+       AND POSITION('partner_source_category_slug' IN recursive_def) = 0 THEN
+        RAISE EXCEPTION 'Expected allocation_distribute_recursive() to keep metadata bridge fallback during migration';
+    END IF;
+
+    IF POSITION('owner_user_id := COALESCE(_node.user_id, _executor_user_id)' IN recursive_def) = 0 THEN
         RAISE EXCEPTION 'Expected group-owned report rows to carry branch owner_user_id via executor fallback';
     END IF;
 END $$;

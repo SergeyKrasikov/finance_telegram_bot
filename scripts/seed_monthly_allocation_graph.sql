@@ -277,6 +277,132 @@ WHERE root.user_id = m.user_id
   AND root.slug = 'salary_primary'
   AND root.active;
 
+-- User-owned monthly scenarios and node bindings.
+INSERT INTO public.allocation_scenarios (
+    owner_user_id,
+    scenario_kind,
+    schedule_cron,
+    slug,
+    "name",
+    description,
+    active
+)
+VALUES
+    (249716305::bigint, 'monthly', NULL, 'monthly_default', 'Monthly default', 'Default monthly allocation scenario', true),
+    (943915310::bigint, 'monthly', NULL, 'monthly_default', 'Monthly default', 'Default monthly allocation scenario', true)
+ON CONFLICT DO NOTHING;
+
+UPDATE public.allocation_scenarios
+SET
+    schedule_cron = NULL,
+    "name" = 'Monthly default',
+    description = 'Default monthly allocation scenario',
+    active = true
+WHERE owner_user_id IN (249716305, 943915310)
+  AND scenario_kind = 'monthly'
+  AND slug = 'monthly_default';
+
+DELETE FROM public.allocation_scenario_node_bindings binding
+USING public.allocation_scenarios scenario,
+      public.allocation_nodes root
+WHERE binding.scenario_id = scenario.id
+  AND binding.root_node_id = root.id
+  AND scenario.scenario_kind = 'monthly'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND root.user_id = scenario.owner_user_id
+  AND root.slug IN (
+      'salary_primary',
+      'monthly_income_sources',
+      'extra_income_sources',
+      'free_to_gifts',
+      'debt_reserve',
+      'invest_self_report',
+      'invest_partner_report',
+      'family_contribution_out'
+  )
+  AND binding.binding_kind IN ('branch_source', 'root_target', 'bridge_source');
+
+INSERT INTO public.allocation_scenario_node_bindings (
+    scenario_id,
+    root_node_id,
+    binding_kind,
+    bound_node_id,
+    priority,
+    active,
+    metadata
+)
+SELECT
+    scenario.id,
+    root.id,
+    config.binding_kind,
+    bound.id,
+    100,
+    true,
+    jsonb_build_object('origin', 'seed_monthly_allocation_graph')
+FROM (
+    VALUES
+        (249716305::bigint, 'salary_primary'::text, 'branch_source'::text, 'cat_16'::text),
+        (943915310::bigint, 'salary_primary'::text, 'branch_source'::text, 'cat_37'::text),
+        (249716305::bigint, 'monthly_income_sources'::text, 'root_target'::text, 'cat_16'::text),
+        (943915310::bigint, 'monthly_income_sources'::text, 'root_target'::text, 'cat_37'::text),
+        (249716305::bigint, 'extra_income_sources'::text, 'root_target'::text, 'cat_7'::text),
+        (943915310::bigint, 'extra_income_sources'::text, 'root_target'::text, 'cat_26'::text),
+        (249716305::bigint, 'free_to_gifts'::text, 'root_target'::text, 'cat_7'::text),
+        (943915310::bigint, 'free_to_gifts'::text, 'root_target'::text, 'cat_26'::text),
+        (249716305::bigint, 'debt_reserve'::text, 'root_target'::text, 'cat_28'::text),
+        (943915310::bigint, 'debt_reserve'::text, 'root_target'::text, 'cat_27'::text),
+        (249716305::bigint, 'invest_self_report'::text, 'root_target'::text, 'cat_1'::text),
+        (943915310::bigint, 'invest_self_report'::text, 'root_target'::text, 'cat_22'::text),
+        (249716305::bigint, 'invest_partner_report'::text, 'root_target'::text, 'cat_1'::text),
+        (943915310::bigint, 'invest_partner_report'::text, 'root_target'::text, 'cat_22'::text)
+) AS config(user_id, root_slug, binding_kind, bound_slug)
+JOIN public.allocation_scenarios scenario
+  ON scenario.owner_user_id = config.user_id
+ AND scenario.scenario_kind = 'monthly'
+ AND scenario.slug = 'monthly_default'
+ AND scenario.active
+JOIN public.allocation_nodes root
+  ON root.user_id = config.user_id
+ AND root.slug = config.root_slug
+ AND root.active
+JOIN public.allocation_nodes bound
+  ON bound.user_id = config.user_id
+ AND bound.slug = config.bound_slug
+ AND bound.active;
+
+INSERT INTO public.allocation_scenario_node_bindings (
+    scenario_id,
+    root_node_id,
+    binding_kind,
+    bound_node_id,
+    priority,
+    active,
+    metadata
+)
+SELECT
+    scenario.id,
+    root.id,
+    'bridge_source',
+    partner_source.id,
+    100,
+    true,
+    jsonb_build_object('origin', 'seed_monthly_allocation_graph')
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.slug = 'family_contribution_out'
+ AND root.active
+JOIN public.get_users_id(scenario.owner_user_id) partner
+  ON partner.user_id <> scenario.owner_user_id
+JOIN public.allocation_nodes partner_source
+  ON partner_source.user_id = partner.user_id
+ AND partner_source.slug = 'cat_15'
+ AND partner_source.active
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'monthly_default'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.active;
+
 -- A category can move out of legacy group 4 during cleanup. Keep old shared
 -- common leaves from being preferred over the current user-owned leaf.
 UPDATE public.allocation_nodes an
@@ -338,22 +464,28 @@ INSERT INTO public.allocation_routes (
     active
 )
 SELECT
-    src.id,
-    dst.id,
+    root.id,
+    bound.id,
     1.0,
     'monthly_income_sources -> income bucket',
     true
-FROM (
-    VALUES
-        (249716305::bigint, 'monthly_income_sources'::text, 'cat_16'::text),
-        (943915310::bigint, 'monthly_income_sources'::text, 'cat_37'::text)
-) AS m(user_id, source_slug, target_slug)
-JOIN public.allocation_nodes src
-  ON src.user_id = m.user_id
- AND src.slug = m.source_slug
-JOIN public.allocation_nodes dst
-  ON dst.user_id = m.user_id
- AND dst.slug = m.target_slug
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.slug = 'monthly_income_sources'
+ AND root.active
+JOIN public.allocation_scenario_node_bindings binding
+  ON binding.scenario_id = scenario.id
+ AND binding.root_node_id = root.id
+ AND binding.binding_kind = 'root_target'
+ AND binding.active
+JOIN public.allocation_nodes bound
+  ON bound.id = binding.bound_node_id
+ AND bound.active
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'monthly_default'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.active
 ON CONFLICT DO NOTHING;
 
 -- extra_income_sources -> canonical extra/gift bucket
@@ -365,22 +497,28 @@ INSERT INTO public.allocation_routes (
     active
 )
 SELECT
-    src.id,
-    dst.id,
+    root.id,
+    bound.id,
     1.0,
     'extra_income_sources -> extra income bucket',
     true
-FROM (
-    VALUES
-        (249716305::bigint, 'extra_income_sources'::text, 'cat_7'::text),
-        (943915310::bigint, 'extra_income_sources'::text, 'cat_26'::text)
-) AS m(user_id, source_slug, target_slug)
-JOIN public.allocation_nodes src
-  ON src.user_id = m.user_id
- AND src.slug = m.source_slug
-JOIN public.allocation_nodes dst
-  ON dst.user_id = m.user_id
- AND dst.slug = m.target_slug
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.slug = 'extra_income_sources'
+ AND root.active
+JOIN public.allocation_scenario_node_bindings binding
+  ON binding.scenario_id = scenario.id
+ AND binding.root_node_id = root.id
+ AND binding.binding_kind = 'root_target'
+ AND binding.active
+JOIN public.allocation_nodes bound
+  ON bound.id = binding.bound_node_id
+ AND bound.active
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'monthly_default'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.active
 ON CONFLICT DO NOTHING;
 
 -- free_to_gifts -> canonical extra/gift bucket
@@ -392,22 +530,24 @@ INSERT INTO public.allocation_routes (
     active
 )
 SELECT
-    src.id,
-    dst.id,
+    root.id,
+    bound.id,
     p.percent,
     'free_to_gifts -> extra income bucket',
     true
-FROM (
-    VALUES
-        (249716305::bigint, 'free_to_gifts'::text, 'cat_7'::text),
-        (943915310::bigint, 'free_to_gifts'::text, 'cat_26'::text)
-) AS m(user_id, source_slug, target_slug)
-JOIN public.allocation_nodes src
-  ON src.user_id = m.user_id
- AND src.slug = m.source_slug
-JOIN public.allocation_nodes dst
-  ON dst.user_id = m.user_id
- AND dst.slug = m.target_slug
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.slug = 'free_to_gifts'
+ AND root.active
+JOIN public.allocation_scenario_node_bindings binding
+  ON binding.scenario_id = scenario.id
+ AND binding.root_node_id = root.id
+ AND binding.binding_kind = 'root_target'
+ AND binding.active
+JOIN public.allocation_nodes bound
+  ON bound.id = binding.bound_node_id
+ AND bound.active
 JOIN (
     SELECT
         ccg.users_id AS user_id,
@@ -419,8 +559,12 @@ JOIN (
       AND ccg.category_groyps_id = 7
     GROUP BY ccg.users_id
 ) p
-  ON p.user_id = m.user_id
+  ON p.user_id = scenario.owner_user_id
  AND p.percent > 0
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'monthly_default'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.active
 ON CONFLICT DO NOTHING;
 -- debt_reserve -> canonical reserve bucket
 INSERT INTO public.allocation_routes (
@@ -431,22 +575,28 @@ INSERT INTO public.allocation_routes (
     active
 )
 SELECT
-    src.id,
-    dst.id,
+    root.id,
+    bound.id,
     1.0,
     'debt_reserve -> reserve bucket',
     true
-FROM (
-    VALUES
-        (249716305::bigint, 'debt_reserve'::text, 'cat_28'::text),
-        (943915310::bigint, 'debt_reserve'::text, 'cat_27'::text)
-) AS m(user_id, source_slug, target_slug)
-JOIN public.allocation_nodes src
-  ON src.user_id = m.user_id
- AND src.slug = m.source_slug
-JOIN public.allocation_nodes dst
-  ON dst.user_id = m.user_id
- AND dst.slug = m.target_slug
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.slug = 'debt_reserve'
+ AND root.active
+JOIN public.allocation_scenario_node_bindings binding
+  ON binding.scenario_id = scenario.id
+ AND binding.root_node_id = root.id
+ AND binding.binding_kind = 'root_target'
+ AND binding.active
+JOIN public.allocation_nodes bound
+  ON bound.id = binding.bound_node_id
+ AND bound.active
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'monthly_default'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.active
 ON CONFLICT DO NOTHING;
 
 -- investment report nodes -> canonical own investment leaves
@@ -458,22 +608,28 @@ INSERT INTO public.allocation_routes (
     active
 )
 SELECT
-    src.id,
-    dst.id,
+    root.id,
+    bound.id,
     1.0,
     'invest_self_report -> own investment leaf',
     true
-FROM (
-    VALUES
-        (249716305::bigint, 'invest_self_report'::text, 'cat_1'::text),
-        (943915310::bigint, 'invest_self_report'::text, 'cat_22'::text)
-) AS m(user_id, source_slug, target_slug)
-JOIN public.allocation_nodes src
-  ON src.user_id = m.user_id
- AND src.slug = m.source_slug
-JOIN public.allocation_nodes dst
-  ON dst.user_id = m.user_id
- AND dst.slug = m.target_slug
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.slug = 'invest_self_report'
+ AND root.active
+JOIN public.allocation_scenario_node_bindings binding
+  ON binding.scenario_id = scenario.id
+ AND binding.root_node_id = root.id
+ AND binding.binding_kind = 'root_target'
+ AND binding.active
+JOIN public.allocation_nodes bound
+  ON bound.id = binding.bound_node_id
+ AND bound.active
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'monthly_default'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.active
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (
@@ -484,22 +640,28 @@ INSERT INTO public.allocation_routes (
     active
 )
 SELECT
-    src.id,
-    dst.id,
+    root.id,
+    bound.id,
     1.0,
     'invest_partner_report -> partner investment leaf',
     true
-FROM (
-    VALUES
-        (249716305::bigint, 'invest_partner_report'::text, 'cat_1'::text),
-        (943915310::bigint, 'invest_partner_report'::text, 'cat_22'::text)
-) AS m(user_id, source_slug, target_slug)
-JOIN public.allocation_nodes src
-  ON src.user_id = m.user_id
- AND src.slug = m.source_slug
-JOIN public.allocation_nodes dst
-  ON dst.user_id = m.user_id
- AND dst.slug = m.target_slug
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.slug = 'invest_partner_report'
+ AND root.active
+JOIN public.allocation_scenario_node_bindings binding
+  ON binding.scenario_id = scenario.id
+ AND binding.root_node_id = root.id
+ AND binding.binding_kind = 'root_target'
+ AND binding.active
+JOIN public.allocation_nodes bound
+  ON bound.id = binding.bound_node_id
+ AND bound.active
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'monthly_default'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.active
 ON CONFLICT DO NOTHING;
 
 -- salary_primary split
@@ -536,30 +698,33 @@ ON CONFLICT DO NOTHING;
 -- partner bridge and split
 INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, active)
 SELECT
-    src.id,
+    root.id,
     dst.id,
     1.0,
     'family_contribution_out -> partner family_contribution_in',
     true
--- Derive the partner from the owner of the configured partner source leaf
--- inside the same household instead of duplicating partner_user_id in metadata.
-FROM public.allocation_nodes src
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.slug = 'family_contribution_out'
+ AND root.active
+JOIN public.allocation_scenario_node_bindings binding
+  ON binding.scenario_id = scenario.id
+ AND binding.root_node_id = root.id
+ AND binding.binding_kind = 'bridge_source'
+ AND binding.active
 JOIN public.allocation_nodes source_node
-  ON source_node.slug = NULLIF(src.metadata->>'partner_source_category_slug', '')
+  ON source_node.id = binding.bound_node_id
  AND source_node.active
  AND source_node.user_id IS NOT NULL
- AND source_node.user_id IN (
-     SELECT household.user_id
-     FROM public.get_users_id(src.user_id) household
-     WHERE household.user_id <> src.user_id
- )
 JOIN public.allocation_nodes dst
   ON dst.user_id = source_node.user_id
  AND dst.slug = 'family_contribution_in'
  AND dst.active
-WHERE src.user_id IN (249716305, 943915310)
-  AND src.slug = 'family_contribution_out'
-  AND src.active
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.slug = 'monthly_default'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.active
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, active)

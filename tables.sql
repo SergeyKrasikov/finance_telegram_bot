@@ -141,6 +141,39 @@ constraint allocation_postings_direction_check
     check (from_node_id is not null or to_node_id is not null)
 );
 
+create table if not exists public.allocation_scenarios (
+id bigserial primary key,
+owner_user_id bigint references users(id),
+owner_user_group_id bigint references public.user_groups(id),
+scenario_kind varchar(32) not null,
+schedule_cron varchar(100),
+slug varchar(100) not null,
+"name" varchar(100) not null,
+description text,
+active boolean not null default true,
+metadata jsonb not null default '{}'::jsonb,
+created_at timestamptz not null default now(),
+constraint allocation_scenarios_owner_check
+    check ((owner_user_id is not null) <> (owner_user_group_id is not null)),
+constraint allocation_scenarios_kind_check
+    check (length(trim(scenario_kind)) > 0),
+constraint allocation_scenarios_schedule_cron_check
+    check (schedule_cron is null or length(trim(schedule_cron)) > 0)
+);
+
+create table if not exists public.allocation_scenario_node_bindings (
+id bigserial primary key,
+scenario_id bigint not null references public.allocation_scenarios(id) on delete cascade,
+root_node_id bigint not null references public.allocation_nodes(id) on delete cascade,
+binding_kind varchar(32) not null,
+bound_node_id bigint not null references public.allocation_nodes(id) on delete cascade,
+priority integer not null default 100,
+active boolean not null default true,
+metadata jsonb not null default '{}'::jsonb,
+constraint allocation_scenario_node_bindings_kind_check
+    check (length(trim(binding_kind)) > 0)
+);
+
 -- Compatibility upgrade for existing databases with varchar(3) currency columns
 DO $$
 BEGIN
@@ -209,3 +242,22 @@ CREATE INDEX IF NOT EXISTS idx_allocation_postings_to_node ON public.allocation_
 CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_postings_legacy_cash_flow_id
     ON public.allocation_postings ((metadata->>'legacy_cash_flow_id'))
     WHERE metadata ? 'legacy_cash_flow_id';
+CREATE INDEX IF NOT EXISTS idx_allocation_scenarios_owner_user
+    ON public.allocation_scenarios (owner_user_id, scenario_kind, active)
+    WHERE owner_user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_allocation_scenarios_owner_group
+    ON public.allocation_scenarios (owner_user_group_id, scenario_kind, active)
+    WHERE owner_user_group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_allocation_scenarios_schedule
+    ON public.allocation_scenarios (active, schedule_cron)
+    WHERE schedule_cron IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_scenarios_user_kind_slug
+    ON public.allocation_scenarios (owner_user_id, scenario_kind, slug)
+    WHERE owner_user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_scenarios_group_kind_slug
+    ON public.allocation_scenarios (owner_user_group_id, scenario_kind, slug)
+    WHERE owner_user_group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_allocation_scenario_bindings_lookup
+    ON public.allocation_scenario_node_bindings (scenario_id, root_node_id, binding_kind, priority DESC, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_scenario_bindings
+    ON public.allocation_scenario_node_bindings (scenario_id, root_node_id, binding_kind, bound_node_id);

@@ -44,6 +44,7 @@ DROP FUNCTION IF EXISTS public.get_currency_v2();
 DROP FUNCTION IF EXISTS public.get_all_users_id();
 DROP FUNCTION IF EXISTS public.is_technical_cashflow_description(text);
 DROP FUNCTION IF EXISTS public.get_users_id(bigint);
+DROP FUNCTION IF EXISTS public.find_allocation_scenario_binding_node_id(bigint, text, bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_legacy_category_id(bigint, text);
@@ -499,6 +500,44 @@ $function$;
 -- Возвращает id активной allocation-ноды пользователя по slug.
 -- Используется только в переходной monthly-логике:
 -- по slug ищем новую root-ноду, если она уже собрана для конкретной ветки.
+CREATE OR REPLACE FUNCTION public.find_allocation_scenario_binding_node_id(
+    _user_id bigint,
+    _scenario_kind text,
+    _root_node_id bigint,
+    _binding_kind text
+)
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT binding.bound_node_id
+    FROM public.allocation_scenarios scenario
+    JOIN public.allocation_scenario_node_bindings binding
+      ON binding.scenario_id = scenario.id
+     AND binding.active
+    WHERE scenario.active
+      AND scenario.scenario_kind = _scenario_kind
+      AND binding.root_node_id = _root_node_id
+      AND binding.binding_kind = _binding_kind
+      AND (
+          scenario.owner_user_id = _user_id
+          OR scenario.owner_user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _user_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN scenario.owner_user_id = _user_id THEN 0 ELSE 1 END,
+        binding.priority DESC,
+        binding.id
+    LIMIT 1;
+$function$;
+
+
+-- Используется только в переходной monthly-логике:
+-- по slug ищем новую root-ноду, если она уже собрана для конкретной ветки.
 CREATE OR REPLACE FUNCTION public.find_allocation_node_id(_user_id bigint, _slug text)
  RETURNS bigint
  LANGUAGE sql
@@ -946,10 +985,20 @@ BEGIN
             _user_id;
     END IF;
 
-    SELECT NULLIF(salary_root.metadata->>'source_category_node_id', '')::bigint
-    INTO _income_source_node_id
-    FROM public.allocation_nodes salary_root
-    WHERE salary_root.id = _salary_primary_root_id;
+    SELECT public.find_allocation_scenario_binding_node_id(
+        _user_id,
+        'monthly',
+        _salary_primary_root_id,
+        'branch_source'
+    )
+    INTO _income_source_node_id;
+
+    IF _income_source_node_id IS NULL THEN
+        SELECT NULLIF(salary_root.metadata->>'source_category_node_id', '')::bigint
+        INTO _income_source_node_id
+        FROM public.allocation_nodes salary_root
+        WHERE salary_root.id = _salary_primary_root_id;
+    END IF;
 
     IF _income_source_node_id IS NOT NULL THEN
         SELECT *
@@ -1015,7 +1064,7 @@ BEGIN
 
     IF _income_source_node_id IS NULL AND _income_category IS NULL THEN
         RAISE EXCEPTION
-            'salary_primary metadata.source_category_node_id is required for user %',
+            'salary_primary branch_source binding or metadata.source_category_node_id is required for user %',
             _user_id;
     ELSIF _income_source_node_id IS NULL THEN
         RAISE EXCEPTION
@@ -1332,39 +1381,72 @@ BEGIN
         -- Partner bridge source is resolved from the current bridge node config
         -- plus the owner of the downstream family_contribution_in branch.
         IF _target_node.slug = 'family_contribution_in' THEN
-            _partner_source_category_slug := NULLIF(_node.metadata->>'partner_source_category_slug', '');
+            SELECT public.find_allocation_scenario_binding_node_id(
+                _executor_user_id,
+                'monthly',
+                _node.id,
+                'bridge_source'
+            )
+            INTO _next_source_category_node_id;
 
-            IF _partner_source_category_slug IS NULL THEN
-                RAISE EXCEPTION
-                    'family_contribution_out node % must define metadata.partner_source_category_slug',
-                    _node.id;
-            END IF;
+            IF _next_source_category_node_id IS NOT NULL THEN
+                SELECT legacy_category_id
+                INTO _next_category_id_from
+                FROM public.allocation_nodes
+                WHERE id = _next_source_category_node_id
+                  AND active
+                  AND (
+                      user_id = _next_executor_user_id
+                      OR user_group_id IN (
+                          SELECT ugm.user_group_id
+                          FROM public.user_group_memberships ugm
+                          WHERE ugm.user_id = _next_executor_user_id
+                            AND ugm.active
+                      )
+                  );
 
-            SELECT id, legacy_category_id
-            INTO _next_source_category_node_id, _next_category_id_from
-            FROM public.allocation_nodes
-            WHERE slug = _partner_source_category_slug
-              AND active
-              AND (
-                  user_id = _next_executor_user_id
-                  OR user_group_id IN (
-                      SELECT ugm.user_group_id
-                      FROM public.user_group_memberships ugm
-                      WHERE ugm.user_id = _next_executor_user_id
-                        AND ugm.active
+                IF NOT FOUND THEN
+                    RAISE EXCEPTION
+                        'family_contribution_in target node % cannot use bridge_source binding node % for user %',
+                        _target_node.id,
+                        _next_source_category_node_id,
+                        _next_executor_user_id;
+                END IF;
+            ELSE
+                _partner_source_category_slug := NULLIF(_node.metadata->>'partner_source_category_slug', '');
+
+                IF _partner_source_category_slug IS NULL THEN
+                    RAISE EXCEPTION
+                        'family_contribution_out node % must define bridge_source binding or metadata.partner_source_category_slug',
+                        _node.id;
+                END IF;
+
+                SELECT id, legacy_category_id
+                INTO _next_source_category_node_id, _next_category_id_from
+                FROM public.allocation_nodes
+                WHERE slug = _partner_source_category_slug
+                  AND active
+                  AND (
+                      user_id = _next_executor_user_id
+                      OR user_group_id IN (
+                          SELECT ugm.user_group_id
+                          FROM public.user_group_memberships ugm
+                          WHERE ugm.user_id = _next_executor_user_id
+                            AND ugm.active
+                      )
                   )
-              )
-            ORDER BY
-                CASE WHEN user_id = _next_executor_user_id THEN 0 ELSE 1 END,
-                id
-            LIMIT 1;
+                ORDER BY
+                    CASE WHEN user_id = _next_executor_user_id THEN 0 ELSE 1 END,
+                    id
+                LIMIT 1;
 
-            IF NOT FOUND THEN
-                RAISE EXCEPTION
-                    'family_contribution_in target node % cannot resolve partner source slug % for user %',
-                    _target_node.id,
-                    _partner_source_category_slug,
-                    _next_executor_user_id;
+                IF NOT FOUND THEN
+                    RAISE EXCEPTION
+                        'family_contribution_in target node % cannot resolve partner source slug % for user %',
+                        _target_node.id,
+                        _partner_source_category_slug,
+                        _next_executor_user_id;
+                END IF;
             END IF;
         ELSE
             _next_category_id_from := _category_id_from;
