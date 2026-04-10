@@ -1190,6 +1190,7 @@ DECLARE
     _next_executor_user_id bigint;
     _next_category_id_from integer;
     _next_source_category_node_id bigint;
+    _partner_source_category_slug text;
 BEGIN
     IF _amount IS NULL OR _amount <= 0 THEN
         RETURN;
@@ -1328,20 +1329,21 @@ BEGIN
         -- а не всегда от исходного executor_user_id.
         _next_executor_user_id := COALESCE(_target_node.user_id, _executor_user_id);
 
-        -- Partner bridge source is route-level graph config, not a hard-coded legacy category.
+        -- Partner bridge source is resolved from the current bridge node config
+        -- plus the owner of the downstream family_contribution_in branch.
         IF _target_node.slug = 'family_contribution_in' THEN
-            _next_source_category_node_id := NULLIF(_route.metadata->>'source_category_node_id', '')::bigint;
+            _partner_source_category_slug := NULLIF(_node.metadata->>'partner_source_category_slug', '');
 
-            IF _next_source_category_node_id IS NULL THEN
+            IF _partner_source_category_slug IS NULL THEN
                 RAISE EXCEPTION
-                    'family_contribution_in route % must define metadata.source_category_node_id',
-                    _route.id;
+                    'family_contribution_out node % must define metadata.partner_source_category_slug',
+                    _node.id;
             END IF;
 
-            SELECT legacy_category_id
-            INTO _next_category_id_from
+            SELECT id, legacy_category_id
+            INTO _next_source_category_node_id, _next_category_id_from
             FROM public.allocation_nodes
-            WHERE id = _next_source_category_node_id
+            WHERE slug = _partner_source_category_slug
               AND active
               AND (
                   user_id = _next_executor_user_id
@@ -1351,13 +1353,17 @@ BEGIN
                       WHERE ugm.user_id = _next_executor_user_id
                         AND ugm.active
                   )
-              );
+              )
+            ORDER BY
+                CASE WHEN user_id = _next_executor_user_id THEN 0 ELSE 1 END,
+                id
+            LIMIT 1;
 
             IF NOT FOUND THEN
                 RAISE EXCEPTION
-                    'family_contribution_in route % source category node % is not available for user %',
-                    _route.id,
-                    _next_source_category_node_id,
+                    'family_contribution_in target node % cannot resolve partner source slug % for user %',
+                    _target_node.id,
+                    _partner_source_category_slug,
                     _next_executor_user_id;
             END IF;
         ELSE

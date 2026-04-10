@@ -69,9 +69,9 @@
   - `monthly_distribute_cascade()` больше не передаёт legacy source category id в `allocation_distribute(...)`; lower-level функция выводит его из source node только для compatibility metadata
   - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots, без hard-coded monthly users и legacy income category id; source leaf для `salary_primary` хранится в `allocation_nodes.metadata.source_category_node_id`
   - prep/reserve roots уже хранят legacy group bridge в metadata, а `monthly_distribute_cascade()` больше не hard-code'ит group ids `11/12/8/15`
-  - `family_contribution_out` уже хранит partner bridge config в metadata (`partner_user_id`, `partner_source_category_slug`), и seed больше не собирает bridge route из жёстко вшитой пары user ids + `cat_15`
+  - `family_contribution_out` уже хранит только `partner_source_category_slug`, а seed выводит partner bridge route по owner этой leaf-ноды внутри household, без жёстко вшитой пары user ids + `cat_15`
   - `monthly_distribute_allocation(...)` уже поддерживает явный source allocation node без обязательного legacy category id
-  - partner bridge уже берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id
+  - partner bridge уже резолвит source leaf по `family_contribution_out.metadata.partner_source_category_slug` и owner целевой ветки, а не из hard-coded legacy category id
   - graph-native leaf-ноды уже могут писать `allocation_postings` без `legacy_category_id`
   - `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger

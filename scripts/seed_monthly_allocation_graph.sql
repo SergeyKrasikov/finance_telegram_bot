@@ -247,15 +247,14 @@ UPDATE public.allocation_nodes root
 SET metadata = jsonb_strip_nulls(
     COALESCE(root.metadata, '{}'::jsonb)
     || jsonb_build_object(
-        'partner_user_id', config.partner_user_id,
         'partner_source_category_slug', config.partner_source_category_slug
     )
 )
 FROM (
     VALUES
-        (249716305::bigint, 943915310::bigint, 'cat_15'::text),
-        (943915310::bigint, 249716305::bigint, 'cat_15'::text)
-) AS config(user_id, partner_user_id, partner_source_category_slug)
+        (249716305::bigint, 'cat_15'::text),
+        (943915310::bigint, 'cat_15'::text)
+) AS config(user_id, partner_source_category_slug)
 WHERE root.user_id = config.user_id
   AND root.slug = 'family_contribution_out'
   AND root.active;
@@ -535,24 +534,32 @@ WHERE src.user_id IN (249716305, 943915310)
 ON CONFLICT DO NOTHING;
 
 -- partner bridge and split
-INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, metadata, active)
+INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, active)
 SELECT
     src.id,
     dst.id,
     1.0,
     'family_contribution_out -> partner family_contribution_in',
-    jsonb_build_object('source_category_node_id', source_node.id),
     true
-JOIN public.allocation_nodes src
-  ON src.user_id IN (249716305, 943915310)
- AND src.slug = 'family_contribution_out'
-JOIN public.allocation_nodes dst
-  ON dst.user_id = NULLIF(src.metadata->>'partner_user_id', '')::bigint
- AND dst.slug = 'family_contribution_in'
+-- Derive the partner from the owner of the configured partner source leaf
+-- inside the same household instead of duplicating partner_user_id in metadata.
+FROM public.allocation_nodes src
 JOIN public.allocation_nodes source_node
-  ON source_node.user_id = NULLIF(src.metadata->>'partner_user_id', '')::bigint
- AND source_node.slug = NULLIF(src.metadata->>'partner_source_category_slug', '')
+  ON source_node.slug = NULLIF(src.metadata->>'partner_source_category_slug', '')
  AND source_node.active
+ AND source_node.user_id IS NOT NULL
+ AND source_node.user_id IN (
+     SELECT household.user_id
+     FROM public.get_users_id(src.user_id) household
+     WHERE household.user_id <> src.user_id
+ )
+JOIN public.allocation_nodes dst
+  ON dst.user_id = source_node.user_id
+ AND dst.slug = 'family_contribution_in'
+ AND dst.active
+WHERE src.user_id IN (249716305, 943915310)
+  AND src.slug = 'family_contribution_out'
+  AND src.active
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, active)

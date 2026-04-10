@@ -94,6 +94,11 @@ SELECT
 FROM user_groups
 WHERE slug = 'test_cascade_group';
 
+UPDATE allocation_nodes
+SET metadata = jsonb_build_object('partner_source_category_slug', 'test_cascade_family_source')
+WHERE user_id = 906001
+  AND slug = 'test_cascade_family_root';
+
 INSERT INTO allocation_routes(source_node_id, target_node_id, percent, description)
 SELECT src.id, dst.id, 0.40, 'root to stage'
 FROM allocation_nodes src
@@ -137,20 +142,16 @@ JOIN allocation_nodes dst
 WHERE src.user_id = 906001
   AND src.slug = 'test_cascade_stage';
 
-INSERT INTO allocation_routes(source_node_id, target_node_id, percent, description, metadata)
+INSERT INTO allocation_routes(source_node_id, target_node_id, percent, description)
 SELECT
     src.id,
     dst.id,
     1,
-    'family bridge route',
-    jsonb_build_object('source_category_node_id', source_node.id)
+    'family bridge route'
 FROM allocation_nodes src
 JOIN allocation_nodes dst
   ON dst.user_id = 906002
  AND dst.slug = 'family_contribution_in'
-JOIN allocation_nodes source_node
-  ON source_node.user_id = 906002
- AND source_node.slug = 'test_cascade_family_source'
 WHERE src.user_id = 906001
   AND src.slug = 'test_cascade_family_root';
 
@@ -341,7 +342,7 @@ BEGIN
       AND from_node_id = family_source_node_id;
 
     IF family_source_rows <> 1 THEN
-        RAISE EXCEPTION 'Expected family bridge row debited from route metadata source node, got %', family_source_rows;
+        RAISE EXCEPTION 'Expected family bridge row debited from source node metadata config, got %', family_source_rows;
     END IF;
 
     SELECT id
