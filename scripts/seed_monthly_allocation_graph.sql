@@ -246,6 +246,23 @@ WHERE root.user_id IN (249716305, 943915310)
 UPDATE public.allocation_nodes root
 SET metadata = jsonb_strip_nulls(
     COALESCE(root.metadata, '{}'::jsonb)
+    || jsonb_build_object(
+        'partner_user_id', config.partner_user_id,
+        'partner_source_category_slug', config.partner_source_category_slug
+    )
+)
+FROM (
+    VALUES
+        (249716305::bigint, 943915310::bigint, 'cat_15'::text),
+        (943915310::bigint, 249716305::bigint, 'cat_15'::text)
+) AS config(user_id, partner_user_id, partner_source_category_slug)
+WHERE root.user_id = config.user_id
+  AND root.slug = 'family_contribution_out'
+  AND root.active;
+
+UPDATE public.allocation_nodes root
+SET metadata = jsonb_strip_nulls(
+    COALESCE(root.metadata, '{}'::jsonb)
     || jsonb_build_object('source_category_node_id', source_node.id)
 )
 FROM (
@@ -526,20 +543,16 @@ SELECT
     'family_contribution_out -> partner family_contribution_in',
     jsonb_build_object('source_category_node_id', source_node.id),
     true
-FROM (
-    VALUES
-        (249716305::bigint, 943915310::bigint),
-        (943915310::bigint, 249716305::bigint)
-) AS p(src_user_id, dst_user_id)
 JOIN public.allocation_nodes src
-  ON src.user_id = p.src_user_id
+  ON src.user_id IN (249716305, 943915310)
  AND src.slug = 'family_contribution_out'
 JOIN public.allocation_nodes dst
-  ON dst.user_id = p.dst_user_id
+  ON dst.user_id = NULLIF(src.metadata->>'partner_user_id', '')::bigint
  AND dst.slug = 'family_contribution_in'
 JOIN public.allocation_nodes source_node
-  ON source_node.user_id = p.dst_user_id
- AND source_node.slug = 'cat_15'
+  ON source_node.user_id = NULLIF(src.metadata->>'partner_user_id', '')::bigint
+ AND source_node.slug = NULLIF(src.metadata->>'partner_source_category_slug', '')
+ AND source_node.active
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.allocation_routes (source_node_id, target_node_id, percent, description, active)

@@ -365,6 +365,7 @@ graph TD
 - `monthly()` больше не содержит hard-coded monthly users и income category id; entrypoint запускает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots.
   `salary_primary` берёт стартовую income leaf из `allocation_nodes.metadata.source_category_node_id`.
   Prep/reserve roots читают legacy group bridge из своей metadata (`source_legacy_group_id`, `spend_legacy_group_id`, `personal_legacy_group_id`), а не из hard-coded условий в function body.
+  `family_contribution_out` хранит partner bridge config в metadata (`partner_user_id`, `partner_source_category_slug`), а route seed собирает bridge оттуда.
   Старый параметр `_income_category` в `monthly_distribute_cascade()` сохранён как fallback на время миграции.
 - Internal helper `monthly_distribute_allocation(...)` уже может принимать явный `source_category_node_id` без обязательного legacy category id.
 - Partner bridge `family_contribution_out -> family_contribution_in` берёт source leaf из `allocation_routes.metadata.source_category_node_id`, а не из hard-coded legacy category id.
