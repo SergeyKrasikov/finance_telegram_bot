@@ -1229,7 +1229,7 @@ BEGIN
     -- Report-сумма считается по входящей сумме в ноду.
     -- Это позволяет включать в отчет как промежуточные report-ноды, так и конечные листья.
     IF _node.include_in_report THEN
-        owner_user_id := _node.user_id;
+        owner_user_id := COALESCE(_node.user_id, _executor_user_id);
         owner_user_group_id := _node.user_group_id;
         report_node_id := _node.id;
         report_node_slug := _node.slug;
@@ -1719,13 +1719,9 @@ $function$;
 
 
 -- Агрегирует report rows месячного каскада в итоговый JSON monthly-метрик.
--- Для Telegram-отчёта сохраняем split-контракт старой monthly_distribute():
--- 1) `общие_категории` — доля текущего пользователя;
--- 2) `second_user_pay` — доля партнёра, которая потом будет досуммирована в Python-агрегации;
--- 3) `investition_second` — инвестиции партнёра из семейного взноса.
--- Пока граф не несёт отдельный report-node для partner-common, второй кусок общих категорий
--- восстанавливаем как остаток partner-ветки:
--- family_contribution - invest_partner - все partner-owned leaf-суммы.
+-- Shared/group-owned report rows несут owner_user_id текущей ветки,
+-- поэтому общие категории теперь считаются напрямую по owner_user_id,
+-- без legacy-style остаточной формулы "family - invest - partner leafs".
 CREATE OR REPLACE FUNCTION public.monthly_allocation_report_metrics(
     _user_id bigint,
     _second_user_id bigint,
@@ -1736,10 +1732,8 @@ CREATE OR REPLACE FUNCTION public.monthly_allocation_report_metrics(
 AS $function$
 DECLARE
     _family_contribution numeric := 0;
-    _common_total numeric := 0;
     _invest_self numeric := 0;
     _invest_partner numeric := 0;
-    _partner_leaf_total numeric := 0;
     _partner_common numeric := 0;
     _self_common numeric := 0;
 BEGIN
@@ -1757,20 +1751,6 @@ BEGIN
         WHERE an.active
           AND an.user_group_id IS NOT NULL
           AND an.slug ~ '^cat_[0-9]+$'
-    ),
-    second_invest_slugs AS (
-        SELECT DISTINCT target.slug
-        FROM public.allocation_nodes source
-        JOIN public.allocation_routes ar
-          ON ar.source_node_id = source.id
-         AND ar.active
-        JOIN public.allocation_nodes target
-          ON target.id = ar.target_node_id
-        WHERE source.user_id = _second_user_id
-          AND source.active
-          AND source.slug IN ('invest_self_report', 'invest_partner_report')
-          AND target.active
-          AND target.slug ~ '^cat_[0-9]+$'
     )
     SELECT
         COALESCE(SUM(amount) FILTER (
@@ -1778,7 +1758,8 @@ BEGIN
               AND slug IN ('family_contribution_out', 'family_contribution_report')
         ), 0),
         COALESCE(SUM(amount) FILTER (
-            WHERE owner_user_group_id IS NOT NULL
+            WHERE owner_user_id = _user_id
+              AND owner_user_group_id IS NOT NULL
               AND slug IN (SELECT slug FROM common_slugs)
         ), 0),
         COALESCE(SUM(amount) FILTER (
@@ -1791,23 +1772,16 @@ BEGIN
         ), 0),
         COALESCE(SUM(amount) FILTER (
             WHERE owner_user_id = _second_user_id
-              AND slug ~ '^cat_[0-9]+$'
-              AND slug NOT IN (SELECT slug FROM common_slugs)
-              AND slug NOT IN (SELECT slug FROM second_invest_slugs)
+              AND owner_user_group_id IS NOT NULL
+              AND slug IN (SELECT slug FROM common_slugs)
         ), 0)
     INTO
         _family_contribution,
-        _common_total,
+        _self_common,
         _invest_self,
         _invest_partner,
-        _partner_leaf_total
+        _partner_common
     FROM rows;
-
-    _partner_common := LEAST(
-        _common_total,
-        GREATEST(_family_contribution - _invest_partner - _partner_leaf_total, 0)
-    );
-    _self_common := GREATEST(_common_total - _partner_common, 0);
 
     RETURN jsonb_build_object(
         'семейный_взнос', _family_contribution,

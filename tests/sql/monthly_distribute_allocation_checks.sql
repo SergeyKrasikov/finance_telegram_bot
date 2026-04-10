@@ -185,6 +185,7 @@ DECLARE
     posted_partner numeric;
     posted_common numeric;
     source_balance numeric;
+    common_owner_user_id bigint;
     posted_rows integer;
     linked_legacy_rows integer;
 BEGIN
@@ -237,12 +238,14 @@ BEGIN
         MAX(CASE WHEN report_row.value ->> 'slug' = 'test_monthly_stage' THEN (report_row.value ->> 'amount')::numeric END),
         MAX(CASE WHEN report_row.value ->> 'slug' = 'test_monthly_personal' THEN (report_row.value ->> 'amount')::numeric END),
         MAX(CASE WHEN report_row.value ->> 'slug' = 'test_monthly_partner' THEN (report_row.value ->> 'amount')::numeric END),
-        MAX(CASE WHEN report_row.value ->> 'slug' = 'test_monthly_common' THEN (report_row.value ->> 'amount')::numeric END)
+        MAX(CASE WHEN report_row.value ->> 'slug' = 'test_monthly_common' THEN (report_row.value ->> 'amount')::numeric END),
+        MAX(CASE WHEN report_row.value ->> 'slug' = 'test_monthly_common' THEN (report_row.value ->> 'owner_user_id')::bigint END)
     INTO
         stage_amount,
         personal_amount,
         partner_amount,
-        common_amount
+        common_amount,
+        common_owner_user_id
     FROM jsonb_array_elements(out -> 'report') AS report_row(value);
 
     IF abs(stage_amount - 40) > 1e-9 THEN
@@ -259,6 +262,10 @@ BEGIN
 
     IF abs(common_amount - 80) > 1e-9 THEN
         RAISE EXCEPTION 'Expected common report amount 80, got %', common_amount;
+    END IF;
+
+    IF common_owner_user_id <> 906011 THEN
+        RAISE EXCEPTION 'Expected shared common report row to carry current branch owner_user_id 906011, got %', common_owner_user_id;
     END IF;
 
     SELECT COALESCE(SUM(value), 0)

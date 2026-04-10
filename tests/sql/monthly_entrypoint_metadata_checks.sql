@@ -62,6 +62,10 @@ BEGIN
     IF POSITION('find_allocation_category_node_id_by_legacy' IN cascade_def) = 0 THEN
         RAISE EXCEPTION 'Expected monthly_distribute_cascade() to keep legacy income category fallback during migration';
     END IF;
+
+    IF POSITION('owner_user_id := COALESCE(_node.user_id, _executor_user_id)' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected group-owned report rows to carry branch owner_user_id via executor fallback';
+    END IF;
 END $$;
 
 ROLLBACK;
