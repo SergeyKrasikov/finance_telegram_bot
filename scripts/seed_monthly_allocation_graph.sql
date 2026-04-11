@@ -382,11 +382,11 @@ INSERT INTO public.allocation_nodes (
 )
 SELECT
     ug.shared_group_id,
-    CONCAT('cat_', common_ids.categories_id),
+    CONCAT('cat_', ug.categories_id),
     c."name",
-    CONCAT('Shared common monthly leaf cat_', common_ids.categories_id),
+    CONCAT('Shared common monthly leaf cat_', ug.categories_id),
     'expense',
-    common_ids.categories_id,
+    ug.categories_id,
     true,
     true,
     true
