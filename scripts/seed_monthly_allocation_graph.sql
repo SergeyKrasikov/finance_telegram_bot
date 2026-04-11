@@ -20,13 +20,77 @@ BEGIN
     END IF;
 END $$;
 
--- Shared group for common monthly leaves.
-INSERT INTO public.user_groups (slug, "name", description)
+CREATE TEMP TABLE tmp_monthly_seed_users (
+    user_id bigint PRIMARY KEY,
+    scenario_slug varchar(100) NOT NULL,
+    scenario_name varchar(100) NOT NULL,
+    scenario_description text NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO tmp_monthly_seed_users(user_id, scenario_slug, scenario_name, scenario_description)
+VALUES
+    (249716305::bigint, 'monthly_default', 'Monthly default', 'Default monthly allocation scenario'),
+    (943915310::bigint, 'monthly_default', 'Monthly default', 'Default monthly allocation scenario');
+
+CREATE TEMP TABLE tmp_monthly_seed_shared_group (
+    slug varchar(100) PRIMARY KEY,
+    "name" varchar(100) NOT NULL,
+    description text NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO tmp_monthly_seed_shared_group(slug, "name", description)
 VALUES (
     'monthly_pair_249716305_943915310',
     'Monthly pair 249716305/943915310',
     'Shared allocation group for monthly cascade'
-)
+);
+
+CREATE TEMP TABLE tmp_monthly_seed_binding_config (
+    user_id bigint NOT NULL,
+    root_slug text NOT NULL,
+    binding_kind text NOT NULL,
+    bound_slug text NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO tmp_monthly_seed_binding_config(user_id, root_slug, binding_kind, bound_slug)
+VALUES
+    (249716305::bigint, 'salary_primary', 'branch_source', 'cat_16'),
+    (943915310::bigint, 'salary_primary', 'branch_source', 'cat_37'),
+    (249716305::bigint, 'monthly_income_sources', 'root_target', 'cat_16'),
+    (943915310::bigint, 'monthly_income_sources', 'root_target', 'cat_37'),
+    (249716305::bigint, 'extra_income_sources', 'root_target', 'cat_7'),
+    (943915310::bigint, 'extra_income_sources', 'root_target', 'cat_26'),
+    (249716305::bigint, 'free_to_gifts', 'root_target', 'cat_7'),
+    (943915310::bigint, 'free_to_gifts', 'root_target', 'cat_26'),
+    (249716305::bigint, 'debt_reserve', 'root_target', 'cat_28'),
+    (943915310::bigint, 'debt_reserve', 'root_target', 'cat_27'),
+    (249716305::bigint, 'invest_self_report', 'root_target', 'cat_1'),
+    (943915310::bigint, 'invest_self_report', 'root_target', 'cat_22'),
+    (249716305::bigint, 'invest_partner_report', 'root_target', 'cat_1'),
+    (943915310::bigint, 'invest_partner_report', 'root_target', 'cat_22');
+
+CREATE TEMP TABLE tmp_monthly_seed_root_param_config (
+    user_id bigint NOT NULL,
+    root_slug text NOT NULL,
+    param_key text NOT NULL,
+    param_value text NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO tmp_monthly_seed_root_param_config(user_id, root_slug, param_key, param_value)
+VALUES
+    (249716305::bigint, 'monthly_income_sources', 'source_legacy_group_id', '11'),
+    (943915310::bigint, 'monthly_income_sources', 'source_legacy_group_id', '11'),
+    (249716305::bigint, 'extra_income_sources', 'source_legacy_group_id', '12'),
+    (943915310::bigint, 'extra_income_sources', 'source_legacy_group_id', '12'),
+    (249716305::bigint, 'debt_reserve', 'spend_legacy_group_id', '8'),
+    (943915310::bigint, 'debt_reserve', 'spend_legacy_group_id', '8'),
+    (249716305::bigint, 'debt_reserve', 'personal_legacy_group_id', '15'),
+    (943915310::bigint, 'debt_reserve', 'personal_legacy_group_id', '15');
+
+-- Shared group for common monthly leaves.
+INSERT INTO public.user_groups (slug, "name", description)
+SELECT slug, "name", description
+FROM tmp_monthly_seed_shared_group
 ON CONFLICT (slug) DO NOTHING;
 
 INSERT INTO public.user_group_memberships (user_id, user_group_id, active)
@@ -34,15 +98,12 @@ SELECT
     u.user_id,
     g.id,
     true
-FROM (
-    VALUES
-        (249716305::bigint),
-        (943915310::bigint)
-) AS u(user_id)
+FROM tmp_monthly_seed_users u
 CROSS JOIN (
-    SELECT id
-    FROM public.user_groups
-    WHERE slug = 'monthly_pair_249716305_943915310'
+    SELECT ug.id
+    FROM public.user_groups ug
+    JOIN tmp_monthly_seed_shared_group sg
+      ON sg.slug = ug.slug
 ) AS g
 ON CONFLICT (user_id, user_group_id)
 DO UPDATE SET active = EXCLUDED.active;
@@ -70,10 +131,9 @@ SELECT
     v.include_in_report,
     true
 FROM (
-    VALUES
-        (249716305::bigint),
-        (943915310::bigint)
-) AS u(user_id)
+    SELECT user_id
+    FROM tmp_monthly_seed_users
+) AS u
 CROSS JOIN (
     VALUES
         ('monthly_income_sources', 'Monthly income sources', 'Consolidation root for group 11', false),
@@ -124,12 +184,12 @@ SELECT DISTINCT
 FROM public.categories_category_groups ccg
 JOIN public.categories c
   ON c.id = ccg.categories_id
-WHERE ccg.users_id IN (249716305, 943915310)
+WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND ccg.category_groyps_id IN (1, 2, 3, 6, 7, 9, 13)
   AND ccg.categories_id NOT IN (
       SELECT DISTINCT common_ccg.categories_id
       FROM public.categories_category_groups common_ccg
-      WHERE common_ccg.users_id IN (249716305, 943915310)
+      WHERE common_ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
         AND common_ccg.category_groyps_id = 4
   )
   AND NOT EXISTS (
@@ -162,14 +222,15 @@ SELECT
     true,
     true
 FROM (
-    SELECT id
-    FROM public.user_groups
-    WHERE slug = 'monthly_pair_249716305_943915310'
+    SELECT ug.id
+    FROM public.user_groups ug
+    JOIN tmp_monthly_seed_shared_group sg
+      ON sg.slug = ug.slug
 ) AS g
 JOIN (
     SELECT DISTINCT categories_id
     FROM public.categories_category_groups
-    WHERE users_id IN (249716305, 943915310)
+    WHERE users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
       AND category_groyps_id = 4
 ) AS common_ids
   ON true
@@ -208,19 +269,19 @@ JOIN public.allocation_nodes an
            AND ugm.active
      )
  )
-WHERE ccg.users_id IN (249716305, 943915310)
+WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
 ON CONFLICT (node_id, legacy_group_id)
 DO UPDATE SET active = EXCLUDED.active;
 
 UPDATE public.allocation_nodes root
 SET metadata = COALESCE(root.metadata, '{}'::jsonb) - 'partner_source_category_slug'
-WHERE root.user_id IN (249716305, 943915310)
+WHERE root.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND root.slug = 'family_contribution_out'
   AND root.active;
 
 UPDATE public.allocation_nodes root
 SET metadata = COALESCE(root.metadata, '{}'::jsonb) - 'source_category_node_id'
-WHERE root.user_id IN (249716305, 943915310)
+WHERE root.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND root.slug = 'salary_primary'
   AND root.active;
 
@@ -231,7 +292,7 @@ SET metadata = jsonb_strip_nulls(
     - 'spend_legacy_group_id'
     - 'personal_legacy_group_id'
 )
-WHERE root.user_id IN (249716305, 943915310)
+WHERE root.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND root.slug IN ('monthly_income_sources', 'extra_income_sources', 'debt_reserve')
   AND root.active;
 
@@ -245,20 +306,27 @@ INSERT INTO public.allocation_scenarios (
     description,
     active
 )
-VALUES
-    (249716305::bigint, 'monthly', NULL, 'monthly_default', 'Monthly default', 'Default monthly allocation scenario', true),
-    (943915310::bigint, 'monthly', NULL, 'monthly_default', 'Monthly default', 'Default monthly allocation scenario', true)
+SELECT
+    cfg.user_id,
+    'monthly',
+    NULL,
+    cfg.scenario_slug,
+    cfg.scenario_name,
+    cfg.scenario_description,
+    true
+FROM tmp_monthly_seed_users cfg
 ON CONFLICT DO NOTHING;
 
 UPDATE public.allocation_scenarios
 SET
     schedule_cron = NULL,
-    "name" = 'Monthly default',
-    description = 'Default monthly allocation scenario',
+    "name" = cfg.scenario_name,
+    description = cfg.scenario_description,
     active = true
-WHERE owner_user_id IN (249716305, 943915310)
+FROM tmp_monthly_seed_users cfg
+WHERE owner_user_id = cfg.user_id
   AND scenario_kind = 'monthly'
-  AND slug = 'monthly_default';
+  AND slug = cfg.scenario_slug;
 
 DELETE FROM public.allocation_scenario_node_bindings binding
 USING public.allocation_scenarios scenario,
@@ -266,7 +334,7 @@ USING public.allocation_scenarios scenario,
 WHERE binding.scenario_id = scenario.id
   AND binding.root_node_id = root.id
   AND scenario.scenario_kind = 'monthly'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND root.user_id = scenario.owner_user_id
   AND root.slug IN (
       'salary_primary',
@@ -286,7 +354,7 @@ USING public.allocation_scenarios scenario,
 WHERE param.scenario_id = scenario.id
   AND param.root_node_id = root.id
   AND scenario.scenario_kind = 'monthly'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND root.user_id = scenario.owner_user_id
   AND root.slug IN (
       'monthly_income_sources',
@@ -317,26 +385,17 @@ SELECT
     true,
     jsonb_build_object('origin', 'seed_monthly_allocation_graph')
 FROM (
-    VALUES
-        (249716305::bigint, 'salary_primary'::text, 'branch_source'::text, 'cat_16'::text),
-        (943915310::bigint, 'salary_primary'::text, 'branch_source'::text, 'cat_37'::text),
-        (249716305::bigint, 'monthly_income_sources'::text, 'root_target'::text, 'cat_16'::text),
-        (943915310::bigint, 'monthly_income_sources'::text, 'root_target'::text, 'cat_37'::text),
-        (249716305::bigint, 'extra_income_sources'::text, 'root_target'::text, 'cat_7'::text),
-        (943915310::bigint, 'extra_income_sources'::text, 'root_target'::text, 'cat_26'::text),
-        (249716305::bigint, 'free_to_gifts'::text, 'root_target'::text, 'cat_7'::text),
-        (943915310::bigint, 'free_to_gifts'::text, 'root_target'::text, 'cat_26'::text),
-        (249716305::bigint, 'debt_reserve'::text, 'root_target'::text, 'cat_28'::text),
-        (943915310::bigint, 'debt_reserve'::text, 'root_target'::text, 'cat_27'::text),
-        (249716305::bigint, 'invest_self_report'::text, 'root_target'::text, 'cat_1'::text),
-        (943915310::bigint, 'invest_self_report'::text, 'root_target'::text, 'cat_22'::text),
-        (249716305::bigint, 'invest_partner_report'::text, 'root_target'::text, 'cat_1'::text),
-        (943915310::bigint, 'invest_partner_report'::text, 'root_target'::text, 'cat_22'::text)
-) AS config(user_id, root_slug, binding_kind, bound_slug)
+    SELECT user_id, root_slug, binding_kind, bound_slug
+    FROM tmp_monthly_seed_binding_config
+) AS config
 JOIN public.allocation_scenarios scenario
   ON scenario.owner_user_id = config.user_id
  AND scenario.scenario_kind = 'monthly'
- AND scenario.slug = 'monthly_default'
+ AND scenario.slug = (
+        SELECT cfg.scenario_slug
+        FROM tmp_monthly_seed_users cfg
+        WHERE cfg.user_id = config.user_id
+    )
  AND scenario.active
 JOIN public.allocation_nodes root
   ON root.user_id = config.user_id
@@ -376,8 +435,12 @@ JOIN public.allocation_nodes partner_source
  AND partner_source.slug = 'cat_15'
  AND partner_source.active
 WHERE scenario.scenario_kind = 'monthly'
-  AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.slug = (
+        SELECT cfg.scenario_slug
+        FROM tmp_monthly_seed_users cfg
+        WHERE cfg.user_id = scenario.owner_user_id
+    )
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active;
 
 INSERT INTO public.allocation_scenario_root_params (
@@ -396,40 +459,66 @@ SELECT
     true,
     jsonb_build_object('origin', 'seed_monthly_allocation_graph')
 FROM (
-    VALUES
-        (249716305::bigint, 'monthly_income_sources'::text, 'source_legacy_group_id'::text, '11'::text),
-        (943915310::bigint, 'monthly_income_sources'::text, 'source_legacy_group_id'::text, '11'::text),
-        (249716305::bigint, 'extra_income_sources'::text, 'source_legacy_group_id'::text, '12'::text),
-        (943915310::bigint, 'extra_income_sources'::text, 'source_legacy_group_id'::text, '12'::text),
-        (249716305::bigint, 'debt_reserve'::text, 'spend_legacy_group_id'::text, '8'::text),
-        (943915310::bigint, 'debt_reserve'::text, 'spend_legacy_group_id'::text, '8'::text),
-        (249716305::bigint, 'debt_reserve'::text, 'personal_legacy_group_id'::text, '15'::text),
-        (943915310::bigint, 'debt_reserve'::text, 'personal_legacy_group_id'::text, '15'::text)
-) AS config(user_id, root_slug, param_key, param_value)
+    SELECT user_id, root_slug, param_key, param_value
+    FROM tmp_monthly_seed_root_param_config
+) AS config
 JOIN public.allocation_scenarios scenario
   ON scenario.owner_user_id = config.user_id
  AND scenario.scenario_kind = 'monthly'
- AND scenario.slug = 'monthly_default'
+ AND scenario.slug = (
+        SELECT cfg.scenario_slug
+        FROM tmp_monthly_seed_users cfg
+        WHERE cfg.user_id = config.user_id
+    )
  AND scenario.active
 JOIN public.allocation_nodes root
   ON root.user_id = config.user_id
  AND root.slug = config.root_slug
  AND root.active;
 
+CREATE TEMP TABLE tmp_monthly_seed_root_target_categories
+ON COMMIT DROP
+AS
+SELECT
+    scenario.owner_user_id AS user_id,
+    root.slug AS root_slug,
+    bound.legacy_category_id AS category_id
+FROM public.allocation_scenarios scenario
+JOIN public.allocation_nodes root
+  ON root.user_id = scenario.owner_user_id
+ AND root.active
+ AND root.slug IN ('invest_self_report', 'invest_partner_report')
+JOIN public.allocation_scenario_node_bindings binding
+  ON binding.scenario_id = scenario.id
+ AND binding.root_node_id = root.id
+ AND binding.binding_kind = 'root_target'
+ AND binding.active
+JOIN public.allocation_nodes bound
+  ON bound.id = binding.bound_node_id
+ AND bound.active
+WHERE scenario.scenario_kind = 'monthly'
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
+  AND scenario.slug = (
+        SELECT cfg.scenario_slug
+        FROM tmp_monthly_seed_users cfg
+        WHERE cfg.user_id = scenario.owner_user_id
+    );
+
 -- A category can move out of legacy group 4 during cleanup. Keep old shared
 -- common leaves from being preferred over the current user-owned leaf.
 UPDATE public.allocation_nodes an
 SET active = false
 WHERE an.user_group_id = (
-        SELECT id
-        FROM public.user_groups
-        WHERE slug = 'monthly_pair_249716305_943915310'
+        SELECT ug.id
+        FROM public.user_groups ug
+        JOIN tmp_monthly_seed_shared_group sg
+          ON sg.slug = ug.slug
     )
   AND an.slug ~ '^cat_[0-9]+$'
   AND an.legacy_category_id NOT IN (
       SELECT DISTINCT ccg.categories_id
       FROM public.categories_category_groups ccg
-      WHERE ccg.users_id IN (249716305, 943915310)
+      WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
         AND ccg.category_groyps_id = 4
   );
 
@@ -440,7 +529,7 @@ DELETE FROM public.allocation_routes r
 USING public.allocation_nodes src
 WHERE r.source_node_id = src.id
   AND (
-      (src.user_id IN (249716305, 943915310) AND src.slug IN (
+      (src.user_id IN (SELECT user_id FROM tmp_monthly_seed_users) AND src.slug IN (
           'monthly_income_sources',
           'extra_income_sources',
           'free_to_gifts',
@@ -456,9 +545,10 @@ WHERE r.source_node_id = src.id
       ))
       OR
       (src.user_group_id = (
-          SELECT id
-          FROM public.user_groups
-          WHERE slug = 'monthly_pair_249716305_943915310'
+          SELECT ug.id
+          FROM public.user_groups ug
+          JOIN tmp_monthly_seed_shared_group sg
+            ON sg.slug = ug.slug
       ) AND src.slug ~ '^cat_[0-9]+$')
   );
 
@@ -497,7 +587,7 @@ JOIN public.allocation_nodes bound
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
   AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -530,7 +620,7 @@ JOIN public.allocation_nodes bound
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
   AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -568,7 +658,7 @@ JOIN (
     FROM public.categories_category_groups ccg
     JOIN public.categories c
       ON c.id = ccg.categories_id
-    WHERE ccg.users_id IN (249716305, 943915310)
+    WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
       AND ccg.category_groyps_id = 7
     GROUP BY ccg.users_id
 ) p
@@ -576,7 +666,7 @@ JOIN (
  AND p.percent > 0
 WHERE scenario.scenario_kind = 'monthly'
   AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 -- debt_reserve -> canonical reserve bucket
@@ -608,7 +698,7 @@ JOIN public.allocation_nodes bound
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
   AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -641,7 +731,7 @@ JOIN public.allocation_nodes bound
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
   AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -673,7 +763,7 @@ JOIN public.allocation_nodes bound
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
   AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -684,7 +774,7 @@ FROM public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = src.user_id
  AND dst.slug = 'invest_self_report'
-WHERE src.user_id IN (249716305, 943915310)
+WHERE src.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND src.slug = 'salary_primary'
 ON CONFLICT DO NOTHING;
 
@@ -694,7 +784,7 @@ FROM public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = src.user_id
  AND dst.slug = 'family_contribution_out'
-WHERE src.user_id IN (249716305, 943915310)
+WHERE src.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND src.slug = 'salary_primary'
 ON CONFLICT DO NOTHING;
 
@@ -704,7 +794,7 @@ FROM public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = src.user_id
  AND dst.slug = 'self_distribution'
-WHERE src.user_id IN (249716305, 943915310)
+WHERE src.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND src.slug = 'salary_primary'
 ON CONFLICT DO NOTHING;
 
@@ -736,7 +826,7 @@ JOIN public.allocation_nodes dst
  AND dst.active
 WHERE scenario.scenario_kind = 'monthly'
   AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -746,7 +836,7 @@ FROM public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = src.user_id
  AND dst.slug = 'partner_contribution_split'
-WHERE src.user_id IN (249716305, 943915310)
+WHERE src.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND src.slug = 'family_contribution_in'
 ON CONFLICT DO NOTHING;
 
@@ -756,7 +846,7 @@ FROM public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = src.user_id
  AND dst.slug = 'invest_partner_report'
-WHERE src.user_id IN (249716305, 943915310)
+WHERE src.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND src.slug = 'partner_contribution_split'
 ON CONFLICT DO NOTHING;
 
@@ -766,7 +856,7 @@ FROM public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = src.user_id
  AND dst.slug = 'partner_distribution'
-WHERE src.user_id IN (249716305, 943915310)
+WHERE src.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND src.slug = 'partner_contribution_split'
 ON CONFLICT DO NOTHING;
 
@@ -776,7 +866,7 @@ ON CONFLICT DO NOTHING;
 DELETE FROM public.allocation_routes r
 USING public.allocation_nodes src
 WHERE r.source_node_id = src.id
-  AND src.user_id IN (249716305, 943915310)
+  AND src.user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND src.slug IN ('self_distribution', 'partner_distribution')
   AND r.percent = 1
   AND r.description NOT IN (
@@ -805,9 +895,10 @@ JOIN public.allocation_nodes src
  AND src.slug = 'self_distribution'
 LEFT JOIN public.allocation_nodes common_dst
   ON common_dst.user_group_id = (
-         SELECT id
-         FROM public.user_groups
-         WHERE slug = 'monthly_pair_249716305_943915310'
+         SELECT ug.id
+         FROM public.user_groups ug
+         JOIN tmp_monthly_seed_shared_group sg
+           ON sg.slug = ug.slug
      )
  AND common_dst.slug = CONCAT('cat_', ccg.categories_id)
  AND common_dst.active
@@ -815,18 +906,15 @@ LEFT JOIN public.allocation_nodes user_dst
   ON user_dst.user_id = ccg.users_id
  AND user_dst.slug = CONCAT('cat_', ccg.categories_id)
  AND user_dst.active
-WHERE ccg.users_id IN (249716305, 943915310)
+WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND ccg.category_groyps_id = 2
   AND COALESCE(c.percent, 0) > 0
   AND COALESCE(c.percent, 0) < 1
   AND NOT EXISTS (
       SELECT 1
-      FROM (
-          VALUES
-              (249716305::bigint, 1::integer),
-              (943915310::bigint, 22::integer)
-      ) AS invest_leaf(user_id, category_id)
-      WHERE invest_leaf.user_id = ccg.users_id
+      FROM tmp_monthly_seed_root_target_categories invest_leaf
+      WHERE invest_leaf.root_slug = 'invest_self_report'
+        AND invest_leaf.user_id = ccg.users_id
         AND invest_leaf.category_id = ccg.categories_id
   )
 ON CONFLICT DO NOTHING;
@@ -851,7 +939,7 @@ JOIN public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = ccg.users_id
  AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (249716305, 943915310)
+WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND ccg.category_groyps_id = 6
 ON CONFLICT DO NOTHING;
 
@@ -870,18 +958,15 @@ SELECT
         NULLIF(
             1 - (
                 SELECT inv_c.percent
-                FROM (
-                    VALUES
-                        (249716305::bigint, 1::integer),
-                        (943915310::bigint, 22::integer)
-                ) AS invest_leaf(user_id, category_id)
+                FROM tmp_monthly_seed_root_target_categories invest_leaf
                 JOIN public.categories_category_groups inv_ccg
                   ON inv_ccg.users_id = invest_leaf.user_id
                  AND inv_ccg.category_groyps_id = 3
                  AND inv_ccg.categories_id = invest_leaf.category_id
                 JOIN public.categories inv_c
                   ON inv_c.id = invest_leaf.category_id
-                WHERE invest_leaf.user_id = ccg.users_id
+                WHERE invest_leaf.root_slug = 'invest_partner_report'
+                  AND invest_leaf.user_id = ccg.users_id
                 LIMIT 1
             ),
             0
@@ -898,9 +983,10 @@ JOIN public.allocation_nodes src
  AND src.slug = 'partner_distribution'
 LEFT JOIN public.allocation_nodes common_dst
   ON common_dst.user_group_id = (
-         SELECT id
-         FROM public.user_groups
-         WHERE slug = 'monthly_pair_249716305_943915310'
+         SELECT ug.id
+         FROM public.user_groups ug
+         JOIN tmp_monthly_seed_shared_group sg
+           ON sg.slug = ug.slug
      )
  AND common_dst.slug = CONCAT('cat_', ccg.categories_id)
  AND common_dst.active
@@ -908,18 +994,15 @@ LEFT JOIN public.allocation_nodes user_dst
   ON user_dst.user_id = ccg.users_id
  AND user_dst.slug = CONCAT('cat_', ccg.categories_id)
  AND user_dst.active
-WHERE ccg.users_id IN (249716305, 943915310)
+WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND ccg.category_groyps_id = 3
   AND COALESCE(c.percent, 0) > 0
   AND COALESCE(c.percent, 0) < 1
   AND NOT EXISTS (
       SELECT 1
-      FROM (
-          VALUES
-              (249716305::bigint, 1::integer),
-              (943915310::bigint, 22::integer)
-      ) AS invest_leaf(user_id, category_id)
-      WHERE invest_leaf.user_id = ccg.users_id
+      FROM tmp_monthly_seed_root_target_categories invest_leaf
+      WHERE invest_leaf.root_slug = 'invest_partner_report'
+        AND invest_leaf.user_id = ccg.users_id
         AND invest_leaf.category_id = ccg.categories_id
   )
 ON CONFLICT DO NOTHING;
@@ -944,7 +1027,7 @@ JOIN public.allocation_nodes src
 JOIN public.allocation_nodes dst
   ON dst.user_id = ccg.users_id
  AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (249716305, 943915310)
+WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND ccg.category_groyps_id = 6
 ON CONFLICT DO NOTHING;
 

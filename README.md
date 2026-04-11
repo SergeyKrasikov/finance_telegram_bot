@@ -341,6 +341,7 @@ graph TD
 - Пока тестируем миграцию на restored legacy data, seed заводит monthly scenario bindings для `salary_primary`, single-target roots и `family_contribution_out`,
   а также monthly scenario root params для prep/reserve веток.
   Это защищает граф от грязных legacy group mappings вроде попадания `cat_15` в investment group и постепенно убирает business-config из тела SQL-функций.
+  Pair-specific seed config теперь централизован в верхнем `tmp_monthly_seed_*` блоке, а route exclusions для investment leaves выводятся из seeded `root_target`, а не из разбросанных literal category id.
 - Источники reserve определяются динамически как пересечение legacy spend `group 8` и personal `group 15`.
 
 ### Allocation Ledger
