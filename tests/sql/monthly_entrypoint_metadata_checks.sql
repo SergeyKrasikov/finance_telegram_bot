@@ -10,6 +10,7 @@ DECLARE
     cascade_def text;
     recursive_def text;
     binding_helper_def text;
+    root_param_helper_def text;
 BEGIN
     SELECT EXISTS (
         SELECT 1
@@ -46,9 +47,17 @@ BEGIN
     SELECT pg_get_functiondef('public.find_allocation_scenario_binding_node_id(bigint,text,bigint,text)'::regprocedure)
     INTO binding_helper_def;
 
+    SELECT pg_get_functiondef('public.find_allocation_scenario_root_param_value(bigint,text,bigint,text)'::regprocedure)
+    INTO root_param_helper_def;
+
     IF POSITION('allocation_scenarios' IN binding_helper_def) = 0
        OR POSITION('allocation_scenario_node_bindings' IN binding_helper_def) = 0 THEN
         RAISE EXCEPTION 'Expected scenario binding helper to read allocation_scenarios and allocation_scenario_node_bindings';
+    END IF;
+
+    IF POSITION('allocation_scenarios' IN root_param_helper_def) = 0
+       OR POSITION('allocation_scenario_root_params' IN root_param_helper_def) = 0 THEN
+        RAISE EXCEPTION 'Expected scenario root param helper to read allocation_scenarios and allocation_scenario_root_params';
     END IF;
 
     IF POSITION('find_allocation_scenario_binding_node_id' IN cascade_def) = 0 THEN
@@ -63,10 +72,20 @@ BEGIN
         RAISE EXCEPTION 'monthly_distribute_cascade() still reads salary source from metadata fallback';
     END IF;
 
+    IF POSITION('find_allocation_scenario_root_param_value' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to resolve prep/reserve config via scenario root params';
+    END IF;
+
     IF POSITION('source_legacy_group_id' IN cascade_def) = 0
        OR POSITION('spend_legacy_group_id' IN cascade_def) = 0
        OR POSITION('personal_legacy_group_id' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to read monthly source group config from root metadata';
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to read prep/reserve keys via scenario root params';
+    END IF;
+
+    IF POSITION('metadata->>''source_legacy_group_id''' IN cascade_def) > 0
+       OR POSITION('metadata->>''spend_legacy_group_id''' IN cascade_def) > 0
+       OR POSITION('metadata->>''personal_legacy_group_id''' IN cascade_def) > 0 THEN
+        RAISE EXCEPTION 'monthly_distribute_cascade() still reads prep/reserve config from root metadata';
     END IF;
 
     IF POSITION('legacy_group_id = 11' IN cascade_def) > 0

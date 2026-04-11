@@ -3,6 +3,13 @@
 
 BEGIN;
 
+DELETE FROM public.allocation_scenario_root_params
+WHERE scenario_id IN (
+    SELECT id
+    FROM public.allocation_scenarios
+    WHERE slug LIKE 'test_scenario_%'
+);
+
 DELETE FROM public.allocation_scenario_node_bindings
 WHERE scenario_id IN (
     SELECT id
@@ -61,6 +68,7 @@ DECLARE
     root_node_id bigint;
     leaf_node_id bigint;
     binding_rows integer;
+    param_rows integer;
 BEGIN
     INSERT INTO public.allocation_scenarios(
         owner_user_id,
@@ -200,6 +208,26 @@ BEGIN
         RAISE EXCEPTION 'Expected 3 scenario bindings, got %', binding_rows;
     END IF;
 
+    INSERT INTO public.allocation_scenario_root_params(
+        scenario_id,
+        root_node_id,
+        param_key,
+        param_value,
+        metadata
+    )
+    VALUES
+        (user_scenario_id, root_node_id, 'source_legacy_group_id', '11', jsonb_build_object('question', 'prep_source_group')),
+        (group_scenario_id, root_node_id, 'spend_legacy_group_id', '8', jsonb_build_object('question', 'reserve_spend_group'));
+
+    SELECT COUNT(*)
+    INTO param_rows
+    FROM public.allocation_scenario_root_params
+    WHERE scenario_id IN (user_scenario_id, group_scenario_id);
+
+    IF param_rows <> 2 THEN
+        RAISE EXCEPTION 'Expected 2 scenario root params, got %', param_rows;
+    END IF;
+
     BEGIN
         INSERT INTO public.allocation_scenario_node_bindings(
             scenario_id,
@@ -215,6 +243,26 @@ BEGIN
         );
 
         RAISE EXCEPTION 'Expected duplicate scenario binding to fail';
+    EXCEPTION
+        WHEN unique_violation THEN
+            NULL;
+    END;
+
+    BEGIN
+        INSERT INTO public.allocation_scenario_root_params(
+            scenario_id,
+            root_node_id,
+            param_key,
+            param_value
+        )
+        VALUES (
+            user_scenario_id,
+            root_node_id,
+            'source_legacy_group_id',
+            '12'
+        );
+
+        RAISE EXCEPTION 'Expected duplicate scenario root param to fail';
     EXCEPTION
         WHEN unique_violation THEN
             NULL;

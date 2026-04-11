@@ -338,14 +338,15 @@ graph TD
   - `free_to_gifts`
   - `debt_reserve`
   - `salary_primary`
-- Пока тестируем миграцию на restored legacy data, seed заводит monthly scenario bindings для `salary_primary`, single-target roots и `family_contribution_out`.
+- Пока тестируем миграцию на restored legacy data, seed заводит monthly scenario bindings для `salary_primary`, single-target roots и `family_contribution_out`,
+  а также monthly scenario root params для prep/reserve веток.
   Это защищает граф от грязных legacy group mappings вроде попадания `cat_15` в investment group и постепенно убирает business-config из тела SQL-функций.
 - Источники reserve определяются динамически как пересечение legacy spend `group 8` и personal `group 15`.
 
 ### Allocation Ledger
 
 - В схему добавлена таблица `public.allocation_postings` как будущий graph-native ledger.
-- В схему добавлены `public.allocation_scenarios` и `public.allocation_scenario_node_bindings` как общий config-слой для allocation-сценариев.
+- В схему добавлены `public.allocation_scenarios`, `public.allocation_scenario_node_bindings` и `public.allocation_scenario_root_params` как общий config-слой для allocation-сценариев.
   Сценарий может принадлежать либо одному `user`, либо `user_group`, поэтому схема подходит и для personal monthly, и для household monthly.
 - Минимальная форма таблицы:
   - `datetime`
@@ -367,7 +368,7 @@ graph TD
 - Вызовы `allocation_distribute(...)` из `monthly_distribute_cascade()` больше не передают legacy source category id; он выводится из source node только как compatibility metadata.
 - `monthly()` больше не содержит hard-coded monthly users и income category id; entrypoint запускает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots.
   `salary_primary` требует source leaf через `allocation_scenario_node_bindings` (`binding_kind = branch_source`).
-  Prep/reserve roots пока читают legacy group bridge из своей metadata (`source_legacy_group_id`, `spend_legacy_group_id`, `personal_legacy_group_id`), а не из hard-coded условий в function body.
+  Prep/reserve roots требуют scenario root params (`source_legacy_group_id`, `spend_legacy_group_id`, `personal_legacy_group_id`) через `allocation_scenario_root_params`, а не из root metadata и не из hard-coded условий в function body.
   `family_contribution_out` требует partner source leaf через `allocation_scenario_node_bindings` (`binding_kind = bridge_source`).
   Старый параметр `_income_category` в `monthly_distribute_cascade()` сохранён как fallback на время миграции.
 - Internal helper `monthly_distribute_allocation(...)` уже может принимать явный `source_category_node_id` без обязательного legacy category id.
@@ -442,14 +443,20 @@ graph TD
   - `priority`: приоритет выбора, если для одной ветки есть несколько активных кандидатов одного `binding_kind`
   - `active`
   - `metadata`
+- `allocation_scenario_root_params`
+  - `scenario_id`
+  - `root_node_id`: root/ветка, для которой задаётся scalar-конфиг сценария
+  - `param_key`: имя параметра, например `source_legacy_group_id`
+  - `param_value`: строковое значение параметра; runtime сам приводит его к нужному типу
+  - `active`
+  - `metadata`
 - Этот слой отвечает на 3 сценарных вопроса:
   - откуда стартовать ветку
   - в какой leaf вести single-target root
   - какой leaf использовать как source для bridge
-- Monthly runtime уже использует этот слой для `salary_primary.branch_source` и `family_contribution_out.bridge_source`;
-  single-target monthly roots в seed уже materialize'ятся из `root_target`.
-  Для этих двух веток metadata fallback уже убран.
-- Пока monthly runtime ещё не переключён на эти таблицы; они введены как schema contract для следующего шага миграции.
+- Monthly runtime уже использует этот слой для `salary_primary.branch_source`, single-target roots, `family_contribution_out.bridge_source`
+  и prep/reserve scalar config через `allocation_scenario_root_params`.
+- Metadata fallback для `salary_primary`, `family_contribution_out` и prep/reserve roots уже убран.
 
 ## Заметки
 - Основная точка входа: `app.py`.

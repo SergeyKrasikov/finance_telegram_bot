@@ -212,37 +212,6 @@ WHERE ccg.users_id IN (249716305, 943915310)
 ON CONFLICT (node_id, legacy_group_id)
 DO UPDATE SET active = EXCLUDED.active;
 
--- Graph-native monthly runtime config.
--- The monthly orchestrator reads these root settings from node metadata instead
--- of hard-coding legacy group/category ids inside public.monthly().
-UPDATE public.allocation_nodes root
-SET metadata = jsonb_strip_nulls(
-    COALESCE(root.metadata, '{}'::jsonb)
-    || jsonb_build_object('source_legacy_group_id', config.source_legacy_group_id)
-)
-FROM (
-    VALUES
-        (249716305::bigint, 'monthly_income_sources'::text, 11::integer),
-        (943915310::bigint, 'monthly_income_sources'::text, 11::integer),
-        (249716305::bigint, 'extra_income_sources'::text, 12::integer),
-        (943915310::bigint, 'extra_income_sources'::text, 12::integer)
-) AS config(user_id, root_slug, source_legacy_group_id)
-WHERE root.user_id = config.user_id
-  AND root.slug = config.root_slug
-  AND root.active;
-
-UPDATE public.allocation_nodes root
-SET metadata = jsonb_strip_nulls(
-    COALESCE(root.metadata, '{}'::jsonb)
-    || jsonb_build_object(
-        'spend_legacy_group_id', 8,
-        'personal_legacy_group_id', 15
-    )
-)
-WHERE root.user_id IN (249716305, 943915310)
-  AND root.slug = 'debt_reserve'
-  AND root.active;
-
 UPDATE public.allocation_nodes root
 SET metadata = COALESCE(root.metadata, '{}'::jsonb) - 'partner_source_category_slug'
 WHERE root.user_id IN (249716305, 943915310)
@@ -253,6 +222,17 @@ UPDATE public.allocation_nodes root
 SET metadata = COALESCE(root.metadata, '{}'::jsonb) - 'source_category_node_id'
 WHERE root.user_id IN (249716305, 943915310)
   AND root.slug = 'salary_primary'
+  AND root.active;
+
+UPDATE public.allocation_nodes root
+SET metadata = jsonb_strip_nulls(
+    COALESCE(root.metadata, '{}'::jsonb)
+    - 'source_legacy_group_id'
+    - 'spend_legacy_group_id'
+    - 'personal_legacy_group_id'
+)
+WHERE root.user_id IN (249716305, 943915310)
+  AND root.slug IN ('monthly_income_sources', 'extra_income_sources', 'debt_reserve')
   AND root.active;
 
 -- User-owned monthly scenarios and node bindings.
@@ -299,6 +279,25 @@ WHERE binding.scenario_id = scenario.id
       'family_contribution_out'
   )
   AND binding.binding_kind IN ('branch_source', 'root_target', 'bridge_source');
+
+DELETE FROM public.allocation_scenario_root_params param
+USING public.allocation_scenarios scenario,
+      public.allocation_nodes root
+WHERE param.scenario_id = scenario.id
+  AND param.root_node_id = root.id
+  AND scenario.scenario_kind = 'monthly'
+  AND scenario.owner_user_id IN (249716305, 943915310)
+  AND root.user_id = scenario.owner_user_id
+  AND root.slug IN (
+      'monthly_income_sources',
+      'extra_income_sources',
+      'debt_reserve'
+  )
+  AND param.param_key IN (
+      'source_legacy_group_id',
+      'spend_legacy_group_id',
+      'personal_legacy_group_id'
+  );
 
 INSERT INTO public.allocation_scenario_node_bindings (
     scenario_id,
@@ -380,6 +379,42 @@ WHERE scenario.scenario_kind = 'monthly'
   AND scenario.slug = 'monthly_default'
   AND scenario.owner_user_id IN (249716305, 943915310)
   AND scenario.active;
+
+INSERT INTO public.allocation_scenario_root_params (
+    scenario_id,
+    root_node_id,
+    param_key,
+    param_value,
+    active,
+    metadata
+)
+SELECT
+    scenario.id,
+    root.id,
+    config.param_key,
+    config.param_value,
+    true,
+    jsonb_build_object('origin', 'seed_monthly_allocation_graph')
+FROM (
+    VALUES
+        (249716305::bigint, 'monthly_income_sources'::text, 'source_legacy_group_id'::text, '11'::text),
+        (943915310::bigint, 'monthly_income_sources'::text, 'source_legacy_group_id'::text, '11'::text),
+        (249716305::bigint, 'extra_income_sources'::text, 'source_legacy_group_id'::text, '12'::text),
+        (943915310::bigint, 'extra_income_sources'::text, 'source_legacy_group_id'::text, '12'::text),
+        (249716305::bigint, 'debt_reserve'::text, 'spend_legacy_group_id'::text, '8'::text),
+        (943915310::bigint, 'debt_reserve'::text, 'spend_legacy_group_id'::text, '8'::text),
+        (249716305::bigint, 'debt_reserve'::text, 'personal_legacy_group_id'::text, '15'::text),
+        (943915310::bigint, 'debt_reserve'::text, 'personal_legacy_group_id'::text, '15'::text)
+) AS config(user_id, root_slug, param_key, param_value)
+JOIN public.allocation_scenarios scenario
+  ON scenario.owner_user_id = config.user_id
+ AND scenario.scenario_kind = 'monthly'
+ AND scenario.slug = 'monthly_default'
+ AND scenario.active
+JOIN public.allocation_nodes root
+  ON root.user_id = config.user_id
+ AND root.slug = config.root_slug
+ AND root.active;
 
 -- A category can move out of legacy group 4 during cleanup. Keep old shared
 -- common leaves from being preferred over the current user-owned leaf.

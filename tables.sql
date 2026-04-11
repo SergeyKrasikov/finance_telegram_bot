@@ -174,6 +174,20 @@ constraint allocation_scenario_node_bindings_kind_check
     check (length(trim(binding_kind)) > 0)
 );
 
+create table if not exists public.allocation_scenario_root_params (
+id bigserial primary key,
+scenario_id bigint not null references public.allocation_scenarios(id) on delete cascade,
+root_node_id bigint not null references public.allocation_nodes(id) on delete cascade,
+param_key varchar(64) not null,
+param_value text not null,
+active boolean not null default true,
+metadata jsonb not null default '{}'::jsonb,
+constraint allocation_scenario_root_params_key_check
+    check (length(trim(param_key)) > 0),
+constraint allocation_scenario_root_params_value_check
+    check (length(trim(param_value)) > 0)
+);
+
 -- Compatibility upgrade for existing databases with varchar(3) currency columns
 DO $$
 BEGIN
@@ -261,3 +275,8 @@ CREATE INDEX IF NOT EXISTS idx_allocation_scenario_bindings_lookup
     ON public.allocation_scenario_node_bindings (scenario_id, root_node_id, binding_kind, priority DESC, id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_scenario_bindings
     ON public.allocation_scenario_node_bindings (scenario_id, root_node_id, binding_kind, bound_node_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_scenario_root_params_lookup
+    ON public.allocation_scenario_root_params (scenario_id, root_node_id, param_key, id)
+    WHERE active;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_scenario_root_params
+    ON public.allocation_scenario_root_params (scenario_id, root_node_id, param_key);

@@ -536,6 +536,41 @@ AS $function$
 $function$;
 
 
+CREATE OR REPLACE FUNCTION public.find_allocation_scenario_root_param_value(
+    _user_id bigint,
+    _scenario_kind text,
+    _root_node_id bigint,
+    _param_key text
+)
+ RETURNS text
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT param.param_value
+    FROM public.allocation_scenarios scenario
+    JOIN public.allocation_scenario_root_params param
+      ON param.scenario_id = scenario.id
+     AND param.active
+    WHERE scenario.active
+      AND scenario.scenario_kind = _scenario_kind
+      AND param.root_node_id = _root_node_id
+      AND param.param_key = _param_key
+      AND (
+          scenario.owner_user_id = _user_id
+          OR scenario.owner_user_group_id IN (
+              SELECT ugm.user_group_id
+              FROM public.user_group_memberships ugm
+              WHERE ugm.user_id = _user_id
+                AND ugm.active
+          )
+      )
+    ORDER BY
+        CASE WHEN scenario.owner_user_id = _user_id THEN 0 ELSE 1 END,
+        param.id
+    LIMIT 1;
+$function$;
+
+
 -- Используется только в переходной monthly-логике:
 -- по slug ищем новую root-ноду, если она уже собрана для конкретной ветки.
 CREATE OR REPLACE FUNCTION public.find_allocation_node_id(_user_id bigint, _slug text)
@@ -791,14 +826,19 @@ BEGIN
             _user_id;
     END IF;
 
-    SELECT NULLIF(root.metadata->>'source_legacy_group_id', '')::integer
-    INTO _monthly_income_source_group_id
-    FROM public.allocation_nodes root
-    WHERE root.id = _monthly_income_root_id;
+    _monthly_income_source_group_id := NULLIF(
+        public.find_allocation_scenario_root_param_value(
+            _user_id,
+            'monthly',
+            _monthly_income_root_id,
+            'source_legacy_group_id'
+        ),
+        ''
+    )::integer;
 
     IF _monthly_income_source_group_id IS NULL THEN
         RAISE EXCEPTION
-            'monthly_income_sources metadata.source_legacy_group_id is required for user %',
+            'monthly_income_sources scenario param source_legacy_group_id is required for user %',
             _user_id;
     END IF;
 
@@ -839,14 +879,19 @@ BEGIN
             _user_id;
     END IF;
 
-    SELECT NULLIF(root.metadata->>'source_legacy_group_id', '')::integer
-    INTO _extra_income_source_group_id
-    FROM public.allocation_nodes root
-    WHERE root.id = _extra_income_root_id;
+    _extra_income_source_group_id := NULLIF(
+        public.find_allocation_scenario_root_param_value(
+            _user_id,
+            'monthly',
+            _extra_income_root_id,
+            'source_legacy_group_id'
+        ),
+        ''
+    )::integer;
 
     IF _extra_income_source_group_id IS NULL THEN
         RAISE EXCEPTION
-            'extra_income_sources metadata.source_legacy_group_id is required for user %',
+            'extra_income_sources scenario param source_legacy_group_id is required for user %',
             _user_id;
     END IF;
 
@@ -918,19 +963,30 @@ BEGIN
             _user_id;
     END IF;
 
-    SELECT
-        NULLIF(root.metadata->>'spend_legacy_group_id', '')::integer,
-        NULLIF(root.metadata->>'personal_legacy_group_id', '')::integer
-    INTO
-        _reserve_spend_group_id,
-        _reserve_personal_group_id
-    FROM public.allocation_nodes root
-    WHERE root.id = _reserve_root_id;
+    _reserve_spend_group_id := NULLIF(
+        public.find_allocation_scenario_root_param_value(
+            _user_id,
+            'monthly',
+            _reserve_root_id,
+            'spend_legacy_group_id'
+        ),
+        ''
+    )::integer;
+
+    _reserve_personal_group_id := NULLIF(
+        public.find_allocation_scenario_root_param_value(
+            _user_id,
+            'monthly',
+            _reserve_root_id,
+            'personal_legacy_group_id'
+        ),
+        ''
+    )::integer;
 
     IF _reserve_spend_group_id IS NULL
        OR _reserve_personal_group_id IS NULL THEN
         RAISE EXCEPTION
-            'debt_reserve metadata.spend_legacy_group_id and metadata.personal_legacy_group_id are required for user %',
+            'debt_reserve scenario params spend_legacy_group_id and personal_legacy_group_id are required for user %',
             _user_id;
     END IF;
 

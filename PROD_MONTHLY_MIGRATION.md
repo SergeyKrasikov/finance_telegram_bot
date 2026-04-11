@@ -8,7 +8,7 @@
 - Все новые write-path'ы уже пишут в ledger-only или dual-write path, который признан корректным.
 - `monthly()` использует `monthly_distribute_cascade()`.
 - Monthly roots и routes уже разворачиваются seed'ом.
-- Monthly scenario config (`allocation_scenarios`, `allocation_scenario_node_bindings`) полностью покрывает runtime без обязательного metadata fallback.
+- Monthly scenario config (`allocation_scenarios`, `allocation_scenario_node_bindings`, `allocation_scenario_root_params`) полностью покрывает runtime без обязательного metadata fallback.
 - SQL-checks на monthly/ledger проходят в action.
 - На тестовой базе сверены:
   - monthly postings
@@ -19,7 +19,7 @@
 
 ## Что ещё нельзя считать завершённым
 
-- Пока не принята финальная доменная модель для `allocation_scenarios` / `allocation_scenario_node_bindings`.
+- Пока не принята финальная доменная модель для `allocation_scenarios` / `allocation_scenario_node_bindings` / `allocation_scenario_root_params`.
 - Prep/reserve ветки всё ещё используют metadata-конфиг root-нод и не переведены полностью на scenario-layer.
 
 ## Порядок продового переезда
@@ -34,6 +34,7 @@
 - существуют `allocation_postings`
 - существуют `allocation_scenarios`
 - существуют `allocation_scenario_node_bindings`
+- существует `allocation_scenario_root_params`
 - read/write helpers созданы
 - `monthly()` и `monthly_distribute_cascade()` обновлены
 
@@ -136,9 +137,9 @@
 - single-target roots полностью materialize'ятся из `root_target`
 
 Отдельно для полного ухода от metadata у prep/reserve веток нужно подтвердить:
-- replacement config-layer для `source_legacy_group_id`
-- replacement config-layer для `spend_legacy_group_id`
-- replacement config-layer для `personal_legacy_group_id`
+- `allocation_scenario_root_params` заполнены для всех required monthly roots
+- `source_legacy_group_id` найден для всех `monthly_income_sources` и `extra_income_sources`
+- `spend_legacy_group_id` и `personal_legacy_group_id` найдены для всех `debt_reserve`
 
 Убирать legacy `cash_flow` monthly dependence можно только после того, как подтверждено:
 - balances читаются из ledger

@@ -127,9 +127,10 @@
 6. Отчёт
 - Начать замену legacy расчётов `общие_категории`, `second_user_pay`, `investition`, `investition_second` на суммы из report-нод.
 - Отдельно доменно проработать новую модель сценариев:
-  `allocation_scenarios` и `allocation_scenario_node_bindings` пока введены как технический config-слой,
+  `allocation_scenarios`, `allocation_scenario_node_bindings` и `allocation_scenario_root_params` пока введены как технический config-слой,
   но до финального продового переезда ещё нужно определить их постоянный бизнес-контракт:
-  кто ими владеет, как они редактируются, как выбирается активный сценарий, и какие binding kinds считаются обязательными.
+  кто ими владеет, как они редактируются, как выбирается активный сценарий, какие binding kinds считаются обязательными
+  и какие root params считаются обязательными для конкретного `scenario_kind`.
 - Классификация shared leaves и investment leaves уже переведена на `allocation_nodes` / `allocation_routes`.
 - Shared/group-owned report rows уже несут `owner_user_id` текущей ветки, поэтому `общие_категории` и `second_user_pay` можно считать напрямую по report rows, без остаточной формулы partner-ветки.
 - Сравнить с legacy JSON.
@@ -145,16 +146,14 @@
 ## Что ещё нужно сделать в схеме
 
 - Финально убрать зависимость движка от legacy category/group функций.
-- Довести monthly runtime до полного ухода с root metadata на `allocation_scenarios` / `allocation_scenario_node_bindings` для prep/reserve веток.
 - Free-balance для `free_to_gifts` уже определяется через allocation remainder leaf node, а не через legacy category balance.
 - Legacy share для `free_to_gifts` перенесён из orchestrator в allocation route.
 - В схему добавлена `allocation_postings`; leaf-проводки allocation-движка уже пишутся туда ledger-only, без новых rows в `cash_flow`.
 - Добавлены read-helper'ы для нового ledger: `get_allocation_node_balance(...)` и `get_allocation_node_balance_by_slug(...)`.
 - Deploy now runs idempotent backfill `cash_flow -> allocation_postings`; historical/backfill rows may carry `metadata.legacy_cash_flow_id`.
 - Определить финальную модель источника для monthly run:
-  Текущий переходный вариант: orchestrator запускает несколько roots, `salary_primary` и `family_contribution_out` уже полностью сидят на scenario bindings; остальные prep/reserve ветки находят source nodes по `allocation_node_groups`, а legacy group ids берут из metadata root-ноды.
+  Текущий переходный вариант: orchestrator запускает несколько roots, `salary_primary` и `family_contribution_out` уже полностью сидят на scenario bindings; prep/reserve ветки находят source nodes по `allocation_node_groups`, а legacy group ids уже берут из `allocation_scenario_root_params`.
 - `allocation_routes.metadata` уже используется для route-level graph config, например source leaf partner bridge.
-- `allocation_nodes.metadata` всё ещё используется как переходный config только для prep/reserve веток (`source_legacy_group_id`, `spend_legacy_group_id`, `personal_legacy_group_id`).
 - Финально решить, остаётся ли `cash_flow` на legacy category ids или переводится на `allocation_nodes.id`.
 
 ## Что нельзя делать пока рано
