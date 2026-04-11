@@ -10,6 +10,7 @@
 - Monthly roots и routes уже разворачиваются seed'ом.
 - Monthly scenario config (`allocation_scenarios`, `allocation_scenario_node_bindings`, `allocation_scenario_root_params`) полностью покрывает runtime без обязательного metadata fallback.
 - Monthly bootstrap config (`allocation_seed_profiles*`) хранит seed-данные для pair/scenario bootstrap вне тела самого seed-скрипта.
+  Seed materialize'ит все активные monthly profiles и должен падать, если один user попал больше чем в один активный monthly profile.
 - SQL-checks на monthly/ledger проходят в action.
 - На тестовой базе сверены:
   - monthly postings

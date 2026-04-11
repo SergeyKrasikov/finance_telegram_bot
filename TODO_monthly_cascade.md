@@ -25,7 +25,8 @@
   - `allocation_seed_profile_users`
   - `allocation_seed_profile_bindings`
   - `allocation_seed_profile_root_params`
-  Monthly seed уже читает pair-config через эти таблицы, а не из локальных `VALUES` по всему телу скрипта.
+  Monthly seed уже читает pair-config через эти таблицы, а не из локальных `VALUES` по всему телу скрипта,
+  и materialize'ит все активные monthly profiles.
 - Добавлены transition/helper-функции:
   - `find_allocation_node_id(...)`
   - `get_group_percent_sum(...)`
@@ -141,6 +142,8 @@
   `allocation_seed_profiles*` пока введены как технический слой для развертывания monthly graph,
   но до финального продового переезда ещё нужно решить, останутся ли они отдельным конфигом,
   будут ли редактироваться руками, или позже сольются с постоянной business-моделью сценариев.
+  Отдельно нужно зафиксировать правило уникальности:
+  сейчас seed явно запрещает одному пользователю одновременно находиться больше чем в одном активном monthly profile.
 - Классификация shared leaves и investment leaves уже переведена на `allocation_nodes` / `allocation_routes`.
 - Shared/group-owned report rows уже несут `owner_user_id` текущей ветки, поэтому `общие_категории` и `second_user_pay` можно считать напрямую по report rows, без остаточной формулы partner-ветки.
 - Сравнить с legacy JSON.

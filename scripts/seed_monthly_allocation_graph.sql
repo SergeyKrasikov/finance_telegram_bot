@@ -171,6 +171,8 @@ CREATE TEMP TABLE tmp_monthly_seed_users
 ON COMMIT DROP
 AS
 SELECT
+    sp.id AS profile_id,
+    sp.shared_group_slug,
     spu.user_id,
     spu.scenario_slug,
     spu.scenario_name,
@@ -180,19 +182,18 @@ JOIN public.allocation_seed_profile_users spu
   ON spu.profile_id = sp.id
  AND spu.active
 WHERE sp.profile_kind = 'monthly'
-  AND sp.slug = 'monthly_default_pair'
   AND sp.active;
 
 CREATE TEMP TABLE tmp_monthly_seed_shared_group
 ON COMMIT DROP
 AS
-SELECT
+SELECT DISTINCT
+    sp.id AS profile_id,
     sp.shared_group_slug AS slug,
     sp.shared_group_name AS "name",
     COALESCE(sp.shared_group_description, '') AS description
 FROM public.allocation_seed_profiles sp
 WHERE sp.profile_kind = 'monthly'
-  AND sp.slug = 'monthly_default_pair'
   AND sp.active;
 
 CREATE TEMP TABLE tmp_monthly_seed_binding_config
@@ -208,7 +209,6 @@ JOIN public.allocation_seed_profile_bindings spb
   ON spb.profile_id = sp.id
  AND spb.active
 WHERE sp.profile_kind = 'monthly'
-  AND sp.slug = 'monthly_default_pair'
   AND sp.active;
 
 CREATE TEMP TABLE tmp_monthly_seed_root_param_config
@@ -224,8 +224,25 @@ JOIN public.allocation_seed_profile_root_params spp
   ON spp.profile_id = sp.id
  AND spp.active
 WHERE sp.profile_kind = 'monthly'
-  AND sp.slug = 'monthly_default_pair'
   AND sp.active;
+
+DO $$
+DECLARE
+    _duplicate_user_id bigint;
+BEGIN
+    SELECT user_id
+    INTO _duplicate_user_id
+    FROM tmp_monthly_seed_users
+    GROUP BY user_id
+    HAVING COUNT(*) > 1
+    LIMIT 1;
+
+    IF _duplicate_user_id IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Monthly seed config is ambiguous: user % belongs to more than one active monthly seed profile',
+            _duplicate_user_id;
+    END IF;
+END $$;
 
 -- Shared group for common monthly leaves.
 INSERT INTO public.user_groups (slug, "name", description)
@@ -239,14 +256,22 @@ SELECT
     g.id,
     true
 FROM tmp_monthly_seed_users u
-CROSS JOIN (
-    SELECT ug.id
-    FROM public.user_groups ug
-    JOIN tmp_monthly_seed_shared_group sg
-      ON sg.slug = ug.slug
-) AS g
+JOIN public.user_groups g
+  ON g.slug = u.shared_group_slug
 ON CONFLICT (user_id, user_group_id)
 DO UPDATE SET active = EXCLUDED.active;
+
+CREATE TEMP TABLE tmp_monthly_seed_user_groups
+ON COMMIT DROP
+AS
+SELECT DISTINCT
+    u.profile_id,
+    u.user_id,
+    u.shared_group_slug,
+    g.id AS shared_group_id
+FROM tmp_monthly_seed_users u
+JOIN public.user_groups g
+  ON g.slug = u.shared_group_slug;
 
 -- Core technical and report nodes per user.
 INSERT INTO public.allocation_nodes (
@@ -324,12 +349,16 @@ SELECT DISTINCT
 FROM public.categories_category_groups ccg
 JOIN public.categories c
   ON c.id = ccg.categories_id
+JOIN tmp_monthly_seed_users seed_user
+  ON seed_user.user_id = ccg.users_id
 WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND ccg.category_groyps_id IN (1, 2, 3, 6, 7, 9, 13)
   AND ccg.categories_id NOT IN (
       SELECT DISTINCT common_ccg.categories_id
       FROM public.categories_category_groups common_ccg
-      WHERE common_ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
+      JOIN tmp_monthly_seed_users common_seed_user
+        ON common_seed_user.user_id = common_ccg.users_id
+      WHERE common_seed_user.shared_group_slug = seed_user.shared_group_slug
         AND common_ccg.category_groyps_id = 4
   )
   AND NOT EXISTS (
@@ -352,7 +381,7 @@ INSERT INTO public.allocation_nodes (
     active
 )
 SELECT
-    g.id,
+    ug.shared_group_id,
     CONCAT('cat_', common_ids.categories_id),
     c."name",
     CONCAT('Shared common monthly leaf cat_', common_ids.categories_id),
@@ -362,25 +391,21 @@ SELECT
     true,
     true
 FROM (
-    SELECT ug.id
-    FROM public.user_groups ug
-    JOIN tmp_monthly_seed_shared_group sg
-      ON sg.slug = ug.slug
-) AS g
-JOIN (
-    SELECT DISTINCT categories_id
-    FROM public.categories_category_groups
-    WHERE users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
-      AND category_groyps_id = 4
-) AS common_ids
-  ON true
+    SELECT DISTINCT
+        tug.shared_group_id,
+        ccg.categories_id
+    FROM tmp_monthly_seed_user_groups tug
+    JOIN public.categories_category_groups ccg
+      ON ccg.users_id = tug.user_id
+     AND ccg.category_groyps_id = 4
+) AS ug
 JOIN public.categories c
-  ON c.id = common_ids.categories_id
+  ON c.id = ug.categories_id
 WHERE NOT EXISTS (
     SELECT 1
     FROM public.allocation_nodes an
-    WHERE an.user_group_id = g.id
-      AND an.slug = CONCAT('cat_', common_ids.categories_id)
+    WHERE an.user_group_id = ug.shared_group_id
+      AND an.slug = CONCAT('cat_', ug.categories_id)
 );
 
 -- Keep monthly allocation group memberships in sync with legacy category mappings.
@@ -648,17 +673,18 @@ WHERE scenario.scenario_kind = 'monthly'
 -- common leaves from being preferred over the current user-owned leaf.
 UPDATE public.allocation_nodes an
 SET active = false
-WHERE an.user_group_id = (
-        SELECT ug.id
-        FROM public.user_groups ug
-        JOIN tmp_monthly_seed_shared_group sg
-          ON sg.slug = ug.slug
-    )
+FROM (
+    SELECT DISTINCT shared_group_id, shared_group_slug
+    FROM tmp_monthly_seed_user_groups
+) AS tug
+WHERE an.user_group_id = tug.shared_group_id
   AND an.slug ~ '^cat_[0-9]+$'
   AND an.legacy_category_id NOT IN (
       SELECT DISTINCT ccg.categories_id
       FROM public.categories_category_groups ccg
-      WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
+      JOIN tmp_monthly_seed_user_groups profile_user
+        ON profile_user.user_id = ccg.users_id
+      WHERE profile_user.shared_group_slug = tug.shared_group_slug
         AND ccg.category_groyps_id = 4
   );
 
@@ -684,11 +710,9 @@ WHERE r.source_node_id = src.id
           'partner_distribution'
       ))
       OR
-      (src.user_group_id = (
-          SELECT ug.id
-          FROM public.user_groups ug
-          JOIN tmp_monthly_seed_shared_group sg
-            ON sg.slug = ug.slug
+      (src.user_group_id IN (
+          SELECT DISTINCT shared_group_id
+          FROM tmp_monthly_seed_user_groups
       ) AND src.slug ~ '^cat_[0-9]+$')
   );
 
@@ -713,6 +737,9 @@ SELECT
     'monthly_income_sources -> income bucket',
     true
 FROM public.allocation_scenarios scenario
+JOIN tmp_monthly_seed_users seed_user
+  ON seed_user.user_id = scenario.owner_user_id
+ AND seed_user.scenario_slug = scenario.slug
 JOIN public.allocation_nodes root
   ON root.user_id = scenario.owner_user_id
  AND root.slug = 'monthly_income_sources'
@@ -726,8 +753,6 @@ JOIN public.allocation_nodes bound
   ON bound.id = binding.bound_node_id
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
-  AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -746,6 +771,9 @@ SELECT
     'extra_income_sources -> extra income bucket',
     true
 FROM public.allocation_scenarios scenario
+JOIN tmp_monthly_seed_users seed_user
+  ON seed_user.user_id = scenario.owner_user_id
+ AND seed_user.scenario_slug = scenario.slug
 JOIN public.allocation_nodes root
   ON root.user_id = scenario.owner_user_id
  AND root.slug = 'extra_income_sources'
@@ -759,8 +787,6 @@ JOIN public.allocation_nodes bound
   ON bound.id = binding.bound_node_id
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
-  AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -779,6 +805,9 @@ SELECT
     'free_to_gifts -> extra income bucket',
     true
 FROM public.allocation_scenarios scenario
+JOIN tmp_monthly_seed_users seed_user
+  ON seed_user.user_id = scenario.owner_user_id
+ AND seed_user.scenario_slug = scenario.slug
 JOIN public.allocation_nodes root
   ON root.user_id = scenario.owner_user_id
  AND root.slug = 'free_to_gifts'
@@ -805,8 +834,6 @@ JOIN (
   ON p.user_id = scenario.owner_user_id
  AND p.percent > 0
 WHERE scenario.scenario_kind = 'monthly'
-  AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 -- debt_reserve -> canonical reserve bucket
@@ -824,6 +851,9 @@ SELECT
     'debt_reserve -> reserve bucket',
     true
 FROM public.allocation_scenarios scenario
+JOIN tmp_monthly_seed_users seed_user
+  ON seed_user.user_id = scenario.owner_user_id
+ AND seed_user.scenario_slug = scenario.slug
 JOIN public.allocation_nodes root
   ON root.user_id = scenario.owner_user_id
  AND root.slug = 'debt_reserve'
@@ -837,8 +867,6 @@ JOIN public.allocation_nodes bound
   ON bound.id = binding.bound_node_id
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
-  AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -857,6 +885,9 @@ SELECT
     'invest_self_report -> own investment leaf',
     true
 FROM public.allocation_scenarios scenario
+JOIN tmp_monthly_seed_users seed_user
+  ON seed_user.user_id = scenario.owner_user_id
+ AND seed_user.scenario_slug = scenario.slug
 JOIN public.allocation_nodes root
   ON root.user_id = scenario.owner_user_id
  AND root.slug = 'invest_self_report'
@@ -870,8 +901,6 @@ JOIN public.allocation_nodes bound
   ON bound.id = binding.bound_node_id
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
-  AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -889,6 +918,9 @@ SELECT
     'invest_partner_report -> partner investment leaf',
     true
 FROM public.allocation_scenarios scenario
+JOIN tmp_monthly_seed_users seed_user
+  ON seed_user.user_id = scenario.owner_user_id
+ AND seed_user.scenario_slug = scenario.slug
 JOIN public.allocation_nodes root
   ON root.user_id = scenario.owner_user_id
  AND root.slug = 'invest_partner_report'
@@ -902,8 +934,6 @@ JOIN public.allocation_nodes bound
   ON bound.id = binding.bound_node_id
  AND bound.active
 WHERE scenario.scenario_kind = 'monthly'
-  AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -947,6 +977,9 @@ SELECT
     'family_contribution_out -> partner family_contribution_in',
     true
 FROM public.allocation_scenarios scenario
+JOIN tmp_monthly_seed_users seed_user
+  ON seed_user.user_id = scenario.owner_user_id
+ AND seed_user.scenario_slug = scenario.slug
 JOIN public.allocation_nodes root
   ON root.user_id = scenario.owner_user_id
  AND root.slug = 'family_contribution_out'
@@ -965,8 +998,6 @@ JOIN public.allocation_nodes dst
  AND dst.slug = 'family_contribution_in'
  AND dst.active
 WHERE scenario.scenario_kind = 'monthly'
-  AND scenario.slug = 'monthly_default'
-  AND scenario.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND scenario.active
 ON CONFLICT DO NOTHING;
 
@@ -1033,13 +1064,10 @@ JOIN public.categories c
 JOIN public.allocation_nodes src
   ON src.user_id = ccg.users_id
  AND src.slug = 'self_distribution'
+JOIN tmp_monthly_seed_user_groups tug
+  ON tug.user_id = ccg.users_id
 LEFT JOIN public.allocation_nodes common_dst
-  ON common_dst.user_group_id = (
-         SELECT ug.id
-         FROM public.user_groups ug
-         JOIN tmp_monthly_seed_shared_group sg
-           ON sg.slug = ug.slug
-     )
+  ON common_dst.user_group_id = tug.shared_group_id
  AND common_dst.slug = CONCAT('cat_', ccg.categories_id)
  AND common_dst.active
 LEFT JOIN public.allocation_nodes user_dst
@@ -1121,13 +1149,10 @@ JOIN public.categories c
 JOIN public.allocation_nodes src
   ON src.user_id = ccg.users_id
  AND src.slug = 'partner_distribution'
+JOIN tmp_monthly_seed_user_groups tug
+  ON tug.user_id = ccg.users_id
 LEFT JOIN public.allocation_nodes common_dst
-  ON common_dst.user_group_id = (
-         SELECT ug.id
-         FROM public.user_groups ug
-         JOIN tmp_monthly_seed_shared_group sg
-           ON sg.slug = ug.slug
-     )
+  ON common_dst.user_group_id = tug.shared_group_id
  AND common_dst.slug = CONCAT('cat_', ccg.categories_id)
  AND common_dst.active
 LEFT JOIN public.allocation_nodes user_dst

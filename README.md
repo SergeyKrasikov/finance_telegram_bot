@@ -482,7 +482,9 @@ graph TD
   - scalar config для seed-materialization
   - хранит `root_slug`, `param_key`, `param_value`
 - `scripts/seed_monthly_allocation_graph.sql` сначала синхронизирует default monthly profile в этих таблицах,
-  потом поднимает `tmp_monthly_seed_*` уже из БД и materialize'ит runtime graph/scenarios/routes.
+  потом поднимает `tmp_monthly_seed_*` уже из БД и materialize'ит runtime graph/scenarios/routes для всех активных monthly profiles.
+- Seed intentionally rejects ambiguous config:
+  если один `user_id` попал больше чем в один активный monthly seed profile, скрипт падает явно.
 
 ## Заметки
 - Основная точка входа: `app.py`.
