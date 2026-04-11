@@ -20,6 +20,12 @@
   Он уже поддерживает owner-level (`user`) и household-level (`user_group`) сценарии,
   а также ручной и cron-based запуск сценария через `schedule_cron` (`NULL` = manual).
   Monthly runtime уже жёстко читает оттуда `branch_source` и `bridge_source`, а single-target roots seed'ятся через `root_target`.
+- Введён bootstrap config-слой для seed:
+  - `allocation_seed_profiles`
+  - `allocation_seed_profile_users`
+  - `allocation_seed_profile_bindings`
+  - `allocation_seed_profile_root_params`
+  Monthly seed уже читает pair-config через эти таблицы, а не из локальных `VALUES` по всему телу скрипта.
 - Добавлены transition/helper-функции:
   - `find_allocation_node_id(...)`
   - `get_group_percent_sum(...)`
@@ -131,6 +137,10 @@
   но до финального продового переезда ещё нужно определить их постоянный бизнес-контракт:
   кто ими владеет, как они редактируются, как выбирается активный сценарий, какие binding kinds считаются обязательными
   и какие root params считаются обязательными для конкретного `scenario_kind`.
+- Отдельно доменно проработать bootstrap profile-модель:
+  `allocation_seed_profiles*` пока введены как технический слой для развертывания monthly graph,
+  но до финального продового переезда ещё нужно решить, останутся ли они отдельным конфигом,
+  будут ли редактироваться руками, или позже сольются с постоянной business-моделью сценариев.
 - Классификация shared leaves и investment leaves уже переведена на `allocation_nodes` / `allocation_routes`.
 - Shared/group-owned report rows уже несут `owner_user_id` текущей ветки, поэтому `общие_категории` и `second_user_pay` можно считать напрямую по report rows, без остаточной формулы partner-ветки.
 - Сравнить с legacy JSON.

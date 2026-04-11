@@ -342,13 +342,16 @@ graph TD
   а также monthly scenario root params для prep/reserve веток.
   Это защищает граф от грязных legacy group mappings вроде попадания `cat_15` в investment group и постепенно убирает business-config из тела SQL-функций.
   Pair-specific seed config теперь централизован в верхнем `tmp_monthly_seed_*` блоке, а route exclusions для investment leaves выводятся из seeded `root_target`, а не из разбросанных literal category id.
+  Источник этих `tmp_monthly_seed_*` таблиц теперь постоянный: `allocation_seed_profiles*`.
 - Источники reserve определяются динамически как пересечение legacy spend `group 8` и personal `group 15`.
 
 ### Allocation Ledger
 
 - В схему добавлена таблица `public.allocation_postings` как будущий graph-native ledger.
-- В схему добавлены `public.allocation_scenarios`, `public.allocation_scenario_node_bindings` и `public.allocation_scenario_root_params` как общий config-слой для allocation-сценариев.
+- В схему добавлены `public.allocation_scenarios`, `public.allocation_scenario_node_bindings` и `public.allocation_scenario_root_params` как общий runtime config-слой для allocation-сценариев.
   Сценарий может принадлежать либо одному `user`, либо `user_group`, поэтому схема подходит и для personal monthly, и для household monthly.
+- Отдельно добавлены `public.allocation_seed_profiles`, `public.allocation_seed_profile_users`,
+  `public.allocation_seed_profile_bindings`, `public.allocation_seed_profile_root_params` как bootstrap config-слой для seed-скриптов.
 - Минимальная форма таблицы:
   - `datetime`
   - `user_id`
@@ -458,6 +461,28 @@ graph TD
 - Monthly runtime уже использует этот слой для `salary_primary.branch_source`, single-target roots, `family_contribution_out.bridge_source`
   и prep/reserve scalar config через `allocation_scenario_root_params`.
 - Metadata fallback для `salary_primary`, `family_contribution_out` и prep/reserve roots уже убран.
+
+### Allocation Seed Profiles
+
+- `allocation_seed_profiles`
+  - `profile_kind`: тип bootstrap-профиля, сейчас `monthly`
+  - `slug`
+  - `name`
+  - `description`
+  - `shared_group_slug`, `shared_group_name`, `shared_group_description`: какой shared `user_group` должен создать seed
+  - `active`
+  - `metadata`
+- `allocation_seed_profile_users`
+  - какие пользователи входят в bootstrap-профиль
+  - `scenario_slug`, `scenario_name`, `scenario_description`: какой scenario должен быть создан для этого пользователя
+- `allocation_seed_profile_bindings`
+  - canonical root/binding config для seed-materialization
+  - хранит `root_slug`, `binding_kind`, `bound_slug`
+- `allocation_seed_profile_root_params`
+  - scalar config для seed-materialization
+  - хранит `root_slug`, `param_key`, `param_value`
+- `scripts/seed_monthly_allocation_graph.sql` сначала синхронизирует default monthly profile в этих таблицах,
+  потом поднимает `tmp_monthly_seed_*` уже из БД и materialize'ит runtime graph/scenarios/routes.
 
 ## Заметки
 - Основная точка входа: `app.py`.

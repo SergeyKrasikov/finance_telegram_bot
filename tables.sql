@@ -188,6 +188,74 @@ constraint allocation_scenario_root_params_value_check
     check (length(trim(param_value)) > 0)
 );
 
+create table if not exists public.allocation_seed_profiles (
+id bigserial primary key,
+profile_kind varchar(32) not null,
+slug varchar(100) not null,
+"name" varchar(100) not null,
+description text,
+shared_group_slug varchar(100) not null,
+shared_group_name varchar(100) not null,
+shared_group_description text,
+active boolean not null default true,
+metadata jsonb not null default '{}'::jsonb,
+created_at timestamptz not null default now(),
+constraint allocation_seed_profiles_kind_check
+    check (length(trim(profile_kind)) > 0),
+constraint allocation_seed_profiles_slug_check
+    check (length(trim(slug)) > 0),
+constraint allocation_seed_profiles_shared_group_slug_check
+    check (length(trim(shared_group_slug)) > 0)
+);
+
+create table if not exists public.allocation_seed_profile_users (
+id bigserial primary key,
+profile_id bigint not null references public.allocation_seed_profiles(id) on delete cascade,
+user_id bigint not null references public.users(id),
+scenario_slug varchar(100) not null,
+scenario_name varchar(100) not null,
+scenario_description text,
+active boolean not null default true,
+metadata jsonb not null default '{}'::jsonb,
+constraint allocation_seed_profile_users_scenario_slug_check
+    check (length(trim(scenario_slug)) > 0)
+);
+
+create table if not exists public.allocation_seed_profile_bindings (
+id bigserial primary key,
+profile_id bigint not null references public.allocation_seed_profiles(id) on delete cascade,
+user_id bigint not null references public.users(id),
+root_slug varchar(100) not null,
+binding_kind varchar(32) not null,
+bound_slug varchar(100) not null,
+priority integer not null default 100,
+active boolean not null default true,
+metadata jsonb not null default '{}'::jsonb,
+constraint allocation_seed_profile_bindings_root_slug_check
+    check (length(trim(root_slug)) > 0),
+constraint allocation_seed_profile_bindings_kind_check
+    check (length(trim(binding_kind)) > 0),
+constraint allocation_seed_profile_bindings_bound_slug_check
+    check (length(trim(bound_slug)) > 0)
+);
+
+create table if not exists public.allocation_seed_profile_root_params (
+id bigserial primary key,
+profile_id bigint not null references public.allocation_seed_profiles(id) on delete cascade,
+user_id bigint not null references public.users(id),
+root_slug varchar(100) not null,
+param_key varchar(64) not null,
+param_value text not null,
+active boolean not null default true,
+metadata jsonb not null default '{}'::jsonb,
+constraint allocation_seed_profile_root_params_root_slug_check
+    check (length(trim(root_slug)) > 0),
+constraint allocation_seed_profile_root_params_key_check
+    check (length(trim(param_key)) > 0),
+constraint allocation_seed_profile_root_params_value_check
+    check (length(trim(param_value)) > 0)
+);
+
 -- Compatibility upgrade for existing databases with varchar(3) currency columns
 DO $$
 BEGIN
@@ -280,3 +348,19 @@ CREATE INDEX IF NOT EXISTS idx_allocation_scenario_root_params_lookup
     WHERE active;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_scenario_root_params
     ON public.allocation_scenario_root_params (scenario_id, root_node_id, param_key);
+CREATE INDEX IF NOT EXISTS idx_allocation_seed_profiles_kind_active
+    ON public.allocation_seed_profiles (profile_kind, active);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_seed_profiles_kind_slug
+    ON public.allocation_seed_profiles (profile_kind, slug);
+CREATE INDEX IF NOT EXISTS idx_allocation_seed_profile_users_profile
+    ON public.allocation_seed_profile_users (profile_id, active, user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_seed_profile_users
+    ON public.allocation_seed_profile_users (profile_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_allocation_seed_profile_bindings_profile
+    ON public.allocation_seed_profile_bindings (profile_id, user_id, root_slug, binding_kind, active);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_seed_profile_bindings
+    ON public.allocation_seed_profile_bindings (profile_id, user_id, root_slug, binding_kind, bound_slug);
+CREATE INDEX IF NOT EXISTS idx_allocation_seed_profile_root_params_profile
+    ON public.allocation_seed_profile_root_params (profile_id, user_id, root_slug, param_key, active);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_seed_profile_root_params
+    ON public.allocation_seed_profile_root_params (profile_id, user_id, root_slug, param_key);

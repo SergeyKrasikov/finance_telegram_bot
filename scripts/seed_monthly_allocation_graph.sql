@@ -1,4 +1,5 @@
 -- Seed for monthly allocation graph used by public.monthly_distribute_cascade(...).
+-- Bootstrap config is stored in allocation_seed_profiles* and synchronized below.
 -- Assumptions:
 -- 1) users 249716305 and 943915310 already exist;
 -- 2) legacy categories_category_groups is already filled;
@@ -20,72 +21,211 @@ BEGIN
     END IF;
 END $$;
 
-CREATE TEMP TABLE tmp_monthly_seed_users (
-    user_id bigint PRIMARY KEY,
-    scenario_slug varchar(100) NOT NULL,
-    scenario_name varchar(100) NOT NULL,
-    scenario_description text NOT NULL
-) ON COMMIT DROP;
-
-INSERT INTO tmp_monthly_seed_users(user_id, scenario_slug, scenario_name, scenario_description)
-VALUES
-    (249716305::bigint, 'monthly_default', 'Monthly default', 'Default monthly allocation scenario'),
-    (943915310::bigint, 'monthly_default', 'Monthly default', 'Default monthly allocation scenario');
-
-CREATE TEMP TABLE tmp_monthly_seed_shared_group (
-    slug varchar(100) PRIMARY KEY,
-    "name" varchar(100) NOT NULL,
-    description text NOT NULL
-) ON COMMIT DROP;
-
-INSERT INTO tmp_monthly_seed_shared_group(slug, "name", description)
+INSERT INTO public.allocation_seed_profiles (
+    profile_kind,
+    slug,
+    "name",
+    description,
+    shared_group_slug,
+    shared_group_name,
+    shared_group_description,
+    active,
+    metadata
+)
 VALUES (
+    'monthly',
+    'monthly_default_pair',
+    'Monthly default pair',
+    'Default monthly seed profile for restored pair data',
     'monthly_pair_249716305_943915310',
     'Monthly pair 249716305/943915310',
-    'Shared allocation group for monthly cascade'
-);
+    'Shared allocation group for monthly cascade',
+    true,
+    jsonb_build_object('origin', 'seed_monthly_allocation_graph')
+)
+ON CONFLICT (profile_kind, slug)
+DO UPDATE SET
+    "name" = EXCLUDED."name",
+    description = EXCLUDED.description,
+    shared_group_slug = EXCLUDED.shared_group_slug,
+    shared_group_name = EXCLUDED.shared_group_name,
+    shared_group_description = EXCLUDED.shared_group_description,
+    active = EXCLUDED.active;
 
-CREATE TEMP TABLE tmp_monthly_seed_binding_config (
-    user_id bigint NOT NULL,
-    root_slug text NOT NULL,
-    binding_kind text NOT NULL,
-    bound_slug text NOT NULL
-) ON COMMIT DROP;
+INSERT INTO public.allocation_seed_profile_users (
+    profile_id,
+    user_id,
+    scenario_slug,
+    scenario_name,
+    scenario_description,
+    active,
+    metadata
+)
+SELECT
+    profile.id,
+    cfg.user_id,
+    cfg.scenario_slug,
+    cfg.scenario_name,
+    cfg.scenario_description,
+    true,
+    jsonb_build_object('origin', 'seed_monthly_allocation_graph')
+FROM public.allocation_seed_profiles profile
+JOIN (
+    VALUES
+        (249716305::bigint, 'monthly_default'::varchar(100), 'Monthly default'::varchar(100), 'Default monthly allocation scenario'::text),
+        (943915310::bigint, 'monthly_default'::varchar(100), 'Monthly default'::varchar(100), 'Default monthly allocation scenario'::text)
+) AS cfg(user_id, scenario_slug, scenario_name, scenario_description)
+  ON true
+WHERE profile.profile_kind = 'monthly'
+  AND profile.slug = 'monthly_default_pair'
+ON CONFLICT (profile_id, user_id)
+DO UPDATE SET
+    scenario_slug = EXCLUDED.scenario_slug,
+    scenario_name = EXCLUDED.scenario_name,
+    scenario_description = EXCLUDED.scenario_description,
+    active = EXCLUDED.active;
 
-INSERT INTO tmp_monthly_seed_binding_config(user_id, root_slug, binding_kind, bound_slug)
-VALUES
-    (249716305::bigint, 'salary_primary', 'branch_source', 'cat_16'),
-    (943915310::bigint, 'salary_primary', 'branch_source', 'cat_37'),
-    (249716305::bigint, 'monthly_income_sources', 'root_target', 'cat_16'),
-    (943915310::bigint, 'monthly_income_sources', 'root_target', 'cat_37'),
-    (249716305::bigint, 'extra_income_sources', 'root_target', 'cat_7'),
-    (943915310::bigint, 'extra_income_sources', 'root_target', 'cat_26'),
-    (249716305::bigint, 'free_to_gifts', 'root_target', 'cat_7'),
-    (943915310::bigint, 'free_to_gifts', 'root_target', 'cat_26'),
-    (249716305::bigint, 'debt_reserve', 'root_target', 'cat_28'),
-    (943915310::bigint, 'debt_reserve', 'root_target', 'cat_27'),
-    (249716305::bigint, 'invest_self_report', 'root_target', 'cat_1'),
-    (943915310::bigint, 'invest_self_report', 'root_target', 'cat_22'),
-    (249716305::bigint, 'invest_partner_report', 'root_target', 'cat_1'),
-    (943915310::bigint, 'invest_partner_report', 'root_target', 'cat_22');
+INSERT INTO public.allocation_seed_profile_bindings (
+    profile_id,
+    user_id,
+    root_slug,
+    binding_kind,
+    bound_slug,
+    priority,
+    active,
+    metadata
+)
+SELECT
+    profile.id,
+    cfg.user_id,
+    cfg.root_slug,
+    cfg.binding_kind,
+    cfg.bound_slug,
+    100,
+    true,
+    jsonb_build_object('origin', 'seed_monthly_allocation_graph')
+FROM public.allocation_seed_profiles profile
+JOIN (
+    VALUES
+        (249716305::bigint, 'salary_primary'::text, 'branch_source'::text, 'cat_16'::text),
+        (943915310::bigint, 'salary_primary'::text, 'branch_source'::text, 'cat_37'::text),
+        (249716305::bigint, 'monthly_income_sources'::text, 'root_target'::text, 'cat_16'::text),
+        (943915310::bigint, 'monthly_income_sources'::text, 'root_target'::text, 'cat_37'::text),
+        (249716305::bigint, 'extra_income_sources'::text, 'root_target'::text, 'cat_7'::text),
+        (943915310::bigint, 'extra_income_sources'::text, 'root_target'::text, 'cat_26'::text),
+        (249716305::bigint, 'free_to_gifts'::text, 'root_target'::text, 'cat_7'::text),
+        (943915310::bigint, 'free_to_gifts'::text, 'root_target'::text, 'cat_26'::text),
+        (249716305::bigint, 'debt_reserve'::text, 'root_target'::text, 'cat_28'::text),
+        (943915310::bigint, 'debt_reserve'::text, 'root_target'::text, 'cat_27'::text),
+        (249716305::bigint, 'invest_self_report'::text, 'root_target'::text, 'cat_1'::text),
+        (943915310::bigint, 'invest_self_report'::text, 'root_target'::text, 'cat_22'::text),
+        (249716305::bigint, 'invest_partner_report'::text, 'root_target'::text, 'cat_1'::text),
+        (943915310::bigint, 'invest_partner_report'::text, 'root_target'::text, 'cat_22'::text)
+) AS cfg(user_id, root_slug, binding_kind, bound_slug)
+  ON true
+WHERE profile.profile_kind = 'monthly'
+  AND profile.slug = 'monthly_default_pair'
+ON CONFLICT (profile_id, user_id, root_slug, binding_kind, bound_slug)
+DO UPDATE SET
+    priority = EXCLUDED.priority,
+    active = EXCLUDED.active;
 
-CREATE TEMP TABLE tmp_monthly_seed_root_param_config (
-    user_id bigint NOT NULL,
-    root_slug text NOT NULL,
-    param_key text NOT NULL,
-    param_value text NOT NULL
-) ON COMMIT DROP;
+INSERT INTO public.allocation_seed_profile_root_params (
+    profile_id,
+    user_id,
+    root_slug,
+    param_key,
+    param_value,
+    active,
+    metadata
+)
+SELECT
+    profile.id,
+    cfg.user_id,
+    cfg.root_slug,
+    cfg.param_key,
+    cfg.param_value,
+    true,
+    jsonb_build_object('origin', 'seed_monthly_allocation_graph')
+FROM public.allocation_seed_profiles profile
+JOIN (
+    VALUES
+        (249716305::bigint, 'monthly_income_sources'::text, 'source_legacy_group_id'::text, '11'::text),
+        (943915310::bigint, 'monthly_income_sources'::text, 'source_legacy_group_id'::text, '11'::text),
+        (249716305::bigint, 'extra_income_sources'::text, 'source_legacy_group_id'::text, '12'::text),
+        (943915310::bigint, 'extra_income_sources'::text, 'source_legacy_group_id'::text, '12'::text),
+        (249716305::bigint, 'debt_reserve'::text, 'spend_legacy_group_id'::text, '8'::text),
+        (943915310::bigint, 'debt_reserve'::text, 'spend_legacy_group_id'::text, '8'::text),
+        (249716305::bigint, 'debt_reserve'::text, 'personal_legacy_group_id'::text, '15'::text),
+        (943915310::bigint, 'debt_reserve'::text, 'personal_legacy_group_id'::text, '15'::text)
+) AS cfg(user_id, root_slug, param_key, param_value)
+  ON true
+WHERE profile.profile_kind = 'monthly'
+  AND profile.slug = 'monthly_default_pair'
+ON CONFLICT (profile_id, user_id, root_slug, param_key)
+DO UPDATE SET
+    param_value = EXCLUDED.param_value,
+    active = EXCLUDED.active;
 
-INSERT INTO tmp_monthly_seed_root_param_config(user_id, root_slug, param_key, param_value)
-VALUES
-    (249716305::bigint, 'monthly_income_sources', 'source_legacy_group_id', '11'),
-    (943915310::bigint, 'monthly_income_sources', 'source_legacy_group_id', '11'),
-    (249716305::bigint, 'extra_income_sources', 'source_legacy_group_id', '12'),
-    (943915310::bigint, 'extra_income_sources', 'source_legacy_group_id', '12'),
-    (249716305::bigint, 'debt_reserve', 'spend_legacy_group_id', '8'),
-    (943915310::bigint, 'debt_reserve', 'spend_legacy_group_id', '8'),
-    (249716305::bigint, 'debt_reserve', 'personal_legacy_group_id', '15'),
-    (943915310::bigint, 'debt_reserve', 'personal_legacy_group_id', '15');
+CREATE TEMP TABLE tmp_monthly_seed_users
+ON COMMIT DROP
+AS
+SELECT
+    spu.user_id,
+    spu.scenario_slug,
+    spu.scenario_name,
+    spu.scenario_description
+FROM public.allocation_seed_profiles sp
+JOIN public.allocation_seed_profile_users spu
+  ON spu.profile_id = sp.id
+ AND spu.active
+WHERE sp.profile_kind = 'monthly'
+  AND sp.slug = 'monthly_default_pair'
+  AND sp.active;
+
+CREATE TEMP TABLE tmp_monthly_seed_shared_group
+ON COMMIT DROP
+AS
+SELECT
+    sp.shared_group_slug AS slug,
+    sp.shared_group_name AS "name",
+    COALESCE(sp.shared_group_description, '') AS description
+FROM public.allocation_seed_profiles sp
+WHERE sp.profile_kind = 'monthly'
+  AND sp.slug = 'monthly_default_pair'
+  AND sp.active;
+
+CREATE TEMP TABLE tmp_monthly_seed_binding_config
+ON COMMIT DROP
+AS
+SELECT
+    spb.user_id,
+    spb.root_slug,
+    spb.binding_kind,
+    spb.bound_slug
+FROM public.allocation_seed_profiles sp
+JOIN public.allocation_seed_profile_bindings spb
+  ON spb.profile_id = sp.id
+ AND spb.active
+WHERE sp.profile_kind = 'monthly'
+  AND sp.slug = 'monthly_default_pair'
+  AND sp.active;
+
+CREATE TEMP TABLE tmp_monthly_seed_root_param_config
+ON COMMIT DROP
+AS
+SELECT
+    spp.user_id,
+    spp.root_slug,
+    spp.param_key,
+    spp.param_value
+FROM public.allocation_seed_profiles sp
+JOIN public.allocation_seed_profile_root_params spp
+  ON spp.profile_id = sp.id
+ AND spp.active
+WHERE sp.profile_kind = 'monthly'
+  AND sp.slug = 'monthly_default_pair'
+  AND sp.active;
 
 -- Shared group for common monthly leaves.
 INSERT INTO public.user_groups (slug, "name", description)
