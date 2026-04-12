@@ -48,8 +48,6 @@ DROP FUNCTION IF EXISTS public.find_allocation_scenario_binding_node_id(bigint, 
 DROP FUNCTION IF EXISTS public.find_allocation_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_legacy_category_id(bigint, text);
-DROP FUNCTION IF EXISTS public.require_active_allocation_node(bigint, text);
-DROP FUNCTION IF EXISTS public.assert_allocation_node_executor_access(bigint, public.allocation_nodes, text, text);
 DROP FUNCTION IF EXISTS public.get_group_percent_sum(bigint, integer);
 DROP FUNCTION IF EXISTS public.distribute_with_allocation_fallback(bigint, text, integer, integer, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.transact_group_to_allocation_fallback(bigint, integer, text, integer, varchar, text);
@@ -625,77 +623,6 @@ AS $function$
     FROM public.allocation_nodes target
     WHERE target.id = public.find_allocation_remainder_node_id(_user_id, _source_slug)
     LIMIT 1;
-$function$;
-
-
--- Loads an allocation node and enforces active status.
--- Used by allocation runtime entrypoints to keep lookup/error handling consistent.
-CREATE OR REPLACE FUNCTION public.require_active_allocation_node(
-    _node_id bigint,
-    _node_label text DEFAULT 'node'
-)
- RETURNS public.allocation_nodes
- LANGUAGE plpgsql
-AS $function$
-DECLARE
-    _node public.allocation_nodes%ROWTYPE;
-BEGIN
-    SELECT *
-    INTO _node
-    FROM public.allocation_nodes
-    WHERE id = _node_id;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Allocation % % not found', _node_label, _node_id;
-    END IF;
-
-    IF NOT _node.active THEN
-        RAISE EXCEPTION 'Allocation % % (%) is inactive', _node_label, _node.id, _node.slug;
-    END IF;
-
-    RETURN _node;
-END;
-$function$;
-
-
--- Checks whether executor can use a concrete allocation node.
--- Keeps source/source-category access validation in one place while preserving caller wording.
-CREATE OR REPLACE FUNCTION public.assert_allocation_node_executor_access(
-    _executor_user_id bigint,
-    _node public.allocation_nodes,
-    _ownership_action text DEFAULT 'use node',
-    _node_label text DEFAULT 'node'
-)
- RETURNS void
- LANGUAGE plpgsql
-AS $function$
-BEGIN
-    IF _node.user_id IS NOT NULL
-       AND _node.user_id <> _executor_user_id THEN
-        RAISE EXCEPTION
-            'Executor user % cannot % % owned by user %',
-            _executor_user_id,
-            _ownership_action,
-            _node.id,
-            _node.user_id;
-    END IF;
-
-    IF _node.user_group_id IS NOT NULL
-       AND NOT EXISTS (
-           SELECT 1
-           FROM public.user_group_memberships ugm
-           WHERE ugm.user_id = _executor_user_id
-             AND ugm.user_group_id = _node.user_group_id
-             AND ugm.active
-       ) THEN
-        RAISE EXCEPTION
-            'Executor user % is not an active member of group % for % %',
-            _executor_user_id,
-            _node.user_group_id,
-            _node_label,
-            _node.id;
-    END IF;
-END;
 $function$;
 
 
@@ -1351,7 +1278,8 @@ CREATE OR REPLACE FUNCTION public.allocation_distribute_recursive(
 AS $function$
 DECLARE
     _node public.allocation_nodes%ROWTYPE;
-    _route record;
+    _target_node public.allocation_nodes%ROWTYPE;
+    _route public.allocation_routes%ROWTYPE;
     _route_count integer;
     _remaining numeric;
     _child_amount numeric;
@@ -1371,7 +1299,30 @@ BEGIN
 
     SELECT *
     INTO _node
-    FROM public.require_active_allocation_node(_source_node_id, 'node');
+    FROM public.allocation_nodes
+    WHERE id = _source_node_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Allocation node % not found', _source_node_id;
+    END IF;
+
+    IF NOT _node.active THEN
+        RAISE EXCEPTION 'Allocation node % (%) is inactive', _node.id, _node.slug;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO _route_count
+    FROM public.allocation_routes
+    WHERE source_node_id = _source_node_id
+      AND active;
+
+    -- Явно запрещаем ноду, которая одновременно является и маршрутизатором, и leaf-точкой записи.
+    IF _route_count > 0 AND _node.legacy_category_id IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Allocation node % (%) has both outgoing routes and legacy_category_id; mixed nodes are not supported',
+            _node.id,
+            _node.slug;
+    END IF;
 
     -- Report-сумма считается по входящей сумме в ноду.
     -- Это позволяет включать в отчет как промежуточные report-ноды, так и конечные листья.
@@ -1384,140 +1335,6 @@ BEGIN
         report_amount := _amount;
         RETURN NEXT;
     END IF;
-
-    _route_count := 0;
-    _remaining := _amount;
-
-    -- One-pass route load:
-    -- 1) joins target nodes once;
-    -- 2) carries route stats via window functions;
-    -- 3) keeps the remainder route ordered after percentage routes.
-    FOR _route IN
-        SELECT
-            route.id,
-            route.target_node_id,
-            route.percent,
-            COUNT(*) OVER () AS route_count,
-            COUNT(*) FILTER (WHERE route.percent = 1) OVER () AS remainder_count,
-            COALESCE(SUM(route.percent) FILTER (WHERE route.percent < 1) OVER (), 0) AS percent_sum,
-            target.id AS target_id,
-            target.user_id AS target_user_id,
-            target.user_group_id AS target_user_group_id,
-            target.slug AS target_slug
-        FROM public.allocation_routes route
-        LEFT JOIN public.allocation_nodes target
-          ON target.id = route.target_node_id
-        WHERE route.source_node_id = _source_node_id
-          AND route.active
-        ORDER BY
-            CASE WHEN route.percent = 1 THEN 1 ELSE 0 END,
-            route.percent,
-            route.id
-    LOOP
-        IF _route_count = 0 THEN
-            _route_count := _route.route_count;
-
-            -- Явно запрещаем ноду, которая одновременно является и маршрутизатором, и leaf-точкой записи.
-            IF _route_count > 0 AND _node.legacy_category_id IS NOT NULL THEN
-                RAISE EXCEPTION
-                    'Allocation node % (%) has both outgoing routes and legacy_category_id; mixed nodes are not supported',
-                    _node.id,
-                    _node.slug;
-            END IF;
-
-            IF _route.remainder_count > 1 THEN
-                RAISE EXCEPTION
-                    'Allocation node % has % remainder routes; expected at most one',
-                    _source_node_id,
-                    _route.remainder_count;
-            END IF;
-
-            IF _route.percent_sum > 1 THEN
-                RAISE EXCEPTION
-                    'Allocation node % has percent sum % > 1',
-                    _source_node_id,
-                    _route.percent_sum;
-            END IF;
-        END IF;
-
-        -- Маршрут с percent = 1 забирает весь остаток после процентных веток.
-        IF _route.percent = 1 THEN
-            _child_amount := _remaining;
-        ELSE
-            _child_amount := _amount * _route.percent;
-            _remaining := _remaining - _child_amount;
-        END IF;
-
-        IF _child_amount IS NULL OR _child_amount <= 0 THEN
-            CONTINUE;
-        END IF;
-
-        IF _route.target_id IS NULL THEN
-            RAISE EXCEPTION 'Allocation target node % not found', _route.target_node_id;
-        END IF;
-
-        -- При переходе в partner-ветку меняем "владельца" downstream-проводок на целевого пользователя.
-        -- Это важно для shared/group-owned leaf-nodes: они должны писаться от имени текущей ветки,
-        -- а не всегда от исходного executor_user_id.
-        _next_executor_user_id := COALESCE(_route.target_user_id, _executor_user_id);
-
-        -- Partner bridge source is resolved from the current bridge node config
-        -- plus the owner of the downstream family_contribution_in branch.
-        IF _route.target_slug = 'family_contribution_in' THEN
-            SELECT public.find_allocation_scenario_binding_node_id(
-                _executor_user_id,
-                'monthly',
-                _node.id,
-                'bridge_source'
-            )
-            INTO _next_source_category_node_id;
-
-            IF _next_source_category_node_id IS NULL THEN
-                RAISE EXCEPTION
-                    'family_contribution_out node % must define bridge_source binding',
-                    _node.id;
-            END IF;
-
-            SELECT legacy_category_id
-            INTO _next_category_id_from
-            FROM public.allocation_nodes
-            WHERE id = _next_source_category_node_id
-              AND active
-              AND (
-                  user_id = _next_executor_user_id
-                  OR user_group_id IN (
-                      SELECT ugm.user_group_id
-                      FROM public.user_group_memberships ugm
-                      WHERE ugm.user_id = _next_executor_user_id
-                        AND ugm.active
-                  )
-              );
-
-            IF NOT FOUND THEN
-                RAISE EXCEPTION
-                    'family_contribution_in target node % cannot use bridge_source binding node % for user %',
-                    _route.target_node_id,
-                    _next_source_category_node_id,
-                    _next_executor_user_id;
-            END IF;
-        ELSE
-            _next_category_id_from := _category_id_from;
-            _next_source_category_node_id := _source_category_node_id;
-        END IF;
-
-        RETURN QUERY
-        SELECT *
-        FROM public.allocation_distribute_recursive(
-            _next_executor_user_id,
-            _route.target_node_id,
-            _child_amount,
-            _currency,
-            _next_category_id_from,
-            _description,
-            _path || _source_node_id,
-            _next_source_category_node_id
-        );
-    END LOOP;
 
     -- Лист определяется отсутствием исходящих активных маршрутов.
     -- Legacy category id is optional for graph-native leaves; technical nodes still must route onward.
@@ -1568,6 +1385,105 @@ BEGIN
 
         RETURN;
     END IF;
+
+    PERFORM public.validate_allocation_routes(_source_node_id);
+
+    _remaining := _amount;
+
+    FOR _route IN
+        SELECT *
+        FROM public.allocation_routes
+        WHERE source_node_id = _source_node_id
+          AND active
+        ORDER BY
+            CASE WHEN percent = 1 THEN 1 ELSE 0 END,
+            percent,
+            id
+    LOOP
+
+        -- Маршрут с percent = 1 забирает весь остаток после процентных веток.
+        IF _route.percent = 1 THEN
+            _child_amount := _remaining;
+        ELSE
+            _child_amount := _amount * _route.percent;
+            _remaining := _remaining - _child_amount;
+        END IF;
+
+        IF _child_amount IS NULL OR _child_amount <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        SELECT *
+        INTO _target_node
+        FROM public.allocation_nodes
+        WHERE id = _route.target_node_id;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Allocation target node % not found', _route.target_node_id;
+        END IF;
+
+        -- При переходе в partner-ветку меняем "владельца" downstream-проводок на целевого пользователя.
+        -- Это важно для shared/group-owned leaf-nodes: они должны писаться от имени текущей ветки,
+        -- а не всегда от исходного executor_user_id.
+        _next_executor_user_id := COALESCE(_target_node.user_id, _executor_user_id);
+
+        -- Partner bridge source is resolved from the current bridge node config
+        -- plus the owner of the downstream family_contribution_in branch.
+        IF _target_node.slug = 'family_contribution_in' THEN
+            SELECT public.find_allocation_scenario_binding_node_id(
+                _executor_user_id,
+                'monthly',
+                _node.id,
+                'bridge_source'
+            )
+            INTO _next_source_category_node_id;
+
+            IF _next_source_category_node_id IS NULL THEN
+                RAISE EXCEPTION
+                    'family_contribution_out node % must define bridge_source binding',
+                    _node.id;
+            END IF;
+
+            SELECT legacy_category_id
+            INTO _next_category_id_from
+            FROM public.allocation_nodes
+            WHERE id = _next_source_category_node_id
+              AND active
+              AND (
+                  user_id = _next_executor_user_id
+                  OR user_group_id IN (
+                      SELECT ugm.user_group_id
+                      FROM public.user_group_memberships ugm
+                      WHERE ugm.user_id = _next_executor_user_id
+                        AND ugm.active
+                  )
+              );
+
+            IF NOT FOUND THEN
+                RAISE EXCEPTION
+                    'family_contribution_in target node % cannot use bridge_source binding node % for user %',
+                    _target_node.id,
+                    _next_source_category_node_id,
+                    _next_executor_user_id;
+            END IF;
+        ELSE
+            _next_category_id_from := _category_id_from;
+            _next_source_category_node_id := _source_category_node_id;
+        END IF;
+
+        RETURN QUERY
+        SELECT *
+        FROM public.allocation_distribute_recursive(
+            _next_executor_user_id,
+            _route.target_node_id,
+            _child_amount,
+            _currency,
+            _next_category_id_from,
+            _description,
+            _path || _source_node_id,
+            _next_source_category_node_id
+        );
+    END LOOP;
 END;
 $function$;
 
@@ -1607,26 +1523,80 @@ BEGIN
 
     SELECT *
     INTO _source_node
-    FROM public.require_active_allocation_node(_source_node_id, 'source node');
+    FROM public.allocation_nodes
+    WHERE id = _source_node_id;
 
-    PERFORM public.assert_allocation_node_executor_access(
-        _executor_user_id,
-        _source_node,
-        'start distribution from node',
-        'source node'
-    );
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Allocation source node % not found', _source_node_id;
+    END IF;
+
+    IF NOT _source_node.active THEN
+        RAISE EXCEPTION 'Allocation source node % (%) is inactive', _source_node.id, _source_node.slug;
+    END IF;
+
+    IF _source_node.user_id IS NOT NULL AND _source_node.user_id <> _executor_user_id THEN
+        RAISE EXCEPTION
+            'Executor user % cannot start distribution from node % owned by user %',
+            _executor_user_id,
+            _source_node.id,
+            _source_node.user_id;
+    END IF;
+
+    IF _source_node.user_group_id IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM public.user_group_memberships ugm
+           WHERE ugm.user_id = _executor_user_id
+             AND ugm.user_group_id = _source_node.user_group_id
+             AND ugm.active
+       ) THEN
+        RAISE EXCEPTION
+            'Executor user % is not an active member of group % for source node %',
+            _executor_user_id,
+            _source_node.user_group_id,
+            _source_node.id;
+    END IF;
 
     IF _source_category_node_id IS NOT NULL THEN
         SELECT *
         INTO _source_category_node
-        FROM public.require_active_allocation_node(_source_category_node_id, 'source category node');
+        FROM public.allocation_nodes
+        WHERE id = _source_category_node_id;
 
-        PERFORM public.assert_allocation_node_executor_access(
-            _executor_user_id,
-            _source_category_node,
-            'use source category node',
-            'source category node'
-        );
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Allocation source category node % not found', _source_category_node_id;
+        END IF;
+
+        IF NOT _source_category_node.active THEN
+            RAISE EXCEPTION
+                'Allocation source category node % (%) is inactive',
+                _source_category_node.id,
+                _source_category_node.slug;
+        END IF;
+
+        IF _source_category_node.user_id IS NOT NULL
+           AND _source_category_node.user_id <> _executor_user_id THEN
+            RAISE EXCEPTION
+                'Executor user % cannot use source category node % owned by user %',
+                _executor_user_id,
+                _source_category_node.id,
+                _source_category_node.user_id;
+        END IF;
+
+        IF _source_category_node.user_group_id IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1
+               FROM public.user_group_memberships ugm
+               WHERE ugm.user_id = _executor_user_id
+                 AND ugm.user_group_id = _source_category_node.user_group_id
+                 AND ugm.active
+           ) THEN
+            RAISE EXCEPTION
+                'Executor user % is not an active member of group % for source category node %',
+                _executor_user_id,
+                _source_category_node.user_group_id,
+                _source_category_node.id;
+        END IF;
 
         IF _category_id_from IS NULL THEN
             _category_id_from := _source_category_node.legacy_category_id;
