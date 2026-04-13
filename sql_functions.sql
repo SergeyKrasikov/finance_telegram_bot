@@ -1049,53 +1049,6 @@ END;
 $function$;
 
 
--- Runs allocation_distribute(...) and returns its ordered report rows as JSON.
--- Shared by monthly entrypoints so report JSON shape stays consistent.
-CREATE OR REPLACE FUNCTION public.build_allocation_report_json(
-    _executor_user_id bigint,
-    _source_node_id bigint,
-    _amount numeric,
-    _currency varchar DEFAULT 'RUB',
-    _category_id_from integer DEFAULT NULL,
-    _description text DEFAULT 'allocation cascade',
-    _source_category_node_id bigint DEFAULT NULL
-)
- RETURNS jsonb
- LANGUAGE sql
-AS $function$
-    WITH distributed AS (
-        SELECT *
-        FROM public.allocation_distribute(
-            _executor_user_id,
-            _source_node_id,
-            _amount,
-            _currency,
-            _category_id_from,
-            _description,
-            _source_category_node_id
-        )
-    )
-    SELECT COALESCE(
-        jsonb_agg(
-            jsonb_build_object(
-                'owner_user_id', owner_user_id,
-                'owner_user_group_id', owner_user_group_id,
-                'node_id', report_node_id,
-                'slug', report_node_slug,
-                'name', report_node_name,
-                'amount', report_amount
-            )
-            ORDER BY
-                owner_user_id NULLS LAST,
-                owner_user_group_id NULLS LAST,
-                report_node_name
-        ),
-        '[]'::jsonb
-    )
-    FROM distributed;
-$function$;
-
-
 -- Runs the monthly reserve rule:
 -- move 1% of each negative personal-spend balance into debt_reserve.
 CREATE OR REPLACE FUNCTION public.run_monthly_debt_reserve(
@@ -1815,6 +1768,53 @@ BEGIN
         distributed.owner_user_group_id NULLS LAST,
         distributed.report_node_name;
 END;
+$function$;
+
+
+-- Runs allocation_distribute(...) and returns its ordered report rows as JSON.
+-- Shared by monthly entrypoints so report JSON shape stays consistent.
+CREATE OR REPLACE FUNCTION public.build_allocation_report_json(
+    _executor_user_id bigint,
+    _source_node_id bigint,
+    _amount numeric,
+    _currency varchar DEFAULT 'RUB',
+    _category_id_from integer DEFAULT NULL,
+    _description text DEFAULT 'allocation cascade',
+    _source_category_node_id bigint DEFAULT NULL
+)
+ RETURNS jsonb
+ LANGUAGE sql
+AS $function$
+    WITH distributed AS (
+        SELECT *
+        FROM public.allocation_distribute(
+            _executor_user_id,
+            _source_node_id,
+            _amount,
+            _currency,
+            _category_id_from,
+            _description,
+            _source_category_node_id
+        )
+    )
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'owner_user_id', owner_user_id,
+                'owner_user_group_id', owner_user_group_id,
+                'node_id', report_node_id,
+                'slug', report_node_slug,
+                'name', report_node_name,
+                'amount', report_amount
+            )
+            ORDER BY
+                owner_user_id NULLS LAST,
+                owner_user_group_id NULLS LAST,
+                report_node_name
+        ),
+        '[]'::jsonb
+    )
+    FROM distributed;
 $function$;
 
 
