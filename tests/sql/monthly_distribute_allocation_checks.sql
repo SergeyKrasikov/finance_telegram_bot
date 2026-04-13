@@ -176,6 +176,7 @@ DO $$
 DECLARE
     root_id bigint;
     source_node_id bigint;
+    personal_node_id bigint;
     out jsonb;
     stage_amount numeric;
     personal_amount numeric;
@@ -188,6 +189,8 @@ DECLARE
     common_owner_user_id bigint;
     posted_rows integer;
     linked_legacy_rows integer;
+    helper_source_balance numeric;
+    helper_personal_balance numeric;
 BEGIN
     SELECT id
     INTO root_id
@@ -200,6 +203,12 @@ BEGIN
     FROM allocation_nodes
     WHERE user_id = 906011
       AND slug = 'test_monthly_source';
+
+    SELECT id
+    INTO personal_node_id
+    FROM allocation_nodes
+    WHERE user_id = 906011
+      AND slug = 'test_monthly_personal';
 
     out := public.monthly_distribute_allocation(
         906011,
@@ -318,6 +327,26 @@ BEGIN
 
     IF abs(source_balance) > 1e-9 THEN
         RAISE EXCEPTION 'Expected source category balance 0 after monthly allocation debit, got %', source_balance;
+    END IF;
+
+    SELECT
+        MAX(CASE WHEN node_id = source_node_id THEN balance END),
+        MAX(CASE WHEN node_id = personal_node_id THEN balance END)
+    INTO
+        helper_source_balance,
+        helper_personal_balance
+    FROM public.get_allocation_node_balances(
+        906011,
+        ARRAY[source_node_id, personal_node_id],
+        'RUB'
+    );
+
+    IF abs(helper_source_balance) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected batch helper source balance 0 after monthly allocation debit, got %', helper_source_balance;
+    END IF;
+
+    IF abs(helper_personal_balance - 10) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected batch helper personal balance 10, got %', helper_personal_balance;
     END IF;
 
     SELECT COUNT(*)

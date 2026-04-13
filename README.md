@@ -117,6 +117,7 @@ bash scripts/apply_db_schema.sh finance_telegram_bot_postgres_1 my_finance_bot m
   - `tests/sql/ledger_write_path_checks.sql`
   - `tests/sql/balance_functions_checks.sql`
   - `tests/sql/monthly_business_checks.sql`
+  - `tests/sql/monthly_distribute_cascade_checks.sql`
   - `tests/sql/monthly_distribute_golden.sql`
 
 ## Переменные окружения

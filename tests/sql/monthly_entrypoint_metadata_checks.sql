@@ -11,6 +11,9 @@ DECLARE
     recursive_def text;
     binding_helper_def text;
     root_param_helper_def text;
+    salary_source_helper_def text;
+    reserve_helper_def text;
+    report_json_helper_def text;
 BEGIN
     SELECT EXISTS (
         SELECT 1
@@ -50,6 +53,15 @@ BEGIN
     SELECT pg_get_functiondef('public.find_allocation_scenario_root_param_value(bigint,text,bigint,text)'::regprocedure)
     INTO root_param_helper_def;
 
+    SELECT pg_get_functiondef('public.resolve_monthly_salary_source(bigint,bigint,integer)'::regprocedure)
+    INTO salary_source_helper_def;
+
+    SELECT pg_get_functiondef('public.run_monthly_debt_reserve(bigint,varchar,text)'::regprocedure)
+    INTO reserve_helper_def;
+
+    SELECT pg_get_functiondef('public.build_allocation_report_json(bigint,bigint,numeric,varchar,integer,text,bigint)'::regprocedure)
+    INTO report_json_helper_def;
+
     IF POSITION('allocation_scenarios' IN binding_helper_def) = 0
        OR POSITION('allocation_scenario_node_bindings' IN binding_helper_def) = 0 THEN
         RAISE EXCEPTION 'Expected scenario binding helper to read allocation_scenarios and allocation_scenario_node_bindings';
@@ -60,32 +72,51 @@ BEGIN
         RAISE EXCEPTION 'Expected scenario root param helper to read allocation_scenarios and allocation_scenario_root_params';
     END IF;
 
-    IF POSITION('find_allocation_scenario_binding_node_id' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to resolve salary source via scenario bindings';
+    IF POSITION('resolve_monthly_salary_source' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to delegate salary source resolution to helper';
     END IF;
 
-    IF POSITION('branch_source' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to require branch_source binding';
+    IF POSITION('find_allocation_scenario_binding_node_id' IN salary_source_helper_def) = 0 THEN
+        RAISE EXCEPTION 'Expected resolve_monthly_salary_source() to resolve salary source via scenario bindings';
     END IF;
 
-    IF POSITION('metadata->>''source_category_node_id''' IN cascade_def) > 0 THEN
-        RAISE EXCEPTION 'monthly_distribute_cascade() still reads salary source from metadata fallback';
+    IF POSITION('branch_source' IN salary_source_helper_def) = 0 THEN
+        RAISE EXCEPTION 'Expected resolve_monthly_salary_source() to require branch_source binding';
     END IF;
 
-    IF POSITION('find_allocation_scenario_root_param_value' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to resolve prep/reserve config via scenario root params';
+    IF POSITION('metadata->>''source_category_node_id''' IN salary_source_helper_def) > 0 THEN
+        RAISE EXCEPTION 'resolve_monthly_salary_source() still reads salary source from metadata fallback';
+    END IF;
+
+    IF POSITION('run_monthly_group_source_root' IN cascade_def) = 0
+       OR POSITION('run_monthly_debt_reserve' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to delegate prep/reserve steps to helpers';
+    END IF;
+
+    IF POSITION('build_allocation_report_json' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to delegate report JSON building to helper';
+    END IF;
+
+    IF POSITION('allocation_distribute' IN report_json_helper_def) = 0
+       OR POSITION('jsonb_agg' IN report_json_helper_def) = 0 THEN
+        RAISE EXCEPTION 'Expected build_allocation_report_json() to wrap allocation_distribute() and ordered jsonb_agg';
+    END IF;
+
+    IF POSITION('find_allocation_scenario_root_param_value' IN cascade_def) = 0
+       AND POSITION('find_allocation_scenario_root_param_value' IN reserve_helper_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly monthly helpers to resolve prep/reserve config via scenario root params';
     END IF;
 
     IF POSITION('source_legacy_group_id' IN cascade_def) = 0
-       OR POSITION('spend_legacy_group_id' IN cascade_def) = 0
-       OR POSITION('personal_legacy_group_id' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to read prep/reserve keys via scenario root params';
+       OR POSITION('spend_legacy_group_id' IN reserve_helper_def) = 0
+       OR POSITION('personal_legacy_group_id' IN reserve_helper_def) = 0 THEN
+        RAISE EXCEPTION 'Expected monthly prep/reserve helpers to keep required scenario root param keys';
     END IF;
 
     IF POSITION('metadata->>''source_legacy_group_id''' IN cascade_def) > 0
-       OR POSITION('metadata->>''spend_legacy_group_id''' IN cascade_def) > 0
-       OR POSITION('metadata->>''personal_legacy_group_id''' IN cascade_def) > 0 THEN
-        RAISE EXCEPTION 'monthly_distribute_cascade() still reads prep/reserve config from root metadata';
+       OR POSITION('metadata->>''spend_legacy_group_id''' IN reserve_helper_def) > 0
+       OR POSITION('metadata->>''personal_legacy_group_id''' IN reserve_helper_def) > 0 THEN
+        RAISE EXCEPTION 'monthly prep/reserve helpers still read config from root metadata';
     END IF;
 
     IF POSITION('legacy_group_id = 11' IN cascade_def) > 0
@@ -95,8 +126,8 @@ BEGIN
         RAISE EXCEPTION 'monthly_distribute_cascade() still hard-codes monthly legacy group ids';
     END IF;
 
-    IF POSITION('find_allocation_category_node_id_by_legacy' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'Expected monthly_distribute_cascade() to keep legacy income category fallback during migration';
+    IF POSITION('find_allocation_category_node_id_by_legacy' IN salary_source_helper_def) = 0 THEN
+        RAISE EXCEPTION 'Expected resolve_monthly_salary_source() to keep legacy income category fallback during migration';
     END IF;
 
     SELECT pg_get_functiondef(

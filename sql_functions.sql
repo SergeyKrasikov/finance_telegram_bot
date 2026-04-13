@@ -28,6 +28,7 @@ DROP FUNCTION IF EXISTS public.get_category_balance_with_currency(bigint, intege
 DROP FUNCTION IF EXISTS public.get_category_balance_with_currency_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
 DROP FUNCTION IF EXISTS public.get_category_balance_v2(bigint, integer, varchar);
+DROP FUNCTION IF EXISTS public.get_allocation_node_balances(bigint, bigint[], varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance(bigint, bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text, varchar);
 DROP FUNCTION IF EXISTS public.find_allocation_category_node_id_by_legacy(bigint, integer);
@@ -45,10 +46,14 @@ DROP FUNCTION IF EXISTS public.get_all_users_id();
 DROP FUNCTION IF EXISTS public.is_technical_cashflow_description(text);
 DROP FUNCTION IF EXISTS public.get_users_id(bigint);
 DROP FUNCTION IF EXISTS public.find_allocation_scenario_binding_node_id(bigint, text, bigint, text);
+DROP FUNCTION IF EXISTS public.require_allocation_root_id(bigint, text);
+DROP FUNCTION IF EXISTS public.resolve_monthly_salary_source(bigint, bigint, integer);
 DROP FUNCTION IF EXISTS public.find_allocation_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_legacy_category_id(bigint, text);
 DROP FUNCTION IF EXISTS public.get_group_percent_sum(bigint, integer);
+DROP FUNCTION IF EXISTS public.run_monthly_group_source_root(bigint, text, text, varchar, text);
+DROP FUNCTION IF EXISTS public.run_monthly_debt_reserve(bigint, varchar, text);
 DROP FUNCTION IF EXISTS public.distribute_with_allocation_fallback(bigint, text, integer, integer, numeric, varchar, text);
 DROP FUNCTION IF EXISTS public.transact_group_to_allocation_fallback(bigint, integer, text, integer, varchar, text);
 DROP FUNCTION IF EXISTS public.reserve_negative_personal_expenses_to_allocation_fallback(bigint, text, text, integer, numeric, varchar, text);
@@ -60,6 +65,7 @@ DROP FUNCTION IF EXISTS public.allocation_distribute(bigint, bigint, numeric, va
 DROP FUNCTION IF EXISTS public.allocation_distribute(bigint, bigint, numeric, varchar, integer, text, bigint);
 DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, integer, varchar, text);
 DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, integer, varchar, text, bigint);
+DROP FUNCTION IF EXISTS public.build_allocation_report_json(bigint, bigint, numeric, varchar, integer, text, bigint);
 DROP FUNCTION IF EXISTS public.monthly_allocation_report_metrics(bigint, bigint, jsonb);
 DROP FUNCTION IF EXISTS public.monthly_distribute_cascade(bigint, integer);
 
@@ -195,6 +201,74 @@ $function$;
 
 -- Возвращает баланс allocation-ноды по новому graph-native ledger.
 -- Используется как read-helper во время перехода с cash_flow на allocation_postings.
+CREATE OR REPLACE FUNCTION public.get_allocation_node_balances(
+    _user_id bigint,
+    _node_ids bigint[],
+    _currency CHARACTER VARYING DEFAULT 'RUB'::CHARACTER VARYING
+) RETURNS TABLE(node_id bigint, balance numeric)
+LANGUAGE sql
+STABLE
+AS $function$
+    WITH target_nodes AS (
+        SELECT DISTINCT source_node_id AS node_id
+        FROM unnest(COALESCE(_node_ids, ARRAY[]::bigint[])) AS source_node_id
+        WHERE source_node_id IS NOT NULL
+    ),
+    household_users AS (
+        SELECT member.user_id
+        FROM public.get_users_id(_user_id) AS member
+    ),
+    latest_rates AS (
+        SELECT DISTINCT ON (currency)
+            currency,
+            rate
+        FROM public.exchange_rates
+        ORDER BY currency, datetime DESC
+    ),
+    target_rate AS (
+        SELECT rate
+        FROM latest_rates
+        WHERE currency = _currency
+    ),
+    posting_deltas AS (
+        SELECT
+            ap.to_node_id AS node_id,
+            ap.value AS value,
+            ap.currency
+        FROM public.allocation_postings ap
+        JOIN target_nodes tn
+          ON tn.node_id = ap.to_node_id
+        WHERE ap.to_node_id IS NOT NULL
+          AND ap.user_id IN (SELECT user_id FROM household_users)
+
+        UNION ALL
+
+        SELECT
+            ap.from_node_id AS node_id,
+            -ap.value AS value,
+            ap.currency
+        FROM public.allocation_postings ap
+        JOIN target_nodes tn
+          ON tn.node_id = ap.from_node_id
+        WHERE ap.from_node_id IS NOT NULL
+          AND ap.user_id IN (SELECT user_id FROM household_users)
+    )
+    SELECT
+        tn.node_id,
+        COALESCE(SUM(pd.value / (src_rate.rate / target_rate.rate)), 0) AS balance
+    FROM target_nodes tn
+    CROSS JOIN target_rate
+    LEFT JOIN posting_deltas pd
+      ON pd.node_id = tn.node_id
+    LEFT JOIN latest_rates src_rate
+      ON src_rate.currency = pd.currency
+    GROUP BY tn.node_id
+    ORDER BY tn.node_id;
+$function$;
+
+
+-- Возвращает баланс allocation-ноды по новому graph-native ledger.
+-- Используется как read-helper во время перехода с cash_flow на allocation_postings.
 CREATE OR REPLACE FUNCTION public.get_allocation_node_balance(
     _user_id bigint,
     _node_id bigint,
@@ -205,32 +279,13 @@ AS $function$
 DECLARE
     result NUMERIC;
 BEGIN
-    WITH _exchange_rates AS (
-        SELECT DISTINCT ON (currency)
-            currency,
-            rate
-        FROM exchange_rates
-        ORDER BY currency, datetime DESC
-    ),
-    posting_data AS (
-        SELECT
-            CASE
-                WHEN to_node_id = _node_id THEN value
-                ELSE -value
-            END AS value,
-            currency
-        FROM public.allocation_postings ap
-        WHERE (_node_id IN (ap.to_node_id, ap.from_node_id))
-          AND ap.user_id IN (SELECT get_users_id(_user_id))
-    )
-    SELECT
-        SUM(p.value / (src_rate.rate / target_rate.rate))
+    SELECT balances.balance
     INTO result
-    FROM posting_data p
-    JOIN _exchange_rates src_rate
-      ON src_rate.currency = p.currency
-    JOIN _exchange_rates target_rate
-      ON target_rate.currency = _currency;
+    FROM public.get_allocation_node_balances(
+        _user_id,
+        ARRAY[_node_id],
+        _currency
+    ) balances;
 
     RETURN result;
 END;
@@ -777,270 +832,50 @@ END;
 $function$;
 
 
--- Graph-native monthly distribution.
--- Preserves the Telegram report shape from legacy monthly_distribute(),
--- but intentionally uses clean monthly semantics for new paths:
--- explicit investment, explicit family contribution, then clean remainder split.
--- Важно:
--- 1) не возвращаться к грязным legacy-дублям percent/group formulas;
--- 2) менять её нужно по одной ветке и после каждого изменения прогонять SQL checks;
--- 3) legacy monthly_distribute() сохраняется ниже как reference/rollback и не должна вызываться из public.monthly().
-CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(
+-- Resolves an active user-owned allocation root by slug.
+-- Monthly runtime uses strict roots, so missing roots should fail loudly.
+CREATE OR REPLACE FUNCTION public.require_allocation_root_id(
     _user_id bigint,
-    _income_category integer DEFAULT NULL
+    _slug text
 )
- RETURNS jsonb
+ RETURNS bigint
  LANGUAGE plpgsql
 AS $function$
 DECLARE
-    _sum_value numeric(10,2);
-    _free_money numeric(10,2);
-    _second_member_id bigint;
-    _sum_earnings numeric;
-    _sum_spend numeric;
-    _monthly_income_root_id bigint;
-    _monthly_income_source_group_id integer;
-    _extra_income_root_id bigint;
-    _extra_income_source_group_id integer;
-    _free_to_gifts_root_id bigint;
-    _free_node_id bigint;
-    _reserve_root_id bigint;
-    _reserve_spend_group_id integer;
-    _reserve_personal_group_id integer;
-    _salary_primary_root_id bigint;
+    _node_id bigint;
+BEGIN
+    _node_id := public.find_allocation_node_id(_user_id, _slug);
+
+    IF _node_id IS NULL THEN
+        RAISE EXCEPTION
+            '% allocation root is required for user %',
+            _slug,
+            _user_id;
+    END IF;
+
+    RETURN _node_id;
+END;
+$function$;
+
+
+-- Resolves the salary_primary source node for monthly cascade.
+-- Keeps the scenario binding path plus the temporary legacy category fallback.
+CREATE OR REPLACE FUNCTION public.resolve_monthly_salary_source(
+    _user_id bigint,
+    _salary_primary_root_id bigint,
+    _income_category integer DEFAULT NULL
+)
+ RETURNS TABLE(
+    source_node_id bigint,
+    source_legacy_category_id integer
+ )
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
     _income_source_node_id bigint;
     _income_source_node public.allocation_nodes%ROWTYPE;
-    _source record;
-    _balance numeric;
-    _reserve_amount numeric;
-    _report_rows jsonb := '[]'::jsonb;
-    _branch_report jsonb := '[]'::jsonb;
-    _report_metrics jsonb := '{}'::jsonb;
+    _resolved_income_category integer := _income_category;
 BEGIN
-    -- Шаг 1. Allocation-only подготовка monthly incomes via monthly_income_sources root config.
-    _monthly_income_root_id := public.find_allocation_node_id(_user_id, 'monthly_income_sources');
-
-    IF _monthly_income_root_id IS NULL THEN
-        RAISE EXCEPTION
-            'monthly_income_sources allocation root is required for user %',
-            _user_id;
-    END IF;
-
-    _monthly_income_source_group_id := NULLIF(
-        public.find_allocation_scenario_root_param_value(
-            _user_id,
-            'monthly',
-            _monthly_income_root_id,
-            'source_legacy_group_id'
-        ),
-        ''
-    )::integer;
-
-    IF _monthly_income_source_group_id IS NULL THEN
-        RAISE EXCEPTION
-            'monthly_income_sources scenario param source_legacy_group_id is required for user %',
-            _user_id;
-    END IF;
-
-    FOR _source IN
-        SELECT
-            source_node.id AS source_category_node_id,
-            public.get_allocation_node_balance(_user_id, source_node.id, 'RUB') AS balance
-        FROM public.allocation_nodes source_node
-        JOIN public.allocation_node_groups source_group
-          ON source_group.node_id = source_node.id
-         AND source_group.active
-        WHERE source_node.user_id = _user_id
-          AND source_node.active
-          AND source_group.legacy_group_id = _monthly_income_source_group_id
-        ORDER BY source_node.id
-    LOOP
-        IF COALESCE(_source.balance, 0) <= 0 THEN
-            CONTINUE;
-        END IF;
-
-        PERFORM public.allocation_distribute(
-            _user_id::bigint,
-            _monthly_income_root_id::bigint,
-            _source.balance::numeric,
-            'RUB'::varchar,
-            NULL::integer,
-            'monthly distribute'::text,
-            _source.source_category_node_id::bigint
-        );
-    END LOOP;
-
-    -- Шаг 2. Allocation-only подготовка extra incomes via extra_income_sources root config.
-    _extra_income_root_id := public.find_allocation_node_id(_user_id, 'extra_income_sources');
-
-    IF _extra_income_root_id IS NULL THEN
-        RAISE EXCEPTION
-            'extra_income_sources allocation root is required for user %',
-            _user_id;
-    END IF;
-
-    _extra_income_source_group_id := NULLIF(
-        public.find_allocation_scenario_root_param_value(
-            _user_id,
-            'monthly',
-            _extra_income_root_id,
-            'source_legacy_group_id'
-        ),
-        ''
-    )::integer;
-
-    IF _extra_income_source_group_id IS NULL THEN
-        RAISE EXCEPTION
-            'extra_income_sources scenario param source_legacy_group_id is required for user %',
-            _user_id;
-    END IF;
-
-    FOR _source IN
-        SELECT
-            source_node.id AS source_category_node_id,
-            public.get_allocation_node_balance(_user_id, source_node.id, 'RUB') AS balance
-        FROM public.allocation_nodes source_node
-        JOIN public.allocation_node_groups source_group
-          ON source_group.node_id = source_node.id
-         AND source_group.active
-        WHERE source_node.user_id = _user_id
-          AND source_node.active
-          AND source_group.legacy_group_id = _extra_income_source_group_id
-        ORDER BY source_node.id
-    LOOP
-        IF COALESCE(_source.balance, 0) <= 0 THEN
-            CONTINUE;
-        END IF;
-
-        PERFORM public.allocation_distribute(
-            _user_id::bigint,
-            _extra_income_root_id::bigint,
-            _source.balance::numeric,
-            'RUB'::varchar,
-            NULL::integer,
-            'monthly distribute'::text,
-            _source.source_category_node_id::bigint
-        );
-    END LOOP;
-
-    _free_node_id := public.find_allocation_remainder_node_id(_user_id, 'self_distribution');
-
-    IF _free_node_id IS NULL THEN
-        RAISE EXCEPTION
-            'self_distribution remainder leaf is required for user %',
-            _user_id;
-    END IF;
-
-    _free_money := public.get_allocation_node_balance(_user_id, _free_node_id, 'RUB');
-
-    -- Шаг 2.5. Allocation-only перевод free money в gifts bucket.
-    _free_to_gifts_root_id := public.find_allocation_node_id(_user_id, 'free_to_gifts');
-
-    IF _free_to_gifts_root_id IS NULL THEN
-        RAISE EXCEPTION
-            'free_to_gifts allocation root is required for user %',
-            _user_id;
-    END IF;
-
-    IF COALESCE(_free_money, 0) > 0 THEN
-        PERFORM public.allocation_distribute(
-            _user_id::bigint,
-            _free_to_gifts_root_id::bigint,
-            _free_money::numeric,
-            'RUB'::varchar,
-            NULL::integer,
-            'monthly distribute'::text,
-            _free_node_id::bigint
-        );
-    END IF;
-
-    -- Шаг 3. Allocation-only reserve для отрицательных personal-spend категорий.
-    _reserve_root_id := public.find_allocation_node_id(_user_id, 'debt_reserve');
-
-    IF _reserve_root_id IS NULL THEN
-        RAISE EXCEPTION
-            'debt_reserve allocation root is required for user %',
-            _user_id;
-    END IF;
-
-    _reserve_spend_group_id := NULLIF(
-        public.find_allocation_scenario_root_param_value(
-            _user_id,
-            'monthly',
-            _reserve_root_id,
-            'spend_legacy_group_id'
-        ),
-        ''
-    )::integer;
-
-    _reserve_personal_group_id := NULLIF(
-        public.find_allocation_scenario_root_param_value(
-            _user_id,
-            'monthly',
-            _reserve_root_id,
-            'personal_legacy_group_id'
-        ),
-        ''
-    )::integer;
-
-    IF _reserve_spend_group_id IS NULL
-       OR _reserve_personal_group_id IS NULL THEN
-        RAISE EXCEPTION
-            'debt_reserve scenario params spend_legacy_group_id and personal_legacy_group_id are required for user %',
-            _user_id;
-    END IF;
-
-    FOR _source IN
-        SELECT DISTINCT
-            spend_node.id AS source_category_node_id
-        FROM public.allocation_nodes spend_node
-        JOIN public.allocation_node_groups spend_group
-          ON spend_group.node_id = spend_node.id
-         AND spend_group.active
-        JOIN public.allocation_node_groups personal_group
-          ON personal_group.node_id = spend_node.id
-         AND personal_group.active
-        WHERE spend_node.user_id = _user_id
-          AND spend_node.active
-          AND spend_group.legacy_group_id = _reserve_spend_group_id
-          AND personal_group.legacy_group_id = _reserve_personal_group_id
-        ORDER BY source_category_node_id
-    LOOP
-        _balance := public.get_allocation_node_balance(
-            _user_id,
-            _source.source_category_node_id,
-            'RUB'
-        );
-
-        IF COALESCE(_balance, 0) >= 0 THEN
-            CONTINUE;
-        END IF;
-
-        _reserve_amount := ABS(_balance) * 0.01;
-
-        IF _reserve_amount <= 0 THEN
-            CONTINUE;
-        END IF;
-
-        PERFORM public.allocation_distribute(
-            _user_id::bigint,
-            _reserve_root_id::bigint,
-            _reserve_amount::numeric,
-            'RUB'::varchar,
-            NULL::integer,
-            'monthly distribute'::text,
-            _source.source_category_node_id::bigint
-        );
-    END LOOP;
-
-    _salary_primary_root_id := public.find_allocation_node_id(_user_id, 'salary_primary');
-
-    IF _salary_primary_root_id IS NULL THEN
-        RAISE EXCEPTION
-            'salary_primary allocation root is required for user %',
-            _user_id;
-    END IF;
-
     SELECT public.find_allocation_scenario_binding_node_id(
         _user_id,
         'monthly',
@@ -1094,33 +929,373 @@ BEGIN
                 _income_source_node.id;
         END IF;
 
-        IF _income_category IS NULL THEN
-            _income_category := _income_source_node.legacy_category_id;
+        IF _resolved_income_category IS NULL THEN
+            _resolved_income_category := _income_source_node.legacy_category_id;
         ELSIF _income_source_node.legacy_category_id IS NOT NULL
-              AND _income_source_node.legacy_category_id <> _income_category THEN
+              AND _income_source_node.legacy_category_id <> _resolved_income_category THEN
             RAISE EXCEPTION
                 'salary_primary source node % legacy category % does not match requested income category %',
                 _income_source_node.id,
                 _income_source_node.legacy_category_id,
-                _income_category;
+                _resolved_income_category;
         END IF;
-    ELSIF _income_category IS NOT NULL THEN
+    ELSIF _resolved_income_category IS NOT NULL THEN
         _income_source_node_id := public.find_allocation_category_node_id_by_legacy(
             _user_id,
-            _income_category
+            _resolved_income_category
         );
     END IF;
 
-    IF _income_source_node_id IS NULL AND _income_category IS NULL THEN
+    IF _income_source_node_id IS NULL AND _resolved_income_category IS NULL THEN
         RAISE EXCEPTION
             'salary_primary branch_source binding is required for user %',
             _user_id;
     ELSIF _income_source_node_id IS NULL THEN
         RAISE EXCEPTION
             'Allocation source node for income category % is required for user %',
-            _income_category,
+            _resolved_income_category,
             _user_id;
     END IF;
+
+    source_node_id := _income_source_node_id;
+    source_legacy_category_id := _resolved_income_category;
+    RETURN NEXT;
+END;
+$function$;
+
+
+-- Runs a monthly prep root that distributes every positive source node
+-- from a configured legacy group into a graph root.
+CREATE OR REPLACE FUNCTION public.run_monthly_group_source_root(
+    _user_id bigint,
+    _root_slug text,
+    _source_group_param_key text DEFAULT 'source_legacy_group_id',
+    _currency varchar DEFAULT 'RUB',
+    _description text DEFAULT 'monthly distribute'
+)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _root_id bigint;
+    _source_group_id integer;
+    _source record;
+BEGIN
+    _root_id := public.require_allocation_root_id(_user_id, _root_slug);
+
+    _source_group_id := NULLIF(
+        public.find_allocation_scenario_root_param_value(
+            _user_id,
+            'monthly',
+            _root_id,
+            _source_group_param_key
+        ),
+        ''
+    )::integer;
+
+    IF _source_group_id IS NULL THEN
+        RAISE EXCEPTION
+            '% scenario param % is required for user %',
+            _root_slug,
+            _source_group_param_key,
+            _user_id;
+    END IF;
+
+    FOR _source IN
+        WITH source_nodes AS (
+            SELECT source_node.id AS source_category_node_id
+            FROM public.allocation_nodes source_node
+            JOIN public.allocation_node_groups source_group
+              ON source_group.node_id = source_node.id
+             AND source_group.active
+            WHERE source_node.user_id = _user_id
+              AND source_node.active
+              AND source_group.legacy_group_id = _source_group_id
+        ),
+        source_balances AS (
+            SELECT *
+            FROM public.get_allocation_node_balances(
+                _user_id,
+                ARRAY(
+                    SELECT source_category_node_id
+                    FROM source_nodes
+                ),
+                _currency
+            )
+        )
+        SELECT
+            source_nodes.source_category_node_id,
+            source_balances.balance
+        FROM source_nodes
+        JOIN source_balances
+          ON source_balances.node_id = source_nodes.source_category_node_id
+        ORDER BY source_nodes.source_category_node_id
+    LOOP
+        IF COALESCE(_source.balance, 0) <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        PERFORM public.allocation_distribute(
+            _user_id::bigint,
+            _root_id::bigint,
+            _source.balance::numeric,
+            _currency,
+            NULL::integer,
+            _description,
+            _source.source_category_node_id::bigint
+        );
+    END LOOP;
+END;
+$function$;
+
+
+-- Runs allocation_distribute(...) and returns its ordered report rows as JSON.
+-- Shared by monthly entrypoints so report JSON shape stays consistent.
+CREATE OR REPLACE FUNCTION public.build_allocation_report_json(
+    _executor_user_id bigint,
+    _source_node_id bigint,
+    _amount numeric,
+    _currency varchar DEFAULT 'RUB',
+    _category_id_from integer DEFAULT NULL,
+    _description text DEFAULT 'allocation cascade',
+    _source_category_node_id bigint DEFAULT NULL
+)
+ RETURNS jsonb
+ LANGUAGE sql
+AS $function$
+    WITH distributed AS (
+        SELECT *
+        FROM public.allocation_distribute(
+            _executor_user_id,
+            _source_node_id,
+            _amount,
+            _currency,
+            _category_id_from,
+            _description,
+            _source_category_node_id
+        )
+    )
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'owner_user_id', owner_user_id,
+                'owner_user_group_id', owner_user_group_id,
+                'node_id', report_node_id,
+                'slug', report_node_slug,
+                'name', report_node_name,
+                'amount', report_amount
+            )
+            ORDER BY
+                owner_user_id NULLS LAST,
+                owner_user_group_id NULLS LAST,
+                report_node_name
+        ),
+        '[]'::jsonb
+    )
+    FROM distributed;
+$function$;
+
+
+-- Runs the monthly reserve rule:
+-- move 1% of each negative personal-spend balance into debt_reserve.
+CREATE OR REPLACE FUNCTION public.run_monthly_debt_reserve(
+    _user_id bigint,
+    _currency varchar DEFAULT 'RUB',
+    _description text DEFAULT 'monthly distribute'
+)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _reserve_root_id bigint;
+    _reserve_spend_group_id integer;
+    _reserve_personal_group_id integer;
+    _source record;
+    _balance numeric;
+    _reserve_amount numeric;
+BEGIN
+    _reserve_root_id := public.require_allocation_root_id(_user_id, 'debt_reserve');
+
+    _reserve_spend_group_id := NULLIF(
+        public.find_allocation_scenario_root_param_value(
+            _user_id,
+            'monthly',
+            _reserve_root_id,
+            'spend_legacy_group_id'
+        ),
+        ''
+    )::integer;
+
+    _reserve_personal_group_id := NULLIF(
+        public.find_allocation_scenario_root_param_value(
+            _user_id,
+            'monthly',
+            _reserve_root_id,
+            'personal_legacy_group_id'
+        ),
+        ''
+    )::integer;
+
+    IF _reserve_spend_group_id IS NULL
+       OR _reserve_personal_group_id IS NULL THEN
+        RAISE EXCEPTION
+            'debt_reserve scenario params spend_legacy_group_id and personal_legacy_group_id are required for user %',
+            _user_id;
+    END IF;
+
+    FOR _source IN
+        WITH reserve_nodes AS (
+            SELECT DISTINCT
+                spend_node.id AS source_category_node_id
+            FROM public.allocation_nodes spend_node
+            JOIN public.allocation_node_groups spend_group
+              ON spend_group.node_id = spend_node.id
+             AND spend_group.active
+            JOIN public.allocation_node_groups personal_group
+              ON personal_group.node_id = spend_node.id
+             AND personal_group.active
+            WHERE spend_node.user_id = _user_id
+              AND spend_node.active
+              AND spend_group.legacy_group_id = _reserve_spend_group_id
+              AND personal_group.legacy_group_id = _reserve_personal_group_id
+        ),
+        reserve_balances AS (
+            SELECT *
+            FROM public.get_allocation_node_balances(
+                _user_id,
+                ARRAY(
+                    SELECT source_category_node_id
+                    FROM reserve_nodes
+                ),
+                _currency
+            )
+        )
+        SELECT
+            reserve_nodes.source_category_node_id,
+            reserve_balances.balance
+        FROM reserve_nodes
+        JOIN reserve_balances
+          ON reserve_balances.node_id = reserve_nodes.source_category_node_id
+        ORDER BY reserve_nodes.source_category_node_id
+    LOOP
+        _balance := _source.balance;
+
+        IF COALESCE(_balance, 0) >= 0 THEN
+            CONTINUE;
+        END IF;
+
+        _reserve_amount := ABS(_balance) * 0.01;
+
+        IF _reserve_amount <= 0 THEN
+            CONTINUE;
+        END IF;
+
+        PERFORM public.allocation_distribute(
+            _user_id::bigint,
+            _reserve_root_id::bigint,
+            _reserve_amount::numeric,
+            _currency,
+            NULL::integer,
+            _description,
+            _source.source_category_node_id::bigint
+        );
+    END LOOP;
+END;
+$function$;
+
+
+-- Graph-native monthly distribution.
+-- Preserves the Telegram report shape from legacy monthly_distribute(),
+-- but intentionally uses clean monthly semantics for new paths:
+-- explicit investment, explicit family contribution, then clean remainder split.
+-- Важно:
+-- 1) не возвращаться к грязным legacy-дублям percent/group formulas;
+-- 2) менять её нужно по одной ветке и после каждого изменения прогонять SQL checks;
+-- 3) legacy monthly_distribute() сохраняется ниже как reference/rollback и не должна вызываться из public.monthly().
+CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(
+    _user_id bigint,
+    _income_category integer DEFAULT NULL
+)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _sum_value numeric;
+    _free_money numeric;
+    _second_member_id bigint;
+    _sum_earnings numeric;
+    _sum_spend numeric;
+    _free_to_gifts_root_id bigint;
+    _free_node_id bigint;
+    _salary_primary_root_id bigint;
+    _income_source_node_id bigint;
+    _report_rows jsonb := '[]'::jsonb;
+    _branch_report jsonb := '[]'::jsonb;
+    _report_metrics jsonb := '{}'::jsonb;
+BEGIN
+    -- Шаг 1. Allocation-only подготовка monthly incomes via monthly_income_sources root config.
+    PERFORM public.run_monthly_group_source_root(
+        _user_id,
+        'monthly_income_sources',
+        'source_legacy_group_id',
+        'RUB'::varchar,
+        'monthly distribute'::text
+    );
+
+    -- Шаг 2. Allocation-only подготовка extra incomes via extra_income_sources root config.
+    PERFORM public.run_monthly_group_source_root(
+        _user_id,
+        'extra_income_sources',
+        'source_legacy_group_id',
+        'RUB'::varchar,
+        'monthly distribute'::text
+    );
+
+    _free_node_id := public.find_allocation_remainder_node_id(_user_id, 'self_distribution');
+
+    IF _free_node_id IS NULL THEN
+        RAISE EXCEPTION
+            'self_distribution remainder leaf is required for user %',
+            _user_id;
+    END IF;
+
+    _free_money := public.get_allocation_node_balance(_user_id, _free_node_id, 'RUB');
+
+    -- Шаг 2.5. Allocation-only перевод free money в gifts bucket.
+    _free_to_gifts_root_id := public.require_allocation_root_id(_user_id, 'free_to_gifts');
+
+    IF COALESCE(_free_money, 0) > 0 THEN
+        PERFORM public.allocation_distribute(
+            _user_id::bigint,
+            _free_to_gifts_root_id::bigint,
+            _free_money::numeric,
+            'RUB'::varchar,
+            NULL::integer,
+            'monthly distribute'::text,
+            _free_node_id::bigint
+        );
+    END IF;
+
+    -- Шаг 3. Allocation-only reserve для отрицательных personal-spend категорий.
+    PERFORM public.run_monthly_debt_reserve(
+        _user_id,
+        'RUB'::varchar,
+        'monthly distribute'::text
+    );
+
+    _salary_primary_root_id := public.require_allocation_root_id(_user_id, 'salary_primary');
+
+    SELECT
+        resolved.source_node_id,
+        resolved.source_legacy_category_id
+    INTO
+        _income_source_node_id,
+        _income_category
+    FROM public.resolve_monthly_salary_source(
+        _user_id,
+        _salary_primary_root_id,
+        _income_category
+    ) resolved;
 
     _sum_value := public.get_allocation_node_balance(
         _user_id,
@@ -1129,37 +1304,17 @@ BEGIN
     );
 
     IF _sum_value > 0 THEN
-        WITH distributed AS (
-            SELECT *
-            FROM public.allocation_distribute(
-                _user_id::bigint,
-                _salary_primary_root_id::bigint,
-                _sum_value::numeric,
-                'RUB'::varchar,
-                NULL::integer,
-                'monthly distribute'::text,
-                _income_source_node_id::bigint
-            )
-        )
-        SELECT COALESCE(
-            jsonb_agg(
-                jsonb_build_object(
-                    'owner_user_id', owner_user_id,
-                    'owner_user_group_id', owner_user_group_id,
-                    'node_id', report_node_id,
-                    'slug', report_node_slug,
-                    'name', report_node_name,
-                    'amount', report_amount
-                )
-                ORDER BY
-                    owner_user_id NULLS LAST,
-                    owner_user_group_id NULLS LAST,
-                    report_node_name
-            ),
-            '[]'::jsonb
+        SELECT public.build_allocation_report_json(
+            _user_id::bigint,
+            _salary_primary_root_id::bigint,
+            _sum_value::numeric,
+            'RUB'::varchar,
+            NULL::integer,
+            'monthly distribute'::text,
+            _income_source_node_id::bigint
         )
         INTO _branch_report
-        FROM distributed;
+        ;
 
         _report_rows := _report_rows || COALESCE(_branch_report, '[]'::jsonb);
     END IF;
@@ -1776,37 +1931,17 @@ BEGIN
     );
 
     IF _source_amount > 0 THEN
-        WITH distributed AS (
-            SELECT *
-            FROM public.allocation_distribute(
-                _executor_user_id,
-                _source_node_id,
-                _source_amount,
-                _currency,
-                _category_id_from,
-                _description,
-                _source_category_node_id
-            )
-        )
-        SELECT COALESCE(
-            jsonb_agg(
-                jsonb_build_object(
-                    'owner_user_id', owner_user_id,
-                    'owner_user_group_id', owner_user_group_id,
-                    'node_id', report_node_id,
-                    'slug', report_node_slug,
-                    'name', report_node_name,
-                    'amount', report_amount
-                )
-                ORDER BY
-                    owner_user_id NULLS LAST,
-                    owner_user_group_id NULLS LAST,
-                    report_node_name
-            ),
-            '[]'::jsonb
+        SELECT public.build_allocation_report_json(
+            _executor_user_id,
+            _source_node_id,
+            _source_amount,
+            _currency,
+            _category_id_from,
+            _description,
+            _source_category_node_id
         )
         INTO _report
-        FROM distributed;
+        ;
     END IF;
 
     RETURN jsonb_build_object(
