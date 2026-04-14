@@ -6,6 +6,7 @@
 
 - Legacy reference/rollback функция: `public.monthly_distribute(_user_id, _income_category)`.
 - Переходная функция: `public.monthly_distribute_cascade(_user_id, _income_category DEFAULT NULL)`.
+  Legacy `_income_category` сохранён только ради совместимости сигнатуры; runtime source resolution уже не зависит от него.
 - Новая функция сохраняет форму Telegram JSON, но использует clean monthly semantics вместо полного повторения грязных legacy percent/group formulas.
 - Compare SQL остаётся справочным инструментом для понимания расхождений со старой функцией.
 
@@ -80,10 +81,12 @@
   - `free_to_gifts` уже считает free balance через `get_allocation_node_balance(...)` по remainder node id
   - `monthly_distribute_cascade()` уже передаёт явный source allocation node в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и `salary_primary`
   - `monthly_distribute_cascade()` больше не передаёт legacy source category id в `allocation_distribute(...)`; lower-level функция выводит его из source node только для compatibility metadata
-  - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots, без hard-coded monthly users и legacy income category id; `salary_primary` требует source leaf через scenario binding `branch_source`
+- `allocation_distribute(...)` больше не создаёт compatibility node на лету; отсутствие source allocation node теперь считается ошибкой runtime config
+- `exchange_v2(...)` больше не создаёт compatibility node на лету; runtime ожидает уже существующую allocation category node для wallet/category
+  - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots, без hard-coded monthly users и legacy income category id; `salary_primary` требует source leaf через scenario binding `branch_source`, без fallback на явный legacy income category id
   - prep/reserve roots уже хранят legacy group bridge в metadata, а `monthly_distribute_cascade()` больше не hard-code'ит group ids `11/12/8/15`
   - single-target monthly roots и `family_contribution_out` уже seed'ятся через `allocation_scenario_node_bindings`, а не через hard-coded target/source leaf в route insert logic
-  - `monthly_distribute_allocation(...)` уже поддерживает явный source allocation node без обязательного legacy category id
+  - `monthly_distribute_allocation(...)` теперь требует явный source allocation node; fallback на legacy category lookup убран
   - partner bridge уже жёстко резолвит source leaf через scenario binding `bridge_source`
   - graph-native leaf-ноды уже могут писать `allocation_postings` без `legacy_category_id`
   - `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL

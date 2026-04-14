@@ -22,7 +22,7 @@
 ## Что ещё нельзя считать завершённым
 
 - Пока не принята финальная доменная модель для `allocation_scenarios` / `allocation_scenario_node_bindings` / `allocation_scenario_root_params`.
-- Prep/reserve ветки всё ещё используют metadata-конфиг root-нод и не переведены полностью на scenario-layer.
+- Bootstrap/cutover слой ещё не оформлен как отдельный release contract: какие SQL-checks обязательны, кто и когда запускает seed и legacy->ledger bootstrap, что считается успешным завершением шага.
 
 ## Порядок продового переезда
 
@@ -50,6 +50,10 @@
 
 Запустить backfill:
 - [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My%20Python%20progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql)
+
+Источник истины для этого шага:
+- `public.bootstrap_allocation_ledger_from_legacy()`
+- wrapper-скрипт выше должен оставаться thin entrypoint, а не отдельной реализацией backfill-логики
 
 Проверки:
 - все положительные `cash_flow` rows отражены в `allocation_postings`
@@ -171,6 +175,6 @@
 ## Что ещё нужно подготовить перед финальным прод-переездом
 
 - Финально решить доменную модель `invest_*_report` против `Н.З.`
-- Перевести prep/reserve config с metadata на scenarios/bindings или отдельно подтверждённый config-layer
+- Отдельно зафиксировать release contract для `public.bootstrap_allocation_ledger_from_legacy()`: когда запускается, какие инварианты проверяет, и в каких случаях повторный запуск обязателен
 - Зафиксировать список обязательных prod SQL-checks в CI как release gate
 - Подготовить операторский checklist: до monthly run, после monthly run, после rollback

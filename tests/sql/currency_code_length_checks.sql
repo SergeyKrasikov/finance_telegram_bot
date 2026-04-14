@@ -21,6 +21,28 @@ INSERT INTO users(id, nickname) VALUES (905001, 'lenchk');
 INSERT INTO categories(id, "name", "percent") VALUES (905011, 'LenCheck', 1.00);
 INSERT INTO categories_category_groups(categories_id, category_groyps_id, users_id)
 VALUES (905011, 14, 905001);
+INSERT INTO allocation_nodes(
+    user_id,
+    slug,
+    "name",
+    description,
+    node_kind,
+    legacy_category_id,
+    visible,
+    include_in_report,
+    active
+)
+VALUES (
+    905001,
+    'lencheck_wallet',
+    'LenCheck',
+    'currency length exchange wallet fixture',
+    'both',
+    905011,
+    true,
+    true,
+    true
+);
 
 DO $$
 DECLARE

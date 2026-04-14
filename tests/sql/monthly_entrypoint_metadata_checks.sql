@@ -9,6 +9,9 @@ DECLARE
     monthly_def text;
     cascade_def text;
     recursive_def text;
+    distribute_def text;
+    exchange_v2_def text;
+    monthly_allocation_helper_def text;
     binding_helper_def text;
     root_param_helper_def text;
     salary_source_helper_def text;
@@ -50,10 +53,19 @@ BEGIN
     SELECT pg_get_functiondef('public.find_allocation_scenario_binding_node_id(bigint,text,bigint,text)'::regprocedure)
     INTO binding_helper_def;
 
+    SELECT pg_get_functiondef('public.allocation_distribute(bigint,bigint,numeric,varchar,integer,text,bigint)'::regprocedure)
+    INTO distribute_def;
+
+    SELECT pg_get_functiondef('public.exchange_v2(bigint,integer,numeric,varchar,numeric,varchar)'::regprocedure)
+    INTO exchange_v2_def;
+
+    SELECT pg_get_functiondef('public.monthly_distribute_allocation(bigint,bigint,integer,varchar,text,bigint)'::regprocedure)
+    INTO monthly_allocation_helper_def;
+
     SELECT pg_get_functiondef('public.find_allocation_scenario_root_param_value(bigint,text,bigint,text)'::regprocedure)
     INTO root_param_helper_def;
 
-    SELECT pg_get_functiondef('public.resolve_monthly_salary_source(bigint,bigint,integer)'::regprocedure)
+    SELECT pg_get_functiondef('public.resolve_monthly_salary_source(bigint,bigint)'::regprocedure)
     INTO salary_source_helper_def;
 
     SELECT pg_get_functiondef('public.run_monthly_debt_reserve(bigint,varchar,text)'::regprocedure)
@@ -126,8 +138,29 @@ BEGIN
         RAISE EXCEPTION 'monthly_distribute_cascade() still hard-codes monthly legacy group ids';
     END IF;
 
-    IF POSITION('find_allocation_category_node_id_by_legacy' IN salary_source_helper_def) = 0 THEN
-        RAISE EXCEPTION 'Expected resolve_monthly_salary_source() to keep legacy income category fallback during migration';
+    IF POSITION('find_allocation_category_node_id_by_legacy' IN salary_source_helper_def) > 0 THEN
+        RAISE EXCEPTION 'resolve_monthly_salary_source() still contains legacy income category fallback';
+    END IF;
+
+    IF POSITION('_income_category' IN salary_source_helper_def) > 0 THEN
+        RAISE EXCEPTION 'resolve_monthly_salary_source() still depends on explicit income category argument';
+    END IF;
+
+    IF POSITION('_income_category' IN cascade_def) > 0
+       AND POSITION('SQL signature compatibility' IN cascade_def) = 0 THEN
+        RAISE EXCEPTION 'monthly_distribute_cascade() still uses legacy income category outside compatibility comment';
+    END IF;
+
+    IF POSITION('ensure_allocation_compatibility_node' IN distribute_def) > 0 THEN
+        RAISE EXCEPTION 'allocation_distribute() still auto-creates compatibility nodes at runtime';
+    END IF;
+
+    IF POSITION('ensure_allocation_compatibility_node' IN exchange_v2_def) > 0 THEN
+        RAISE EXCEPTION 'exchange_v2() still auto-creates compatibility nodes at runtime';
+    END IF;
+
+    IF POSITION('find_allocation_category_node_id_by_legacy' IN monthly_allocation_helper_def) > 0 THEN
+        RAISE EXCEPTION 'monthly_distribute_allocation() still falls back to legacy category lookup';
     END IF;
 
     SELECT pg_get_functiondef(

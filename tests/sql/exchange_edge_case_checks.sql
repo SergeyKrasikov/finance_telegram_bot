@@ -27,6 +27,21 @@ INSERT INTO users_groups(users_id, users_groups) VALUES
 INSERT INTO categories(id, "name", "percent") VALUES
     (901111, 'EdgeWallet', 0.00);
 
+INSERT INTO allocation_nodes(
+    user_id,
+    slug,
+    "name",
+    description,
+    node_kind,
+    legacy_category_id,
+    visible,
+    include_in_report,
+    active
+)
+VALUES
+    (901101, 'edge_wallet_1', 'EdgeWallet', 'edge exchange wallet fixture', 'both', 901111, true, true, true),
+    (901102, 'edge_wallet_2', 'EdgeWallet', 'edge exchange wallet fixture', 'both', 901111, true, true, true);
+
 -- latest rates + older rates to validate we always use latest
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES
     (now() - interval '2 day', 'USD', 1),

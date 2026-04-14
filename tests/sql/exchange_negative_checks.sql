@@ -12,6 +12,28 @@ DELETE FROM exchange_rates WHERE currency IN ('AAA', 'BBB', 'USDT', 'ETH', 'RUB'
 
 INSERT INTO users(id, nickname) VALUES (904001, 'neg_ex_u');
 INSERT INTO categories(id, "name", "percent") VALUES (904011, 'NegExWallet', 0.00);
+INSERT INTO allocation_nodes(
+    user_id,
+    slug,
+    "name",
+    description,
+    node_kind,
+    legacy_category_id,
+    visible,
+    include_in_report,
+    active
+)
+VALUES (
+    904001,
+    'neg_ex_wallet',
+    'NegExWallet',
+    'negative exchange wallet fixture',
+    'both',
+    904011,
+    true,
+    true,
+    true
+);
 
 DO $$
 DECLARE

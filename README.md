@@ -79,6 +79,16 @@ make fmt
 PGPASSWORD=postgres PGHOST=localhost PGPORT=5432 PGUSER=postgres PGDATABASE=finance_test make test-sql
 ```
 
+Полный прогон для тестового сервера:
+```bash
+PGPASSWORD=postgres PGHOST=localhost PGPORT=5432 PGUSER=postgres PGDATABASE=finance_test make test-server-validate
+```
+
+Если нужен ещё и реальный smoke вызов `monthly()` после schema/seed/bootstrap:
+```bash
+PGPASSWORD=postgres PGHOST=localhost PGPORT=5432 PGUSER=postgres PGDATABASE=finance_test RUN_MONTHLY_SMOKE=1 make test-server-validate
+```
+
 ### Через Docker
 ```
 docker-compose up --build
@@ -114,6 +124,7 @@ bash scripts/apply_db_schema.sh finance_telegram_bot_postgres_1 my_finance_bot m
   - `tests/sql/exchange_edge_case_checks.sql`
   - `tests/sql/spend_with_exchange_checks.sql`
   - `tests/sql/spend_with_exchange_negative_checks.sql`
+  - `tests/sql/allocation_legacy_bootstrap_checks.sql`
   - `tests/sql/ledger_write_path_checks.sql`
   - `tests/sql/balance_functions_checks.sql`
   - `tests/sql/monthly_business_checks.sql`
@@ -371,12 +382,15 @@ graph TD
 - `monthly_distribute_cascade()` уже передаёт source category node id в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и основного `salary_primary` split.
   `legacy_category_id` пока остаётся compatibility-полем для балансов, metadata и bridge/backfill, но больше не является единственным способом выбрать debit-node внутри monthly runtime.
 - Вызовы `allocation_distribute(...)` из `monthly_distribute_cascade()` больше не передают legacy source category id; он выводится из source node только как compatibility metadata.
+- Low-level `allocation_distribute(...)` больше не создаёт compatibility bridge-ноду на лету, если source node не найден по legacy category id.
+  Runtime должен либо передать явный `source_category_node_id`, либо иметь уже существующую allocation-ноду для этой legacy category.
 - `monthly()` больше не содержит hard-coded monthly users и income category id; entrypoint запускает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots.
   `salary_primary` требует source leaf через `allocation_scenario_node_bindings` (`binding_kind = branch_source`).
   Prep/reserve roots требуют scenario root params (`source_legacy_group_id`, `spend_legacy_group_id`, `personal_legacy_group_id`) через `allocation_scenario_root_params`, а не из root metadata и не из hard-coded условий в function body.
   `family_contribution_out` требует partner source leaf через `allocation_scenario_node_bindings` (`binding_kind = bridge_source`).
-  Старый параметр `_income_category` в `monthly_distribute_cascade()` сохранён как fallback на время миграции.
-- Internal helper `monthly_distribute_allocation(...)` уже может принимать явный `source_category_node_id` без обязательного legacy category id.
+  Legacy-параметр `_income_category` в `monthly_distribute_cascade()` сохранён только ради SQL-совместимости сигнатуры и больше не участвует в source resolution.
+- Internal helper `monthly_distribute_allocation(...)` теперь требует явный `source_category_node_id`;
+  legacy category id остаётся там только как compatibility metadata/validation against the provided node.
 - Partner bridge `family_contribution_out -> family_contribution_in` резолвит source leaf через `allocation_scenario_node_bindings`, без metadata fallback.
 - Graph-native leaf-ноды больше не обязаны иметь `legacy_category_id`; он пишется в metadata только если присутствует на source/target node.
 - Household membership helper `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL.
@@ -412,9 +426,12 @@ graph TD
   - `public.exchange_v2(...)`
   App write-paths for manual spend/revenue, auto-exchange spend, and manual exchange already use these v2 functions.
   Manual spend/revenue, manual exchange, and auto-exchange spend are ledger-only.
+  `exchange_v2(...)` тоже больше не создаёт compatibility bridge-ноду на лету: wallet/category allocation node должна существовать заранее.
   Legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)`
   remain in SQL for reference/compare/rollback.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
+- Canonical SQL entrypoint для этого шага: `public.bootstrap_allocation_ledger_from_legacy()`.
+  Скрипт backfill теперь только вызывает эту функцию, чтобы prod-bootstrap оставался в одном месте и не дублировался между `.sql` файлами.
 - Historical/backfill rows may carry `metadata.legacy_cash_flow_id`; new runtime ledger-only writes do not.
 - Текущая конвенция `metadata`:
   - monthly runtime: `kind=monthly`, `subkind=leaf_posting`, `origin=allocation_runtime`

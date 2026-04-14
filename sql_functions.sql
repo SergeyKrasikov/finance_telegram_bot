@@ -33,6 +33,7 @@ DROP FUNCTION IF EXISTS public.get_allocation_node_balance(bigint, bigint, varch
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text, varchar);
 DROP FUNCTION IF EXISTS public.find_allocation_category_node_id_by_legacy(bigint, integer);
 DROP FUNCTION IF EXISTS public.ensure_allocation_compatibility_node(bigint, integer);
+DROP FUNCTION IF EXISTS public.bootstrap_allocation_ledger_from_legacy();
 DROP FUNCTION IF EXISTS public.mirror_cash_flow_row_to_allocation_postings(bigint, text, text, text, jsonb);
 DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_categories_name_v2(bigint, integer);
@@ -48,6 +49,7 @@ DROP FUNCTION IF EXISTS public.get_users_id(bigint);
 DROP FUNCTION IF EXISTS public.find_allocation_scenario_binding_node_id(bigint, text, bigint, text);
 DROP FUNCTION IF EXISTS public.require_allocation_root_id(bigint, text);
 DROP FUNCTION IF EXISTS public.resolve_monthly_salary_source(bigint, bigint, integer);
+DROP FUNCTION IF EXISTS public.resolve_monthly_salary_source(bigint, bigint);
 DROP FUNCTION IF EXISTS public.find_allocation_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_node_id(bigint, text);
 DROP FUNCTION IF EXISTS public.find_allocation_remainder_legacy_category_id(bigint, text);
@@ -422,6 +424,277 @@ BEGIN
     RETURNING id INTO _node_id;
 
     RETURN _node_id;
+END;
+$function$;
+
+
+-- Canonical prod bootstrap for the ledger layer on top of legacy cash_flow/categories data.
+-- Keeps compatibility nodes, legacy node-group memberships, and idempotent cash_flow backfill
+-- in one SQL entrypoint that can stay on the prod branch after runtime cutover.
+CREATE OR REPLACE FUNCTION public.bootstrap_allocation_ledger_from_legacy()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _compat_nodes_synced bigint := 0;
+    _node_groups_synced bigint := 0;
+    _postings_inserted bigint := 0;
+    _exchange_rows_reclassified bigint := 0;
+    _cash_flow_count bigint;
+    _allocation_postings_count bigint;
+BEGIN
+    WITH legacy_categories AS (
+        SELECT DISTINCT
+            cf.users_id AS user_id,
+            x.legacy_category_id
+        FROM public.cash_flow cf
+        CROSS JOIN LATERAL (
+            VALUES
+                (cf.category_id_from),
+                (cf.category_id_to)
+        ) AS x(legacy_category_id)
+        WHERE cf.users_id IS NOT NULL
+          AND x.legacy_category_id IS NOT NULL
+
+        UNION
+
+        SELECT DISTINCT
+            ccg.users_id::bigint AS user_id,
+            ccg.categories_id AS legacy_category_id
+        FROM public.categories_category_groups ccg
+        WHERE ccg.users_id IS NOT NULL
+          AND ccg.categories_id IS NOT NULL
+    )
+    INSERT INTO public.allocation_nodes (
+        user_id,
+        slug,
+        "name",
+        description,
+        node_kind,
+        legacy_category_id,
+        visible,
+        include_in_report,
+        active
+    )
+    SELECT
+        lc.user_id,
+        CONCAT('legacy_bridge_cat_', lc.legacy_category_id),
+        c."name",
+        CONCAT('Compatibility bridge for legacy category ', lc.legacy_category_id),
+        'both',
+        lc.legacy_category_id,
+        false,
+        false,
+        true
+    FROM legacy_categories lc
+    JOIN public.categories c
+      ON c.id = lc.legacy_category_id
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM public.allocation_nodes an
+        WHERE an.active
+          AND an.legacy_category_id = lc.legacy_category_id
+          AND (
+              an.user_id = lc.user_id
+              OR an.user_group_id IN (
+                  SELECT ugm.user_group_id
+                  FROM public.user_group_memberships ugm
+                  WHERE ugm.user_id = lc.user_id
+                    AND ugm.active
+              )
+          )
+    )
+    ON CONFLICT (user_id, slug) WHERE user_id IS NOT NULL
+    DO UPDATE SET
+        legacy_category_id = EXCLUDED.legacy_category_id,
+        active = true;
+
+    GET DIAGNOSTICS _compat_nodes_synced = ROW_COUNT;
+
+    INSERT INTO public.allocation_node_groups (
+        node_id,
+        legacy_group_id,
+        active
+    )
+    SELECT DISTINCT
+        an.id,
+        ccg.category_groyps_id,
+        true
+    FROM public.categories_category_groups ccg
+    JOIN public.allocation_nodes an
+      ON an.active
+     AND an.legacy_category_id = ccg.categories_id
+     AND (
+         an.user_id = ccg.users_id
+         OR an.user_group_id IN (
+             SELECT ugm.user_group_id
+             FROM public.user_group_memberships ugm
+             WHERE ugm.user_id = ccg.users_id
+               AND ugm.active
+         )
+     )
+    ON CONFLICT (node_id, legacy_group_id)
+    DO UPDATE SET active = EXCLUDED.active;
+
+    GET DIAGNOSTICS _node_groups_synced = ROW_COUNT;
+
+    INSERT INTO public.allocation_postings (
+        "datetime",
+        user_id,
+        from_node_id,
+        to_node_id,
+        value,
+        currency,
+        description,
+        metadata
+    )
+    SELECT
+        cf."datetime",
+        cf.users_id,
+        from_node.id,
+        to_node.id,
+        cf.value,
+        cf.currency,
+        cf.description,
+        jsonb_strip_nulls(
+            jsonb_build_object(
+                'kind', CASE
+                    WHEN cf.description ILIKE 'exchange to %'
+                      OR cf.description ILIKE 'exchange from %'
+                      OR cf.description ILIKE 'auto exchange %'
+                        THEN 'exchange'
+                    ELSE 'backfill'
+                END,
+                'subkind', CASE
+                    WHEN cf.description ILIKE 'auto exchange %' THEN 'auto'
+                    WHEN cf.description ILIKE 'exchange to %'
+                      OR cf.description ILIKE 'exchange from %'
+                        THEN 'manual'
+                    ELSE 'cash_flow'
+                END,
+                'origin', 'migration',
+                'direction', CASE
+                    WHEN cf.description ILIKE 'exchange to %'
+                      OR cf.description ILIKE 'auto exchange % to %'
+                        THEN 'out'
+                    WHEN cf.description ILIKE 'exchange from %'
+                      OR cf.description ILIKE 'auto exchange % from %'
+                        THEN 'in'
+                    ELSE NULL
+                END,
+                'backfill_kind', 'cash_flow',
+                'legacy_cash_flow_id', cf.id,
+                'legacy_category_id_from', cf.category_id_from,
+                'legacy_category_id_to', cf.category_id_to,
+                'backfilled_from_cash_flow', true
+            )
+        )
+    FROM public.cash_flow cf
+    LEFT JOIN LATERAL (
+        SELECT an.id
+        FROM public.allocation_nodes an
+        WHERE an.active
+          AND an.legacy_category_id = cf.category_id_from
+          AND (
+              an.user_id = cf.users_id
+              OR an.user_group_id IN (
+                  SELECT ugm.user_group_id
+                  FROM public.user_group_memberships ugm
+                  WHERE ugm.user_id = cf.users_id
+                    AND ugm.active
+              )
+          )
+        ORDER BY
+            CASE WHEN an.user_id = cf.users_id THEN 0 ELSE 1 END,
+            an.id
+        LIMIT 1
+    ) AS from_node ON true
+    LEFT JOIN LATERAL (
+        SELECT an.id
+        FROM public.allocation_nodes an
+        WHERE an.active
+          AND an.legacy_category_id = cf.category_id_to
+          AND (
+              an.user_id = cf.users_id
+              OR an.user_group_id IN (
+                  SELECT ugm.user_group_id
+                  FROM public.user_group_memberships ugm
+                  WHERE ugm.user_id = cf.users_id
+                    AND ugm.active
+              )
+          )
+        ORDER BY
+            CASE WHEN an.user_id = cf.users_id THEN 0 ELSE 1 END,
+            an.id
+        LIMIT 1
+    ) AS to_node ON true
+    WHERE (from_node.id IS NOT NULL OR to_node.id IS NOT NULL)
+      AND COALESCE(cf.value, 0) > 0
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.allocation_postings ap
+          WHERE ap.metadata->>'legacy_cash_flow_id' = cf.id::text
+             OR (
+                 ap."datetime" = cf."datetime"
+                 AND ap.user_id = cf.users_id
+                 AND ap.from_node_id IS NOT DISTINCT FROM from_node.id
+                 AND ap.to_node_id IS NOT DISTINCT FROM to_node.id
+                 AND ap.value = cf.value
+                 AND ap.currency = cf.currency
+                 AND COALESCE(ap.description, '') = COALESCE(cf.description, '')
+             )
+      );
+
+    GET DIAGNOSTICS _postings_inserted = ROW_COUNT;
+
+    SELECT count(*) INTO _cash_flow_count FROM public.cash_flow;
+    SELECT count(*) INTO _allocation_postings_count FROM public.allocation_postings;
+
+    IF _cash_flow_count > 0 AND _allocation_postings_count = 0 THEN
+        RAISE EXCEPTION
+            'allocation_postings backfill produced 0 rows while cash_flow has % rows',
+            _cash_flow_count;
+    END IF;
+
+    UPDATE public.allocation_postings ap
+    SET metadata = jsonb_strip_nulls(
+        ap.metadata
+        || jsonb_build_object(
+            'kind', 'exchange',
+            'subkind', CASE
+                WHEN ap.description ILIKE 'auto exchange %' THEN 'auto'
+                ELSE 'manual'
+            END,
+            'origin', 'migration',
+            'direction', CASE
+                WHEN ap.description ILIKE 'exchange to %'
+                  OR ap.description ILIKE 'auto exchange % to %'
+                    THEN 'out'
+                WHEN ap.description ILIKE 'exchange from %'
+                  OR ap.description ILIKE 'auto exchange % from %'
+                    THEN 'in'
+                ELSE NULL
+            END,
+            'backfill_kind', 'cash_flow'
+        )
+    )
+    WHERE ap.metadata->>'kind' = 'backfill'
+      AND (
+          ap.description ILIKE 'exchange to %'
+          OR ap.description ILIKE 'exchange from %'
+          OR ap.description ILIKE 'auto exchange %'
+      );
+
+    GET DIAGNOSTICS _exchange_rows_reclassified = ROW_COUNT;
+
+    RETURN jsonb_build_object(
+        'compat_nodes_synced', _compat_nodes_synced,
+        'node_groups_synced', _node_groups_synced,
+        'postings_inserted', _postings_inserted,
+        'exchange_rows_reclassified', _exchange_rows_reclassified,
+        'cash_flow_rows', _cash_flow_count,
+        'allocation_postings_rows', _allocation_postings_count
+    );
 END;
 $function$;
 
@@ -859,11 +1132,12 @@ $function$;
 
 
 -- Resolves the salary_primary source node for monthly cascade.
--- Keeps the scenario binding path plus the temporary legacy category fallback.
+-- Source resolution is binding-only: salary_primary must point to branch_source.
+-- The helper still returns legacy_category_id from the resolved source node when present,
+-- but no longer falls back to an explicit legacy income category argument.
 CREATE OR REPLACE FUNCTION public.resolve_monthly_salary_source(
     _user_id bigint,
-    _salary_primary_root_id bigint,
-    _income_category integer DEFAULT NULL
+    _salary_primary_root_id bigint
 )
  RETURNS TABLE(
     source_node_id bigint,
@@ -874,7 +1148,6 @@ AS $function$
 DECLARE
     _income_source_node_id bigint;
     _income_source_node public.allocation_nodes%ROWTYPE;
-    _resolved_income_category integer := _income_category;
 BEGIN
     SELECT public.find_allocation_scenario_binding_node_id(
         _user_id,
@@ -928,37 +1201,16 @@ BEGIN
                 _income_source_node.user_group_id,
                 _income_source_node.id;
         END IF;
-
-        IF _resolved_income_category IS NULL THEN
-            _resolved_income_category := _income_source_node.legacy_category_id;
-        ELSIF _income_source_node.legacy_category_id IS NOT NULL
-              AND _income_source_node.legacy_category_id <> _resolved_income_category THEN
-            RAISE EXCEPTION
-                'salary_primary source node % legacy category % does not match requested income category %',
-                _income_source_node.id,
-                _income_source_node.legacy_category_id,
-                _resolved_income_category;
-        END IF;
-    ELSIF _resolved_income_category IS NOT NULL THEN
-        _income_source_node_id := public.find_allocation_category_node_id_by_legacy(
-            _user_id,
-            _resolved_income_category
-        );
     END IF;
 
-    IF _income_source_node_id IS NULL AND _resolved_income_category IS NULL THEN
+    IF _income_source_node_id IS NULL THEN
         RAISE EXCEPTION
             'salary_primary branch_source binding is required for user %',
-            _user_id;
-    ELSIF _income_source_node_id IS NULL THEN
-        RAISE EXCEPTION
-            'Allocation source node for income category % is required for user %',
-            _resolved_income_category,
             _user_id;
     END IF;
 
     source_node_id := _income_source_node_id;
-    source_legacy_category_id := _resolved_income_category;
+    source_legacy_category_id := _income_source_node.legacy_category_id;
     RETURN NEXT;
 END;
 $function$;
@@ -1165,6 +1417,8 @@ $function$;
 -- 1) не возвращаться к грязным legacy-дублям percent/group formulas;
 -- 2) менять её нужно по одной ветке и после каждого изменения прогонять SQL checks;
 -- 3) legacy monthly_distribute() сохраняется ниже как reference/rollback и не должна вызываться из public.monthly().
+-- Legacy _income_category is kept only for SQL signature compatibility during migration;
+-- runtime source resolution is branch_source-only.
 CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(
     _user_id bigint,
     _income_category integer DEFAULT NULL
@@ -1182,6 +1436,7 @@ DECLARE
     _free_node_id bigint;
     _salary_primary_root_id bigint;
     _income_source_node_id bigint;
+    _income_source_legacy_category_id integer;
     _report_rows jsonb := '[]'::jsonb;
     _branch_report jsonb := '[]'::jsonb;
     _report_metrics jsonb := '{}'::jsonb;
@@ -1243,11 +1498,10 @@ BEGIN
         resolved.source_legacy_category_id
     INTO
         _income_source_node_id,
-        _income_category
+        _income_source_legacy_category_id
     FROM public.resolve_monthly_salary_source(
         _user_id,
-        _salary_primary_root_id,
-        _income_category
+        _salary_primary_root_id
     ) resolved;
 
     _sum_value := public.get_allocation_node_balance(
@@ -1725,13 +1979,6 @@ BEGIN
         );
 
         IF _source_category_node_id IS NULL THEN
-            _source_category_node_id := public.ensure_allocation_compatibility_node(
-                _executor_user_id,
-                _category_id_from
-            );
-        END IF;
-
-        IF _source_category_node_id IS NULL THEN
             RAISE EXCEPTION
                 'Allocation source node for legacy category % not found for user %',
                 _category_id_from,
@@ -1820,6 +2067,8 @@ $function$;
 
 -- Внутренний allocation entrypoint для monthly cascade.
 -- Legacy monthly_distribute() сохраняется отдельно как reference/rollback.
+-- Runtime requires explicit source allocation node; legacy category id may remain
+-- only as compatibility metadata/validation against that node.
 CREATE OR REPLACE FUNCTION public.monthly_distribute_allocation(
     _executor_user_id bigint,
     _source_node_id bigint,
@@ -1839,72 +2088,58 @@ DECLARE
     _report jsonb := '[]'::jsonb;
 BEGIN
     IF _source_category_node_id IS NULL THEN
-        IF _category_id_from IS NULL THEN
-            RAISE EXCEPTION 'monthly_distribute_allocation requires source category id or source allocation node id';
-        END IF;
+        RAISE EXCEPTION 'monthly_distribute_allocation requires explicit source allocation node id';
+    END IF;
 
-        _source_category_node_id := public.find_allocation_category_node_id_by_legacy(
+    SELECT *
+    INTO _source_category_node
+    FROM public.allocation_nodes
+    WHERE id = _source_category_node_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Allocation source node % not found', _source_category_node_id;
+    END IF;
+
+    IF NOT _source_category_node.active THEN
+        RAISE EXCEPTION
+            'Allocation source node % (%) is inactive',
+            _source_category_node.id,
+            _source_category_node.slug;
+    END IF;
+
+    IF _source_category_node.user_id IS NOT NULL
+       AND _source_category_node.user_id <> _executor_user_id THEN
+        RAISE EXCEPTION
+            'Executor user % cannot use source allocation node % owned by user %',
             _executor_user_id,
-            _category_id_from
-        );
+            _source_category_node.id,
+            _source_category_node.user_id;
+    END IF;
 
-        IF _source_category_node_id IS NULL THEN
-            RAISE EXCEPTION
-                'Allocation source node for legacy category % not found for user %',
-                _category_id_from,
-                _executor_user_id;
-        END IF;
-    ELSE
-        SELECT *
-        INTO _source_category_node
-        FROM public.allocation_nodes
-        WHERE id = _source_category_node_id;
+    IF _source_category_node.user_group_id IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM public.user_group_memberships ugm
+           WHERE ugm.user_id = _executor_user_id
+             AND ugm.user_group_id = _source_category_node.user_group_id
+             AND ugm.active
+       ) THEN
+        RAISE EXCEPTION
+            'Executor user % is not an active member of group % for source allocation node %',
+            _executor_user_id,
+            _source_category_node.user_group_id,
+            _source_category_node.id;
+    END IF;
 
-        IF NOT FOUND THEN
-            RAISE EXCEPTION 'Allocation source node % not found', _source_category_node_id;
-        END IF;
-
-        IF NOT _source_category_node.active THEN
-            RAISE EXCEPTION
-                'Allocation source node % (%) is inactive',
-                _source_category_node.id,
-                _source_category_node.slug;
-        END IF;
-
-        IF _source_category_node.user_id IS NOT NULL
-           AND _source_category_node.user_id <> _executor_user_id THEN
-            RAISE EXCEPTION
-                'Executor user % cannot use source allocation node % owned by user %',
-                _executor_user_id,
-                _source_category_node.id,
-                _source_category_node.user_id;
-        END IF;
-
-        IF _source_category_node.user_group_id IS NOT NULL
-           AND NOT EXISTS (
-               SELECT 1
-               FROM public.user_group_memberships ugm
-               WHERE ugm.user_id = _executor_user_id
-                 AND ugm.user_group_id = _source_category_node.user_group_id
-                 AND ugm.active
-           ) THEN
-            RAISE EXCEPTION
-                'Executor user % is not an active member of group % for source allocation node %',
-                _executor_user_id,
-                _source_category_node.user_group_id,
-                _source_category_node.id;
-        END IF;
-
-        IF _category_id_from IS NULL THEN
-            _category_id_from := _source_category_node.legacy_category_id;
-        ELSIF _source_category_node.legacy_category_id IS NOT NULL
-              AND _source_category_node.legacy_category_id <> _category_id_from THEN
-            RAISE EXCEPTION
-                'Source allocation node % legacy category % does not match requested legacy category %',
-                _source_category_node.id,
-                _source_category_node.legacy_category_id,
-                _category_id_from;
-        END IF;
+    IF _category_id_from IS NULL THEN
+        _category_id_from := _source_category_node.legacy_category_id;
+    ELSIF _source_category_node.legacy_category_id IS NOT NULL
+          AND _source_category_node.legacy_category_id <> _category_id_from THEN
+        RAISE EXCEPTION
+            'Source allocation node % legacy category % does not match requested legacy category %',
+            _source_category_node.id,
+            _source_category_node.legacy_category_id,
+            _category_id_from;
     END IF;
 
     _source_amount := COALESCE(
@@ -2925,10 +3160,6 @@ begin
         case when an.user_id = _users_id then 0 else 1 end,
         an.id
     limit 1;
-
-    if _category_node_id is null then
-        _category_node_id := public.ensure_allocation_compatibility_node(_users_id, _category_id);
-    end if;
 
     if _category_node_id is null then
         raise exception 'Allocation category node for legacy category % not found for user %', _category_id, _users_id;

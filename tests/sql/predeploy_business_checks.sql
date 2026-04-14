@@ -13,6 +13,28 @@ DELETE FROM users WHERE id = 900001;
 
 INSERT INTO users(id, nickname) VALUES (900001, 'testuser');
 INSERT INTO categories(id, "name", "percent") VALUES (900001, 'Test Wallet', 0.00);
+INSERT INTO allocation_nodes(
+    user_id,
+    slug,
+    "name",
+    description,
+    node_kind,
+    legacy_category_id,
+    visible,
+    include_in_report,
+    active
+)
+VALUES (
+    900001,
+    'test_wallet',
+    'Test Wallet',
+    'predeploy exchange wallet fixture',
+    'both',
+    900001,
+    true,
+    true,
+    true
+);
 
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
