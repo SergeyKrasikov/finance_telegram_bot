@@ -595,6 +595,10 @@ DECLARE
     partner_invest_amount numeric;
     partner_personal_amount numeric;
     partner_common_amount numeric;
+    salary_source_balance numeric;
+    partner_bridge_source_balance numeric;
+    monthly_row_count_before_repeat integer;
+    monthly_row_count_after_repeat integer;
     linked_legacy_rows integer;
     monthly_cash_flow_rows integer;
 BEGIN
@@ -778,6 +782,38 @@ BEGIN
         RAISE EXCEPTION 'Expected partner common amount 27, got %', partner_common_amount;
     END IF;
 
+    SELECT public.get_allocation_node_balance(
+        906021,
+        (
+            SELECT id
+            FROM allocation_nodes
+            WHERE user_id = 906021
+              AND slug = 'cat_906213'
+        ),
+        'RUB'
+    )
+    INTO salary_source_balance;
+
+    IF abs(COALESCE(salary_source_balance, 0)) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected salary source balance 0 after monthly debit, got %', salary_source_balance;
+    END IF;
+
+    SELECT public.get_allocation_node_balance(
+        906022,
+        (
+            SELECT id
+            FROM allocation_nodes
+            WHERE user_id = 906022
+              AND slug = 'cat_906218'
+        ),
+        'RUB'
+    )
+    INTO partner_bridge_source_balance;
+
+    IF abs(COALESCE(partner_bridge_source_balance, 0)) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected partner bridge source balance 0 after bridge credit/debit, got %', partner_bridge_source_balance;
+    END IF;
+
     SELECT COUNT(*)
     INTO linked_legacy_rows
     FROM allocation_postings
@@ -797,6 +833,26 @@ BEGIN
 
     IF monthly_cash_flow_rows <> 0 THEN
         RAISE EXCEPTION 'Expected no cash_flow monthly distribute rows, got %', monthly_cash_flow_rows;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO monthly_row_count_before_repeat
+    FROM allocation_postings
+    WHERE user_id IN (906021, 906022)
+      AND description = 'monthly distribute';
+
+    PERFORM public.monthly_distribute_cascade(906021);
+
+    SELECT COUNT(*)
+    INTO monthly_row_count_after_repeat
+    FROM allocation_postings
+    WHERE user_id IN (906021, 906022)
+      AND description = 'monthly distribute';
+
+    IF monthly_row_count_after_repeat <> monthly_row_count_before_repeat THEN
+        RAISE EXCEPTION 'Expected repeated monthly_distribute_cascade() to be a no-op without new source balance, got % -> % rows',
+            monthly_row_count_before_repeat,
+            monthly_row_count_after_repeat;
     END IF;
 
     BEGIN
@@ -841,6 +897,18 @@ BEGIN
           )
           AND binding_kind = 'bridge_source';
 
+        INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
+        SELECT
+            906021,
+            id,
+            10,
+            'RUB',
+            'fixture repeated salary source',
+            jsonb_build_object('kind', 'fixture')
+        FROM allocation_nodes
+        WHERE user_id = 906021
+          AND slug = 'cat_906213';
+
         PERFORM public.monthly_distribute_cascade(906021);
         RAISE EXCEPTION 'Expected missing bridge_source binding to fail';
     EXCEPTION WHEN OTHERS THEN
@@ -853,6 +921,18 @@ BEGIN
         DELETE FROM public.allocation_nodes
         WHERE user_id = 906021
           AND slug = 'free_to_gifts';
+
+        INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
+        SELECT
+            906021,
+            id,
+            10,
+            'RUB',
+            'fixture repeated salary source',
+            jsonb_build_object('kind', 'fixture')
+        FROM allocation_nodes
+        WHERE user_id = 906021
+          AND slug = 'cat_906213';
 
         PERFORM public.monthly_distribute_cascade(906021);
         RAISE EXCEPTION 'Expected missing free_to_gifts root to fail';

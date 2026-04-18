@@ -1459,38 +1459,6 @@ BEGIN
         'monthly distribute'::text
     );
 
-    _free_node_id := public.find_allocation_remainder_node_id(_user_id, 'self_distribution');
-
-    IF _free_node_id IS NULL THEN
-        RAISE EXCEPTION
-            'self_distribution remainder leaf is required for user %',
-            _user_id;
-    END IF;
-
-    _free_money := public.get_allocation_node_balance(_user_id, _free_node_id, 'RUB');
-
-    -- Шаг 2.5. Allocation-only перевод free money в gifts bucket.
-    _free_to_gifts_root_id := public.require_allocation_root_id(_user_id, 'free_to_gifts');
-
-    IF COALESCE(_free_money, 0) > 0 THEN
-        PERFORM public.allocation_distribute(
-            _user_id::bigint,
-            _free_to_gifts_root_id::bigint,
-            _free_money::numeric,
-            'RUB'::varchar,
-            NULL::integer,
-            'monthly distribute'::text,
-            _free_node_id::bigint
-        );
-    END IF;
-
-    -- Шаг 3. Allocation-only reserve для отрицательных personal-spend категорий.
-    PERFORM public.run_monthly_debt_reserve(
-        _user_id,
-        'RUB'::varchar,
-        'monthly distribute'::text
-    );
-
     _salary_primary_root_id := public.require_allocation_root_id(_user_id, 'salary_primary');
 
     SELECT
@@ -1510,7 +1478,39 @@ BEGIN
         'RUB'
     );
 
-    IF _sum_value > 0 THEN
+    IF COALESCE(_sum_value, 0) > 0 THEN
+        _free_node_id := public.find_allocation_remainder_node_id(_user_id, 'self_distribution');
+
+        IF _free_node_id IS NULL THEN
+            RAISE EXCEPTION
+                'self_distribution remainder leaf is required for user %',
+                _user_id;
+        END IF;
+
+        _free_money := public.get_allocation_node_balance(_user_id, _free_node_id, 'RUB');
+
+        -- Шаг 2.5. Allocation-only перевод free money в gifts bucket.
+        _free_to_gifts_root_id := public.require_allocation_root_id(_user_id, 'free_to_gifts');
+
+        IF COALESCE(_free_money, 0) > 0 THEN
+            PERFORM public.allocation_distribute(
+                _user_id::bigint,
+                _free_to_gifts_root_id::bigint,
+                _free_money::numeric,
+                'RUB'::varchar,
+                NULL::integer,
+                'monthly distribute'::text,
+                _free_node_id::bigint
+            );
+        END IF;
+
+        -- Шаг 3. Allocation-only reserve для отрицательных personal-spend категорий.
+        PERFORM public.run_monthly_debt_reserve(
+            _user_id,
+            'RUB'::varchar,
+            'monthly distribute'::text
+        );
+
         SELECT public.build_allocation_report_json(
             _user_id::bigint,
             _salary_primary_root_id::bigint,
@@ -1650,6 +1650,7 @@ DECLARE
     _next_executor_user_id bigint;
     _next_category_id_from integer;
     _next_source_category_node_id bigint;
+    _bridge_posting_user_id bigint;
 BEGIN
     IF _amount IS NULL OR _amount <= 0 THEN
         RETURN;
@@ -1806,6 +1807,12 @@ BEGIN
                     _node.id;
             END IF;
 
+            IF _source_category_node_id IS NULL THEN
+                RAISE EXCEPTION
+                    'family_contribution_out node % requires current source category node',
+                    _node.id;
+            END IF;
+
             SELECT legacy_category_id
             INTO _next_category_id_from
             FROM public.allocation_nodes
@@ -1828,6 +1835,41 @@ BEGIN
                     _next_source_category_node_id,
                     _next_executor_user_id;
             END IF;
+
+            _bridge_posting_user_id := COALESCE(
+                _target_node.user_id,
+                _next_executor_user_id,
+                _executor_user_id
+            );
+
+            INSERT INTO public.allocation_postings(
+                user_id,
+                from_node_id,
+                to_node_id,
+                value,
+                currency,
+                description,
+                metadata
+            )
+            VALUES (
+                _bridge_posting_user_id,
+                _source_category_node_id,
+                _next_source_category_node_id,
+                _child_amount,
+                _currency,
+                COALESCE(_description, 'allocation cascade'),
+                jsonb_strip_nulls(
+                    jsonb_build_object(
+                        'kind', 'monthly',
+                        'subkind', 'bridge_transfer',
+                        'origin', 'allocation_runtime',
+                        'bridge_from_slug', _node.slug,
+                        'bridge_to_slug', _target_node.slug,
+                        'legacy_category_id_from', _category_id_from,
+                        'legacy_category_id_to', _next_category_id_from
+                    )
+                )
+            );
         ELSE
             _next_category_id_from := _category_id_from;
             _next_source_category_node_id := _source_category_node_id;

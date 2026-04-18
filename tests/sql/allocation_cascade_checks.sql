@@ -254,6 +254,7 @@ DECLARE
     family_root_id bigint;
     family_source_node_id bigint;
     family_source_rows integer;
+    family_bridge_credit_rows integer;
     native_root_id bigint;
     native_leaf_id bigint;
     native_rows integer;
@@ -395,6 +396,18 @@ BEGIN
 
     IF family_source_rows <> 1 THEN
         RAISE EXCEPTION 'Expected family bridge row debited from source node bridge_source binding, got %', family_source_rows;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO family_bridge_credit_rows
+    FROM allocation_postings
+    WHERE user_id = 906002
+      AND description = 'test family bridge'
+      AND from_node_id = source_node_id
+      AND to_node_id = family_source_node_id;
+
+    IF family_bridge_credit_rows <> 1 THEN
+        RAISE EXCEPTION 'Expected family bridge transfer row from source node to bridge_source binding, got %', family_bridge_credit_rows;
     END IF;
 
     SELECT id
