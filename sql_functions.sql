@@ -2919,9 +2919,29 @@ $function$
 CREATE OR REPLACE FUNCTION public.get_group_balance_v2(_user_id bigint, _groyps_id integer)
  RETURNS TABLE(balance NUMERIC)
  LANGUAGE sql
+ STABLE
 AS $function$
-    SELECT SUM(public.get_category_balance_v2(_user_id, c.categories_id, 'RUB')) AS balance
-    FROM public.get_categories_id(_user_id, _groyps_id) c;
+    WITH grouped_categories AS (
+        SELECT DISTINCT an.legacy_category_id
+        FROM public.allocation_nodes an
+        JOIN public.allocation_node_groups ang
+          ON ang.node_id = an.id
+         AND ang.active
+        WHERE an.active
+          AND an.legacy_category_id IS NOT NULL
+          AND ang.legacy_group_id = _groyps_id
+          AND (
+              an.user_id = _user_id
+              OR an.user_group_id IN (
+                  SELECT ugm.user_group_id
+                  FROM public.user_group_memberships ugm
+                  WHERE ugm.user_id = _user_id
+                    AND ugm.active
+              )
+          )
+    )
+    SELECT SUM(public.get_category_balance_v2(_user_id, gc.legacy_category_id, 'RUB')) AS balance
+    FROM grouped_categories gc;
 $function$
 ;
 
@@ -2943,28 +2963,17 @@ $function$
 -- Ledger-backed candidate for get_remains(...).
 CREATE OR REPLACE FUNCTION public.get_remains_v2(_user_id bigint, _category CHARACTER)
  RETURNS numeric
- LANGUAGE plpgsql
+ LANGUAGE sql
+ STABLE
 AS $function$
-BEGIN
-    RETURN (
-        SELECT COALESCE(
-            public.get_category_balance_v2(
-                _user_id,
-                (
-                    SELECT c.id
-                    FROM public.categories c
-                    JOIN public.categories_category_groups ccg
-                      ON c.id = ccg.categories_id
-                    WHERE ccg.category_groyps_id = 14
-                      AND ccg.users_id = _user_id
-                      AND c."name" = _category
-                ),
-                'RUB'
-            ),
-            0
-        )
+    SELECT COALESCE(
+        public.get_category_balance_v2(
+            _user_id,
+            public.get_category_id_from_name_v2(_user_id, _category),
+            'RUB'
+        ),
+        0
     );
-END;
 $function$
 ;
 
@@ -2989,16 +2998,36 @@ $function$;
 -- Ledger-backed candidate for get_all_balances(...).
 CREATE OR REPLACE FUNCTION public.get_all_balances_v2(_user_id bigint, _group_id integer)
 RETURNS TABLE(category_name varchar, balance numeric(20, 2))
-LANGUAGE plpgsql
+LANGUAGE sql
+STABLE
 AS $function$
-BEGIN
-    RETURN QUERY
+    WITH grouped_categories AS (
+        SELECT DISTINCT ON (an.legacy_category_id)
+            an."name" AS category_name,
+            an.legacy_category_id
+        FROM public.allocation_nodes an
+        JOIN public.allocation_node_groups ang
+          ON ang.node_id = an.id
+         AND ang.active
+        WHERE an.active
+          AND an.legacy_category_id IS NOT NULL
+          AND ang.legacy_group_id = _group_id
+          AND (
+              an.user_id = _user_id
+              OR an.user_group_id IN (
+                  SELECT ugm.user_group_id
+                  FROM public.user_group_memberships ugm
+                  WHERE ugm.user_id = _user_id
+                    AND ugm.active
+              )
+          )
+        ORDER BY an.legacy_category_id, an.id
+    )
     SELECT
-        c."name" AS category_name,
-        COALESCE(public.get_category_balance_v2(_user_id, c.id, 'RUB'), 0)::numeric(20, 2) AS balance
-    FROM public.categories c
-    WHERE c.id IN (SELECT public.get_categories_id(_user_id, _group_id));
-END;
+        gc.category_name::varchar,
+        COALESCE(public.get_category_balance_v2(_user_id, gc.legacy_category_id, 'RUB'), 0)::numeric(20, 2) AS balance
+    FROM grouped_categories gc
+    ORDER BY gc.category_name;
 $function$;
 
 -- запускает функции месячного распределения

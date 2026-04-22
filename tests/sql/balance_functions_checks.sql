@@ -15,7 +15,6 @@ WHERE node_id IN (
 DELETE FROM allocation_nodes WHERE user_id IN (902101, 902102) OR legacy_category_id IN (902211, 902212);
 DELETE FROM user_group_memberships WHERE user_id IN (902101, 902102);
 DELETE FROM user_groups WHERE slug = 'balance_test_group';
-DELETE FROM categories_category_groups WHERE users_id IN (902101, 902102);
 DELETE FROM users WHERE id IN (902101, 902102);
 DELETE FROM categories WHERE id IN (902211, 902212);
 DELETE FROM category_groups WHERE id IN (9808, 9814);
@@ -35,7 +34,7 @@ SELECT 902101, id FROM user_groups WHERE slug = 'balance_test_group';
 INSERT INTO user_group_memberships(user_id, user_group_id)
 SELECT 902102, id FROM user_groups WHERE slug = 'balance_test_group';
 
--- category groups remain as read contract for *_v2 balance helpers
+-- category groups now map through allocation_node_groups for *_v2 balance helpers
 INSERT INTO category_groups(id, "name", description) VALUES
   (9808, 'test_spend_group', ''),
   (9814, 'test_all_group', '');
@@ -43,12 +42,6 @@ INSERT INTO category_groups(id, "name", description) VALUES
 INSERT INTO categories(id, "name", "percent") VALUES
   (902211, 'FoodTest', 0.00),
   (902212, 'CryptoTest', 0.00);
-
-INSERT INTO categories_category_groups(categories_id, category_groyps_id, users_id) VALUES
-  (902211, 9808, 902101),
-  (902212, 9808, 902101),
-  (902211, 9814, 902101),
-  (902212, 9814, 902101);
 
 -- rates (currency per 1 USD)
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES
@@ -72,6 +65,12 @@ VALUES
     (9022111, 902101, 'bal_food_node', 'FoodTest', 'food test node', 'expense', 902211, true, true, true),
     (9022121, 902101, 'bal_crypto_node', 'CryptoTest', 'crypto test node', 'expense', 902212, true, true, true);
 
+INSERT INTO allocation_node_groups(node_id, legacy_group_id, active) VALUES
+    (9022111, 9808, true),
+    (9022111, 9814, true),
+    (9022121, 9808, true),
+    (9022121, 9814, true);
+
 -- Food balance inputs (shared across users in same runtime household)
 INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
 VALUES
@@ -94,6 +93,7 @@ DO $$
 DECLARE
     food_balance numeric;
     crypto_balance numeric;
+    food_remains numeric;
     group_balance numeric;
     all_sum numeric;
     food_usd numeric;
@@ -109,6 +109,11 @@ BEGIN
 
     IF crypto_balance IS NULL OR abs(crypto_balance - 3500) > 1e-9 THEN
         RAISE EXCEPTION 'Expected CryptoTest RUB balance 3500, got %', crypto_balance;
+    END IF;
+
+    SELECT public.get_remains_v2(902101, 'FoodTest') INTO food_remains;
+    IF food_remains IS NULL OR abs(food_remains - 8000) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected FoodTest remains 8000, got %', food_remains;
     END IF;
 
     -- group balance should equal sum of categories
