@@ -25,9 +25,3 @@ async def get_category_balance_with_currency_v2(
         "get_category_balance_with_currency_v2", user_id, category_id
     )
     return [(record[0], record[1]) for record in records]
-
-
-get_group_balance = get_group_balance_v2
-get_all_balances = get_all_balances_v2
-get_remains = get_remains_v2
-get_category_balance_with_currency = get_category_balance_with_currency_v2
