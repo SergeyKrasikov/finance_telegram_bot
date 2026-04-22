@@ -3,7 +3,6 @@
 -- Assumptions:
 -- 1) users 249716305 and 943915310 already exist;
 -- 2) legacy categories_category_groups is already filled;
--- 3) legacy users_groups relation already contains the family pair.
 --
 -- Run after tables.sql and sql_functions.sql:
 --   psql -v ON_ERROR_STOP=1 -f scripts/seed_monthly_allocation_graph.sql

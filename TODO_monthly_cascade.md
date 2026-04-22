@@ -89,7 +89,7 @@
   - `monthly_distribute_allocation(...)` теперь требует явный source allocation node; fallback на legacy category lookup убран
   - partner bridge уже жёстко резолвит source leaf через scenario binding `bridge_source`
   - graph-native leaf-ноды уже могут писать `allocation_postings` без `legacy_category_id`
-  - `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL
+  - `get_users_id(...)` уже читает только `user_group_memberships`
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
   - `/history` читает ledger-backed `get_last_transaction_v2(user_id, num)`
   - delete-flow удаляет `allocation_postings` и linked legacy `cash_flow`, если он есть в metadata

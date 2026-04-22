@@ -72,8 +72,7 @@ DROP FUNCTION IF EXISTS public.monthly_allocation_report_metrics(bigint, bigint,
 DROP FUNCTION IF EXISTS public.monthly_distribute_cascade(bigint, integer);
 
 -- Returns active household members for a user.
--- Runtime membership is graph-native via user_group_memberships; legacy users_groups
--- remains as a fallback for old fixtures/reference SQL.
+-- Runtime membership is graph-native via user_group_memberships.
 CREATE OR REPLACE FUNCTION public.get_users_id(_user_id bigint)
  RETURNS TABLE(user_id bigint)
  LANGUAGE sql
@@ -92,14 +91,6 @@ AS $function$
          AND ugm2.active
         WHERE ugm1.user_id = _user_id
           AND ugm1.active
-
-        UNION ALL
-
-        SELECT ug2.users_id::bigint AS member_id
-        FROM public.users_groups ug1
-        JOIN public.users_groups ug2
-          ON ug2.users_groups = ug1.users_groups
-        WHERE ug1.users_id = _user_id
     ) members
     ORDER BY member_id;
 $function$;

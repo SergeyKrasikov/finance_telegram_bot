@@ -408,7 +408,7 @@ graph TD
   legacy category id остаётся там только как compatibility metadata/validation against the provided node.
 - Partner bridge `family_contribution_out -> family_contribution_in` резолвит source leaf через `allocation_scenario_node_bindings`, без metadata fallback.
 - Graph-native leaf-ноды больше не обязаны иметь `legacy_category_id`; он пишется в metadata только если присутствует на source/target node.
-- Household membership helper `get_users_id(...)` уже читает `user_group_memberships`, с legacy `users_groups` fallback для старых fixtures/reference SQL.
+- Household membership helper `get_users_id(...)` читает только `user_group_memberships`.
 - Для безопасного наблюдения за новым ledger добавлен read-only helper:
   - `public.get_last_allocation_postings(user_id, num)`
   - `public.get_last_transaction_v2(user_id, num)` как ledger-backed candidate для `/history`

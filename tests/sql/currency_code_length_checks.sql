@@ -8,7 +8,6 @@ DELETE FROM allocation_postings WHERE user_id = 905001;
 DELETE FROM allocation_nodes WHERE user_id = 905001 OR legacy_category_id = 905011;
 DELETE FROM cash_flow WHERE users_id = 905001;
 DELETE FROM categories_category_groups WHERE users_id = 905001;
-DELETE FROM users_groups WHERE users_id = 905001;
 DELETE FROM users WHERE id = 905001;
 DELETE FROM categories WHERE id = 905011;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'USDT', 'FDUSD');
