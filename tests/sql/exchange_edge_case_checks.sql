@@ -9,7 +9,8 @@ DELETE FROM allocation_nodes
 WHERE user_id IN (901101, 901102)
    OR legacy_category_id IN (901111);
 DELETE FROM cash_flow WHERE users_id IN (901101, 901102);
-DELETE FROM users_groups WHERE users_id IN (901101, 901102);
+DELETE FROM user_group_memberships WHERE user_id IN (901101, 901102);
+DELETE FROM user_groups WHERE slug = 'exchange_edge_group';
 DELETE FROM users WHERE id IN (901101, 901102);
 DELETE FROM categories WHERE id IN (901111);
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'ETH', 'USDT');
@@ -19,9 +20,14 @@ INSERT INTO users(id, nickname) VALUES
     (901101, 'edge_u1'),
     (901102, 'edge_u2');
 
-INSERT INTO users_groups(users_id, users_groups) VALUES
-    (901101, 9101),
-    (901102, 9101);
+INSERT INTO user_groups(slug, "name", description)
+VALUES ('exchange_edge_group', 'exchange edge group', 'fixture');
+
+INSERT INTO user_group_memberships(user_id, user_group_id)
+SELECT 901101, id FROM user_groups WHERE slug = 'exchange_edge_group';
+
+INSERT INTO user_group_memberships(user_id, user_group_id)
+SELECT 901102, id FROM user_groups WHERE slug = 'exchange_edge_group';
 
 -- category for balance and exchange tests
 INSERT INTO categories(id, "name", "percent") VALUES
@@ -51,23 +57,50 @@ INSERT INTO exchange_rates("datetime", currency, rate) VALUES
     (now(), 'RUB', 100),
     (now(), 'ETH', 0.0005);
 
--- balance movements in mixed currencies across both users in same users_group
-INSERT INTO cash_flow(users_id, category_id_to, value, currency, description)
-VALUES (901101, 901111, 0.1, 'ETH', 'edge in eth');
+-- balance movements in mixed currencies across both users in same runtime household
+INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
+SELECT
+    901101,
+    id,
+    0.1,
+    'ETH',
+    'edge in eth',
+    jsonb_build_object('kind', 'fixture', 'origin', 'exchange_edge_case')
+FROM allocation_nodes
+WHERE user_id = 901101
+  AND slug = 'edge_wallet_1';
 
-INSERT INTO cash_flow(users_id, category_id_from, value, currency, description)
-VALUES (901102, 901111, 5000, 'RUB', 'edge out rub');
+INSERT INTO allocation_postings(user_id, from_node_id, value, currency, description, metadata)
+SELECT
+    901102,
+    id,
+    5000,
+    'RUB',
+    'edge out rub',
+    jsonb_build_object('kind', 'fixture', 'origin', 'exchange_edge_case')
+FROM allocation_nodes
+WHERE user_id = 901102
+  AND slug = 'edge_wallet_2';
 
-INSERT INTO cash_flow(users_id, category_id_to, value, currency, description)
-VALUES (901102, 901111, 10, 'USD', 'edge in usd');
+INSERT INTO allocation_postings(user_id, to_node_id, value, currency, description, metadata)
+SELECT
+    901102,
+    id,
+    10,
+    'USD',
+    'edge in usd',
+    jsonb_build_object('kind', 'fixture', 'origin', 'exchange_edge_case')
+FROM allocation_nodes
+WHERE user_id = 901102
+  AND slug = 'edge_wallet_2';
 
 DO $$
 DECLARE
     rub_balance numeric;
     usd_balance numeric;
 BEGIN
-    SELECT public.get_category_balance(901101, 901111, 'RUB') INTO rub_balance;
-    SELECT public.get_category_balance(901101, 901111, 'USD') INTO usd_balance;
+    SELECT public.get_category_balance_v2(901101, 901111, 'RUB') INTO rub_balance;
+    SELECT public.get_category_balance_v2(901101, 901111, 'USD') INTO usd_balance;
 
     -- Expected with latest rates (RUB=100, ETH=0.0005):
     -- +0.1 ETH => +20000 RUB
