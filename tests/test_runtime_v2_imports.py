@@ -6,6 +6,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 RUNTIME_FILES = [
+    ROOT / "app" / "filters" / "category_name.py",
     ROOT / "app" / "routers" / "adjustment.py",
     ROOT / "app" / "routers" / "balance.py",
     ROOT / "app" / "routers" / "earnings.py",

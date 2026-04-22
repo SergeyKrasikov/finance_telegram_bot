@@ -26,7 +26,3 @@ async def exchange_currency_v2(
         currency_in,
     )
     return records[0][0] if records else "OK"
-
-
-get_currency_list = get_currency_list_v2
-exchange_currency = exchange_currency_v2
