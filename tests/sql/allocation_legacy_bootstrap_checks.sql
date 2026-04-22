@@ -38,11 +38,15 @@ INSERT INTO cash_flow(users_id, "datetime", category_id_from, value, currency, d
 INSERT INTO cash_flow(users_id, "datetime", category_id_from, value, currency, description) VALUES
     (908001, now() + interval '3 seconds', 908012, 0::numeric, 'RUB', 'zero row');
 
+SELECT public.ensure_monthly_allocation_nodes_from_legacy(ARRAY[908001]);
+SELECT public.ensure_monthly_allocation_nodes_from_legacy(ARRAY[908001]);
 SELECT public.bootstrap_allocation_ledger_from_legacy();
 SELECT public.bootstrap_allocation_ledger_from_legacy();
 
 DO $$
 DECLARE
+    monthly_leaf_count int;
+    monthly_leaf_group_count int;
     compat_node_count int;
     node_group_count int;
     posting_count int;
@@ -50,6 +54,31 @@ DECLARE
     exchange_count int;
     zero_row_count int;
 BEGIN
+    SELECT count(*)
+    INTO monthly_leaf_count
+    FROM allocation_nodes
+    WHERE user_id = 908001
+      AND slug IN ('cat_908011', 'cat_908012')
+      AND active;
+
+    IF monthly_leaf_count <> 2 THEN
+        RAISE EXCEPTION 'Expected 2 active monthly leaf nodes without duplicates, got %', monthly_leaf_count;
+    END IF;
+
+    SELECT count(*)
+    INTO monthly_leaf_group_count
+    FROM allocation_node_groups ang
+    JOIN allocation_nodes an
+      ON an.id = ang.node_id
+    WHERE an.user_id = 908001
+      AND an.slug IN ('cat_908011', 'cat_908012')
+      AND ang.legacy_group_id IN (908101, 908102)
+      AND ang.active;
+
+    IF monthly_leaf_group_count <> 2 THEN
+        RAISE EXCEPTION 'Expected 2 active monthly leaf allocation_node_groups rows, got %', monthly_leaf_group_count;
+    END IF;
+
     SELECT count(*)
     INTO compat_node_count
     FROM allocation_nodes

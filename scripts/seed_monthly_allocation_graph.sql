@@ -272,6 +272,42 @@ FROM tmp_monthly_seed_users u
 JOIN public.user_groups g
   ON g.slug = u.shared_group_slug;
 
+SELECT public.ensure_monthly_allocation_nodes_from_legacy(
+    ARRAY(SELECT user_id FROM tmp_monthly_seed_users)
+);
+
+CREATE TEMP TABLE tmp_monthly_seed_leaf_groups
+ON COMMIT DROP
+AS
+SELECT DISTINCT
+    seed.user_id AS owner_user_id,
+    an.id AS node_id,
+    an.user_id AS node_user_id,
+    an.user_group_id,
+    an.slug,
+    an.legacy_category_id AS category_id,
+    ang.legacy_group_id AS group_id,
+    c.percent,
+    (an.user_group_id IS NOT NULL) AS is_shared
+FROM tmp_monthly_seed_users seed
+JOIN public.allocation_nodes an
+  ON an.active
+ AND an.legacy_category_id IS NOT NULL
+ AND (
+     an.user_id = seed.user_id
+     OR an.user_group_id IN (
+         SELECT ugm.user_group_id
+         FROM public.user_group_memberships ugm
+         WHERE ugm.user_id = seed.user_id
+           AND ugm.active
+     )
+ )
+JOIN public.allocation_node_groups ang
+  ON ang.node_id = an.id
+ AND ang.active
+LEFT JOIN public.categories c
+  ON c.id = an.legacy_category_id;
+
 -- Core technical and report nodes per user.
 INSERT INTO public.allocation_nodes (
     user_id,
@@ -319,123 +355,6 @@ WHERE NOT EXISTS (
     WHERE an.user_id = u.user_id
       AND an.slug = v.slug
 );
-
--- User-owned leaves for non-common monthly categories.
-INSERT INTO public.allocation_nodes (
-    user_id,
-    slug,
-    "name",
-    description,
-    node_kind,
-    legacy_category_id,
-    visible,
-    include_in_report,
-    active
-)
-SELECT DISTINCT
-    ccg.users_id::bigint,
-    CONCAT('cat_', ccg.categories_id),
-    c."name",
-    CONCAT('Legacy monthly leaf cat_', ccg.categories_id),
-    CASE
-        WHEN ccg.category_groyps_id = 13 THEN 'income'
-        ELSE 'expense'
-    END,
-    ccg.categories_id,
-    true,
-    true,
-    true
-FROM public.categories_category_groups ccg
-JOIN public.categories c
-  ON c.id = ccg.categories_id
-JOIN tmp_monthly_seed_users seed_user
-  ON seed_user.user_id = ccg.users_id
-WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
-  AND ccg.category_groyps_id IN (1, 2, 3, 6, 7, 9, 13)
-  AND ccg.categories_id NOT IN (
-      SELECT DISTINCT common_ccg.categories_id
-      FROM public.categories_category_groups common_ccg
-      JOIN tmp_monthly_seed_users common_seed_user
-        ON common_seed_user.user_id = common_ccg.users_id
-      WHERE common_seed_user.shared_group_slug = seed_user.shared_group_slug
-        AND common_ccg.category_groyps_id = 4
-  )
-  AND NOT EXISTS (
-      SELECT 1
-      FROM public.allocation_nodes an
-      WHERE an.user_id = ccg.users_id
-        AND an.slug = CONCAT('cat_', ccg.categories_id)
-  );
-
--- Shared common leaves owned by the pair group.
-INSERT INTO public.allocation_nodes (
-    user_group_id,
-    slug,
-    "name",
-    description,
-    node_kind,
-    legacy_category_id,
-    visible,
-    include_in_report,
-    active
-)
-SELECT
-    ug.shared_group_id,
-    CONCAT('cat_', ug.categories_id),
-    c."name",
-    CONCAT('Shared common monthly leaf cat_', ug.categories_id),
-    'expense',
-    ug.categories_id,
-    true,
-    true,
-    true
-FROM (
-    SELECT DISTINCT
-        tug.shared_group_id,
-        ccg.categories_id
-    FROM tmp_monthly_seed_user_groups tug
-    JOIN public.categories_category_groups ccg
-      ON ccg.users_id = tug.user_id
-     AND ccg.category_groyps_id = 4
-) AS ug
-JOIN public.categories c
-  ON c.id = ug.categories_id
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM public.allocation_nodes an
-    WHERE an.user_group_id = ug.shared_group_id
-      AND an.slug = CONCAT('cat_', ug.categories_id)
-);
-
--- Keep monthly allocation group memberships in sync with legacy category mappings.
--- The backfill script also does this globally, but the monthly seed should be
--- self-contained because monthly_distribute_cascade() reads groups 8/11/12/15
--- from allocation_node_groups at runtime.
-INSERT INTO public.allocation_node_groups (
-    node_id,
-    legacy_group_id,
-    active
-)
-SELECT DISTINCT
-    an.id,
-    ccg.category_groyps_id,
-    true
-FROM public.categories_category_groups ccg
-JOIN public.allocation_nodes an
-  ON an.active
- AND an.legacy_category_id = ccg.categories_id
- AND (
-     an.user_id = ccg.users_id
-     OR an.user_group_id IN (
-         SELECT ugm.user_group_id
-         FROM public.user_group_memberships ugm
-         WHERE ugm.user_id = ccg.users_id
-           AND ugm.active
-     )
- )
-WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
-ON CONFLICT (node_id, legacy_group_id)
-DO UPDATE SET active = EXCLUDED.active;
 
 UPDATE public.allocation_nodes root
 SET metadata = COALESCE(root.metadata, '{}'::jsonb) - 'partner_source_category_slug'
@@ -678,13 +597,12 @@ FROM (
 ) AS tug
 WHERE an.user_group_id = tug.shared_group_id
   AND an.slug ~ '^cat_[0-9]+$'
-  AND an.legacy_category_id NOT IN (
-      SELECT DISTINCT ccg.categories_id
-      FROM public.categories_category_groups ccg
-      JOIN tmp_monthly_seed_user_groups profile_user
-        ON profile_user.user_id = ccg.users_id
-      WHERE profile_user.shared_group_slug = tug.shared_group_slug
-        AND ccg.category_groyps_id = 4
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.allocation_node_groups ang
+      WHERE ang.node_id = an.id
+        AND ang.legacy_group_id = 4
+        AND ang.active
   );
 
 -- Rebuild managed monthly routes from scratch.
@@ -821,14 +739,12 @@ JOIN public.allocation_nodes bound
  AND bound.active
 JOIN (
     SELECT
-        ccg.users_id AS user_id,
-        COALESCE(SUM(c.percent), 0) AS percent
-    FROM public.categories_category_groups ccg
-    JOIN public.categories c
-      ON c.id = ccg.categories_id
-    WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
-      AND ccg.category_groyps_id = 7
-    GROUP BY ccg.users_id
+        owner_user_id AS user_id,
+        COALESCE(SUM(percent), 0) AS percent
+    FROM tmp_monthly_seed_leaf_groups
+    WHERE group_id = 7
+      AND node_user_id = owner_user_id
+    GROUP BY owner_user_id
 ) p
   ON p.user_id = scenario.owner_user_id
  AND p.percent > 0
@@ -1054,35 +970,46 @@ INSERT INTO public.allocation_routes (
 SELECT
     src.id,
     COALESCE(common_dst.id, user_dst.id),
-    c.percent,
-    CONCAT('self_distribution -> cat_', ccg.categories_id),
+    leaf.percent,
+    CONCAT('self_distribution -> cat_', leaf.category_id),
     true
-FROM public.categories_category_groups ccg
-JOIN public.categories c
-  ON c.id = ccg.categories_id
+FROM tmp_monthly_seed_leaf_groups leaf
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
+  ON src.user_id = leaf.owner_user_id
  AND src.slug = 'self_distribution'
-JOIN tmp_monthly_seed_user_groups tug
-  ON tug.user_id = ccg.users_id
 LEFT JOIN public.allocation_nodes common_dst
-  ON common_dst.user_group_id = tug.shared_group_id
- AND common_dst.slug = CONCAT('cat_', ccg.categories_id)
+  ON common_dst.id = (
+        SELECT shared_leaf.node_id
+        FROM tmp_monthly_seed_leaf_groups shared_leaf
+        WHERE shared_leaf.owner_user_id = leaf.owner_user_id
+          AND shared_leaf.category_id = leaf.category_id
+          AND shared_leaf.is_shared
+        ORDER BY shared_leaf.node_id
+        LIMIT 1
+    )
  AND common_dst.active
 LEFT JOIN public.allocation_nodes user_dst
-  ON user_dst.user_id = ccg.users_id
- AND user_dst.slug = CONCAT('cat_', ccg.categories_id)
+  ON user_dst.id = (
+        SELECT user_leaf.node_id
+        FROM tmp_monthly_seed_leaf_groups user_leaf
+        WHERE user_leaf.owner_user_id = leaf.owner_user_id
+          AND user_leaf.category_id = leaf.category_id
+          AND user_leaf.node_user_id = leaf.owner_user_id
+        ORDER BY user_leaf.node_id
+        LIMIT 1
+    )
  AND user_dst.active
-WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
-  AND ccg.category_groyps_id = 2
-  AND COALESCE(c.percent, 0) > 0
-  AND COALESCE(c.percent, 0) < 1
+WHERE leaf.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
+  AND leaf.group_id = 2
+  AND leaf.node_user_id = leaf.owner_user_id
+  AND COALESCE(leaf.percent, 0) > 0
+  AND COALESCE(leaf.percent, 0) < 1
   AND NOT EXISTS (
       SELECT 1
       FROM tmp_monthly_seed_root_target_categories invest_leaf
       WHERE invest_leaf.root_slug = 'invest_self_report'
-        AND invest_leaf.user_id = ccg.users_id
-        AND invest_leaf.category_id = ccg.categories_id
+        AND invest_leaf.user_id = leaf.owner_user_id
+        AND invest_leaf.category_id = leaf.category_id
   )
 ON CONFLICT DO NOTHING;
 
@@ -1099,15 +1026,16 @@ SELECT
     1.0,
     'self_distribution -> free remainder',
     true
-FROM public.categories_category_groups ccg
+FROM tmp_monthly_seed_leaf_groups leaf
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
+  ON src.user_id = leaf.owner_user_id
  AND src.slug = 'self_distribution'
 JOIN public.allocation_nodes dst
-  ON dst.user_id = ccg.users_id
- AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
-  AND ccg.category_groyps_id = 6
+  ON dst.user_id = leaf.owner_user_id
+ AND dst.slug = CONCAT('cat_', leaf.category_id)
+WHERE leaf.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
+  AND leaf.group_id = 6
+  AND leaf.node_user_id = leaf.owner_user_id
 ON CONFLICT DO NOTHING;
 
 -- partner_distribution (group 3): common leaves, partner personal leaves, free remainder
@@ -1121,53 +1049,63 @@ INSERT INTO public.allocation_routes (
 SELECT
     src.id,
     COALESCE(common_dst.id, user_dst.id),
-    c.percent / COALESCE(
+    leaf.percent / COALESCE(
         NULLIF(
             1 - (
-                SELECT inv_c.percent
+                SELECT partner_leaf.percent
                 FROM tmp_monthly_seed_root_target_categories invest_leaf
-                JOIN public.categories_category_groups inv_ccg
-                  ON inv_ccg.users_id = invest_leaf.user_id
-                 AND inv_ccg.category_groyps_id = 3
-                 AND inv_ccg.categories_id = invest_leaf.category_id
-                JOIN public.categories inv_c
-                  ON inv_c.id = invest_leaf.category_id
+                JOIN tmp_monthly_seed_leaf_groups partner_leaf
+                  ON partner_leaf.owner_user_id = invest_leaf.user_id
+                 AND partner_leaf.group_id = 3
+                 AND partner_leaf.category_id = invest_leaf.category_id
+                 AND partner_leaf.node_user_id = invest_leaf.user_id
                 WHERE invest_leaf.root_slug = 'invest_partner_report'
-                  AND invest_leaf.user_id = ccg.users_id
+                  AND invest_leaf.user_id = leaf.owner_user_id
                 LIMIT 1
             ),
             0
         ),
         1
     ),
-    CONCAT('partner_distribution -> cat_', ccg.categories_id),
+    CONCAT('partner_distribution -> cat_', leaf.category_id),
     true
-FROM public.categories_category_groups ccg
-JOIN public.categories c
-  ON c.id = ccg.categories_id
+FROM tmp_monthly_seed_leaf_groups leaf
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
+  ON src.user_id = leaf.owner_user_id
  AND src.slug = 'partner_distribution'
-JOIN tmp_monthly_seed_user_groups tug
-  ON tug.user_id = ccg.users_id
 LEFT JOIN public.allocation_nodes common_dst
-  ON common_dst.user_group_id = tug.shared_group_id
- AND common_dst.slug = CONCAT('cat_', ccg.categories_id)
+  ON common_dst.id = (
+        SELECT shared_leaf.node_id
+        FROM tmp_monthly_seed_leaf_groups shared_leaf
+        WHERE shared_leaf.owner_user_id = leaf.owner_user_id
+          AND shared_leaf.category_id = leaf.category_id
+          AND shared_leaf.is_shared
+        ORDER BY shared_leaf.node_id
+        LIMIT 1
+    )
  AND common_dst.active
 LEFT JOIN public.allocation_nodes user_dst
-  ON user_dst.user_id = ccg.users_id
- AND user_dst.slug = CONCAT('cat_', ccg.categories_id)
+  ON user_dst.id = (
+        SELECT user_leaf.node_id
+        FROM tmp_monthly_seed_leaf_groups user_leaf
+        WHERE user_leaf.owner_user_id = leaf.owner_user_id
+          AND user_leaf.category_id = leaf.category_id
+          AND user_leaf.node_user_id = leaf.owner_user_id
+        ORDER BY user_leaf.node_id
+        LIMIT 1
+    )
  AND user_dst.active
-WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
-  AND ccg.category_groyps_id = 3
-  AND COALESCE(c.percent, 0) > 0
-  AND COALESCE(c.percent, 0) < 1
+WHERE leaf.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
+  AND leaf.group_id = 3
+  AND leaf.node_user_id = leaf.owner_user_id
+  AND COALESCE(leaf.percent, 0) > 0
+  AND COALESCE(leaf.percent, 0) < 1
   AND NOT EXISTS (
       SELECT 1
       FROM tmp_monthly_seed_root_target_categories invest_leaf
       WHERE invest_leaf.root_slug = 'invest_partner_report'
-        AND invest_leaf.user_id = ccg.users_id
-        AND invest_leaf.category_id = ccg.categories_id
+        AND invest_leaf.user_id = leaf.owner_user_id
+        AND invest_leaf.category_id = leaf.category_id
   )
 ON CONFLICT DO NOTHING;
 
@@ -1184,15 +1122,16 @@ SELECT
     1.0,
     'partner_distribution -> free remainder',
     true
-FROM public.categories_category_groups ccg
+FROM tmp_monthly_seed_leaf_groups leaf
 JOIN public.allocation_nodes src
-  ON src.user_id = ccg.users_id
+  ON src.user_id = leaf.owner_user_id
  AND src.slug = 'partner_distribution'
 JOIN public.allocation_nodes dst
-  ON dst.user_id = ccg.users_id
- AND dst.slug = CONCAT('cat_', ccg.categories_id)
-WHERE ccg.users_id IN (SELECT user_id FROM tmp_monthly_seed_users)
-  AND ccg.category_groyps_id = 6
+  ON dst.user_id = leaf.owner_user_id
+ AND dst.slug = CONCAT('cat_', leaf.category_id)
+WHERE leaf.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
+  AND leaf.group_id = 6
+  AND leaf.node_user_id = leaf.owner_user_id
 ON CONFLICT DO NOTHING;
 
 COMMIT;

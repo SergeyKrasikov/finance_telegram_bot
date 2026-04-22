@@ -33,6 +33,8 @@ DROP FUNCTION IF EXISTS public.get_allocation_node_balance(bigint, bigint, varch
 DROP FUNCTION IF EXISTS public.get_allocation_node_balance_by_slug(bigint, text, varchar);
 DROP FUNCTION IF EXISTS public.find_allocation_category_node_id_by_legacy(bigint, integer);
 DROP FUNCTION IF EXISTS public.ensure_allocation_compatibility_node(bigint, integer);
+DROP FUNCTION IF EXISTS public.sync_allocation_node_groups_from_legacy(bigint[]);
+DROP FUNCTION IF EXISTS public.ensure_monthly_allocation_nodes_from_legacy(bigint[]);
 DROP FUNCTION IF EXISTS public.bootstrap_allocation_ledger_from_legacy();
 DROP FUNCTION IF EXISTS public.mirror_cash_flow_row_to_allocation_postings(bigint, text, text, text, jsonb);
 DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
@@ -423,6 +425,170 @@ END;
 $function$;
 
 
+-- Sync legacy category-group memberships into allocation_node_groups.
+-- This is bootstrap-only compatibility logic and must not be used from runtime paths.
+CREATE OR REPLACE FUNCTION public.sync_allocation_node_groups_from_legacy(
+    _user_ids bigint[] DEFAULT NULL
+) RETURNS bigint
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _rows_synced bigint := 0;
+BEGIN
+    INSERT INTO public.allocation_node_groups (
+        node_id,
+        legacy_group_id,
+        active
+    )
+    SELECT DISTINCT
+        an.id,
+        ccg.category_groyps_id,
+        true
+    FROM public.categories_category_groups ccg
+    JOIN public.allocation_nodes an
+      ON an.active
+     AND an.legacy_category_id = ccg.categories_id
+     AND (
+         an.user_id = ccg.users_id
+         OR an.user_group_id IN (
+             SELECT ugm.user_group_id
+             FROM public.user_group_memberships ugm
+             WHERE ugm.user_id = ccg.users_id
+               AND ugm.active
+         )
+     )
+    WHERE _user_ids IS NULL
+       OR ccg.users_id = ANY(_user_ids)
+    ON CONFLICT (node_id, legacy_group_id)
+    DO UPDATE SET active = EXCLUDED.active;
+
+    GET DIAGNOSTICS _rows_synced = ROW_COUNT;
+    RETURN _rows_synced;
+END;
+$function$;
+
+
+-- Materialize monthly leaf allocation_nodes from legacy categories_category_groups.
+-- This keeps legacy derivation inside a bootstrap helper while runtime/seed read only
+-- allocation_nodes + allocation_node_groups.
+CREATE OR REPLACE FUNCTION public.ensure_monthly_allocation_nodes_from_legacy(
+    _user_ids bigint[]
+) RETURNS jsonb
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    _user_leaf_nodes_synced bigint := 0;
+    _shared_leaf_nodes_synced bigint := 0;
+    _node_groups_synced bigint := 0;
+BEGIN
+    INSERT INTO public.allocation_nodes (
+        user_id,
+        slug,
+        "name",
+        description,
+        node_kind,
+        legacy_category_id,
+        visible,
+        include_in_report,
+        active
+    )
+    SELECT DISTINCT
+        ccg.users_id::bigint,
+        CONCAT('cat_', ccg.categories_id),
+        c."name",
+        CONCAT('Legacy monthly leaf cat_', ccg.categories_id),
+        CASE
+            WHEN ccg.category_groyps_id = 13 THEN 'income'
+            ELSE 'expense'
+        END,
+        ccg.categories_id,
+        true,
+        true,
+        true
+    FROM public.categories_category_groups ccg
+    JOIN public.categories c
+      ON c.id = ccg.categories_id
+    WHERE ccg.users_id = ANY(_user_ids)
+      AND ccg.category_groyps_id IN (1, 2, 3, 6, 7, 9, 13)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.user_group_memberships owner_ugm
+          JOIN public.user_group_memberships member_ugm
+            ON member_ugm.user_group_id = owner_ugm.user_group_id
+           AND member_ugm.active
+          JOIN public.categories_category_groups common_ccg
+            ON common_ccg.users_id = member_ugm.user_id
+           AND common_ccg.category_groyps_id = 4
+           AND common_ccg.categories_id = ccg.categories_id
+          WHERE owner_ugm.user_id = ccg.users_id
+            AND owner_ugm.active
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.allocation_nodes an
+          WHERE an.user_id = ccg.users_id
+            AND an.slug = CONCAT('cat_', ccg.categories_id)
+      )
+    ON CONFLICT (user_id, slug) WHERE user_id IS NOT NULL
+    DO UPDATE SET
+        legacy_category_id = EXCLUDED.legacy_category_id,
+        active = true;
+
+    GET DIAGNOSTICS _user_leaf_nodes_synced = ROW_COUNT;
+
+    INSERT INTO public.allocation_nodes (
+        user_group_id,
+        slug,
+        "name",
+        description,
+        node_kind,
+        legacy_category_id,
+        visible,
+        include_in_report,
+        active
+    )
+    SELECT DISTINCT
+        ugm.user_group_id,
+        CONCAT('cat_', ccg.categories_id),
+        c."name",
+        CONCAT('Shared common monthly leaf cat_', ccg.categories_id),
+        'expense',
+        ccg.categories_id,
+        true,
+        true,
+        true
+    FROM public.user_group_memberships ugm
+    JOIN public.categories_category_groups ccg
+      ON ccg.users_id = ugm.user_id
+     AND ccg.category_groyps_id = 4
+    JOIN public.categories c
+      ON c.id = ccg.categories_id
+    WHERE ugm.active
+      AND ugm.user_id = ANY(_user_ids)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.allocation_nodes an
+          WHERE an.user_group_id = ugm.user_group_id
+            AND an.slug = CONCAT('cat_', ccg.categories_id)
+      )
+    ON CONFLICT (user_group_id, slug) WHERE user_group_id IS NOT NULL
+    DO UPDATE SET
+        legacy_category_id = EXCLUDED.legacy_category_id,
+        active = true;
+
+    GET DIAGNOSTICS _shared_leaf_nodes_synced = ROW_COUNT;
+
+    _node_groups_synced := public.sync_allocation_node_groups_from_legacy(_user_ids);
+
+    RETURN jsonb_build_object(
+        'user_leaf_nodes_synced', _user_leaf_nodes_synced,
+        'shared_leaf_nodes_synced', _shared_leaf_nodes_synced,
+        'node_groups_synced', _node_groups_synced
+    );
+END;
+$function$;
+
+
 -- Canonical prod bootstrap for the ledger layer on top of legacy cash_flow/categories data.
 -- Keeps compatibility nodes, legacy node-group memberships, and idempotent cash_flow backfill
 -- in one SQL entrypoint that can stay on the prod branch after runtime cutover.
@@ -506,32 +672,7 @@ BEGIN
 
     GET DIAGNOSTICS _compat_nodes_synced = ROW_COUNT;
 
-    INSERT INTO public.allocation_node_groups (
-        node_id,
-        legacy_group_id,
-        active
-    )
-    SELECT DISTINCT
-        an.id,
-        ccg.category_groyps_id,
-        true
-    FROM public.categories_category_groups ccg
-    JOIN public.allocation_nodes an
-      ON an.active
-     AND an.legacy_category_id = ccg.categories_id
-     AND (
-         an.user_id = ccg.users_id
-         OR an.user_group_id IN (
-             SELECT ugm.user_group_id
-             FROM public.user_group_memberships ugm
-             WHERE ugm.user_id = ccg.users_id
-               AND ugm.active
-         )
-     )
-    ON CONFLICT (node_id, legacy_group_id)
-    DO UPDATE SET active = EXCLUDED.active;
-
-    GET DIAGNOSTICS _node_groups_synced = ROW_COUNT;
+    _node_groups_synced := public.sync_allocation_node_groups_from_legacy(NULL);
 
     INSERT INTO public.allocation_postings (
         "datetime",
