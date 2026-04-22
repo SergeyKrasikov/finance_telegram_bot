@@ -262,7 +262,6 @@ class MonthlyReportTaskTests(unittest.TestCase):
         self.assertIn("На семейный взнос 120.00₽", message_by_user[943915310])
         self.assertIn("На общие категории 14.00₽", message_by_user[249716305])
         self.assertIn("На инвестиции 6.00₽", message_by_user[249716305])
-
     def test_monthly_task_accepts_record_like_rows(self) -> None:
         jobs = _load_jobs_with_rows(
             [
