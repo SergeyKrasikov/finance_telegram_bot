@@ -4,6 +4,10 @@
 BEGIN;
 
 -- cleanup deterministic fixture scope
+DELETE FROM allocation_postings WHERE user_id IN (901101, 901102);
+DELETE FROM allocation_nodes
+WHERE user_id IN (901101, 901102)
+   OR legacy_category_id IN (901111);
 DELETE FROM cash_flow WHERE users_id IN (901101, 901102);
 DELETE FROM users_groups WHERE users_id IN (901101, 901102);
 DELETE FROM users WHERE id IN (901101, 901102);
@@ -22,6 +26,21 @@ INSERT INTO users_groups(users_id, users_groups) VALUES
 -- category for balance and exchange tests
 INSERT INTO categories(id, "name", "percent") VALUES
     (901111, 'EdgeWallet', 0.00);
+
+INSERT INTO allocation_nodes(
+    user_id,
+    slug,
+    "name",
+    description,
+    node_kind,
+    legacy_category_id,
+    visible,
+    include_in_report,
+    active
+)
+VALUES
+    (901101, 'edge_wallet_1', 'EdgeWallet', 'edge exchange wallet fixture', 'both', 901111, true, true, true),
+    (901102, 'edge_wallet_2', 'EdgeWallet', 'edge exchange wallet fixture', 'both', 901111, true, true, true);
 
 -- latest rates + older rates to validate we always use latest
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES
@@ -69,8 +88,8 @@ END $$;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'USDT', 'RUB');
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
-SELECT public.exchange(901101, 901111, 1::numeric, 'USD', 99::numeric, 'USDT');
-SELECT public.exchange(901101, 901111, 80::numeric, 'RUB', 1::numeric, 'USDT');
+SELECT public.exchange_v2(901101, 901111, 1::numeric, 'USD', 99::numeric, 'USDT');
+SELECT public.exchange_v2(901101, 901111, 80::numeric, 'RUB', 1::numeric, 'USDT');
 
 DO $$
 DECLARE

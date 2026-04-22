@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 import importlib.util
 from decimal import Decimal

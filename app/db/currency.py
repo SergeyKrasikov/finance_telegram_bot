@@ -4,7 +4,12 @@ from app.db.connection import db_function
 
 
 async def get_currency_list() -> list[str]:
-    records = await db_function("get_currency")
+    records = await db_function("get_currency_v2")
+    return [record[0] for record in records]
+
+
+async def get_currency_list_v2() -> list[str]:
+    records = await db_function("get_currency_v2")
     return [record[0] for record in records]
 
 
@@ -17,6 +22,32 @@ async def exchange_currency(
     currency_in: str,
 ) -> str:
     records = await db_function(
-        "exchange", user_id, category_id, value_out, currency_out, value_in, currency_in
+        "exchange_v2",
+        user_id,
+        category_id,
+        value_out,
+        currency_out,
+        value_in,
+        currency_in,
+    )
+    return records[0][0] if records else "OK"
+
+
+async def exchange_currency_v2(
+    user_id: int,
+    category_id: int,
+    value_out: Decimal,
+    currency_out: str,
+    value_in: Decimal,
+    currency_in: str,
+) -> str:
+    records = await db_function(
+        "exchange_v2",
+        user_id,
+        category_id,
+        value_out,
+        currency_out,
+        value_in,
+        currency_in,
     )
     return records[0][0] if records else "OK"

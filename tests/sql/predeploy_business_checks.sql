@@ -4,6 +4,8 @@
 BEGIN;
 
 -- Test fixtures
+DELETE FROM allocation_postings WHERE user_id = 900001;
+DELETE FROM allocation_nodes WHERE user_id = 900001 OR legacy_category_id = 900001;
 DELETE FROM cash_flow WHERE users_id = 900001;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'USDT', 'ETH', 'RUB', 'AAA', 'BBB');
 DELETE FROM categories WHERE id = 900001;
@@ -11,11 +13,33 @@ DELETE FROM users WHERE id = 900001;
 
 INSERT INTO users(id, nickname) VALUES (900001, 'testuser');
 INSERT INTO categories(id, "name", "percent") VALUES (900001, 'Test Wallet', 0.00);
+INSERT INTO allocation_nodes(
+    user_id,
+    slug,
+    "name",
+    description,
+    node_kind,
+    legacy_category_id,
+    visible,
+    include_in_report,
+    active
+)
+VALUES (
+    900001,
+    'test_wallet',
+    'Test Wallet',
+    'predeploy exchange wallet fixture',
+    'both',
+    900001,
+    true,
+    true,
+    true
+);
 
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
 -- 1) USD -> USDT: updates USDT (anchor USD=1)
-SELECT public.exchange(900001, 900001, 100::numeric, 'USD', 99::numeric, 'USDT');
+SELECT public.exchange_v2(900001, 900001, 100::numeric, 'USD', 99::numeric, 'USDT');
 DO $$
 DECLARE r numeric;
 BEGIN
@@ -26,7 +50,7 @@ BEGIN
 END $$;
 
 -- 2) RUB -> USDT: when receiving stablecoin, update non-stable side (RUB)
-SELECT public.exchange(900001, 900001, 80::numeric, 'RUB', 1::numeric, 'USDT');
+SELECT public.exchange_v2(900001, 900001, 80::numeric, 'RUB', 1::numeric, 'USDT');
 DO $$
 DECLARE rub_rate numeric;
 DECLARE usdt_rate numeric;
@@ -44,7 +68,7 @@ BEGIN
 END $$;
 
 -- 3) USDT -> ETH: paying stablecoin updates received non-stable (ETH)
-SELECT public.exchange(900001, 900001, 1::numeric, 'USDT', 0.0004::numeric, 'ETH');
+SELECT public.exchange_v2(900001, 900001, 1::numeric, 'USDT', 0.0004::numeric, 'ETH');
 DO $$
 DECLARE eth_rate numeric;
 BEGIN
@@ -55,7 +79,7 @@ BEGIN
 END $$;
 
 -- 4) ETH -> RUB: no USD/stable in target, update received currency (RUB)
-SELECT public.exchange(900001, 900001, 0.0005::numeric, 'ETH', 100::numeric, 'RUB');
+SELECT public.exchange_v2(900001, 900001, 0.0005::numeric, 'ETH', 100::numeric, 'RUB');
 DO $$
 DECLARE rub_rate numeric;
 BEGIN
@@ -69,7 +93,7 @@ END $$;
 DO $$
 BEGIN
     BEGIN
-        PERFORM public.exchange(900001, 900001, 1::numeric, 'AAA', 2::numeric, 'BBB');
+        PERFORM public.exchange_v2(900001, 900001, 1::numeric, 'AAA', 2::numeric, 'BBB');
         RAISE EXCEPTION 'Test failed: expected exception for unknown pair AAA/BBB';
     EXCEPTION
         WHEN OTHERS THEN
@@ -110,10 +134,45 @@ END $$;
 DO $$
 DECLARE v text;
 DECLARE t text;
+DECLARE ledger_rows int;
+DECLARE linked_legacy_rows int;
+DECLARE cash_flow_rows int;
 BEGIN
+    SELECT count(*)
+    INTO ledger_rows
+    FROM allocation_postings
+    WHERE user_id = 900001
+      AND metadata->>'kind' = 'exchange'
+      AND metadata->>'subkind' = 'manual';
+
+    IF ledger_rows <> 8 THEN
+        RAISE EXCEPTION 'Test failed: expected 8 manual exchange ledger rows, got %', ledger_rows;
+    END IF;
+
+    SELECT count(*)
+    INTO linked_legacy_rows
+    FROM allocation_postings
+    WHERE user_id = 900001
+      AND metadata->>'kind' = 'exchange'
+      AND metadata->>'subkind' = 'manual'
+      AND metadata ? 'legacy_cash_flow_id';
+
+    IF linked_legacy_rows <> 0 THEN
+        RAISE EXCEPTION 'Test failed: expected no legacy_cash_flow_id for ledger-only exchange, got %', linked_legacy_rows;
+    END IF;
+
+    SELECT count(*)
+    INTO cash_flow_rows
+    FROM cash_flow
+    WHERE users_id = 900001;
+
+    IF cash_flow_rows <> 0 THEN
+        RAISE EXCEPTION 'Test failed: expected no cash_flow rows for ledger-only exchange, got %', cash_flow_rows;
+    END IF;
+
     SELECT value, pg_typeof(value)::text
     INTO v, t
-    FROM get_last_transaction(900001, 1)
+    FROM get_last_transaction_v2(900001, 1)
     LIMIT 1;
 
     IF t <> 'character varying' THEN
