@@ -2969,7 +2969,26 @@ AS $function$
     SELECT COALESCE(
         public.get_category_balance_v2(
             _user_id,
-            public.get_category_id_from_name_v2(_user_id, _category),
+            (
+                SELECT an.legacy_category_id
+                FROM public.allocation_nodes an
+                WHERE an.active
+                  AND an.legacy_category_id IS NOT NULL
+                  AND an."name" = _category
+                  AND (
+                      an.user_id = _user_id
+                      OR an.user_group_id IN (
+                          SELECT ugm.user_group_id
+                          FROM public.user_group_memberships ugm
+                          WHERE ugm.user_id = _user_id
+                            AND ugm.active
+                      )
+                  )
+                ORDER BY
+                    CASE WHEN an.user_id = _user_id THEN 0 ELSE 1 END,
+                    an.id
+                LIMIT 1
+            ),
             'RUB'
         ),
         0
