@@ -32,5 +32,4 @@ GROUP_PERSONAL = 15
 # Scheduler settings
 DAILY_REPORT_HOUR = 23
 DAILY_REPORT_MINUTE = 59
-# Despite the historical name, the monthly summary job now runs every day.
-MONTHLY_REPORT_CRON = {"hour": 0, "minute": 0, "timezone": "UTC"}
+MONTHLY_REPORT_CRON = {"day": 1, "hour": 0, "minute": 0, "timezone": "UTC"}
