@@ -4,7 +4,15 @@ from app.db.connection import db_function
 
 
 async def get_last_transaction(user_id: int, num: int):
-    return await db_function("get_last_transaction", user_id, num)
+    return await db_function("get_last_transaction_v2", user_id, num)
+
+
+async def get_last_transaction_v2(user_id: int, num: int):
+    return await db_function("get_last_transaction_v2", user_id, num)
+
+
+async def get_last_allocation_postings(user_id: int, num: int):
+    return await db_function("get_last_allocation_postings", user_id, num)
 
 
 async def delete_transactions(transaction_ids: list[int]) -> None:
@@ -18,7 +26,17 @@ async def insert_revenue(
     currency: str,
     comment: str | None = None,
 ) -> None:
-    await db_function("insert_revenue", user_id, category, amount, currency, comment)
+    await db_function("insert_revenue_v2", user_id, category, amount, currency, comment)
+
+
+async def insert_revenue_v2(
+    user_id: int,
+    category: str,
+    amount: Decimal,
+    currency: str,
+    comment: str | None = None,
+) -> None:
+    await db_function("insert_revenue_v2", user_id, category, amount, currency, comment)
 
 
 async def insert_spend(
@@ -28,7 +46,17 @@ async def insert_spend(
     currency: str,
     comment: str | None = None,
 ) -> None:
-    await db_function("insert_spend", user_id, category, amount, currency, comment)
+    await db_function("insert_spend_v2", user_id, category, amount, currency, comment)
+
+
+async def insert_spend_v2(
+    user_id: int,
+    category: str,
+    amount: Decimal,
+    currency: str,
+    comment: str | None = None,
+) -> None:
+    await db_function("insert_spend_v2", user_id, category, amount, currency, comment)
 
 
 async def insert_spend_with_exchange(
@@ -39,12 +67,29 @@ async def insert_spend_with_exchange(
     comment: str | None = None,
 ) -> None:
     await db_function(
-        "insert_spend_with_exchange", user_id, category, amount, currency, comment
+        "insert_spend_with_exchange_v2", user_id, category, amount, currency, comment
+    )
+
+
+async def insert_spend_with_exchange_v2(
+    user_id: int,
+    category: str,
+    amount: Decimal,
+    currency: str,
+    comment: str | None = None,
+) -> None:
+    await db_function(
+        "insert_spend_with_exchange_v2", user_id, category, amount, currency, comment
     )
 
 
 async def get_daily_transactions(user_id: int) -> list[str]:
     records = await db_function("get_daily_transactions", user_id)
+    return [record[0] for record in records]
+
+
+async def get_daily_allocation_transactions(user_id: int) -> list[str]:
+    records = await db_function("get_daily_allocation_transactions", user_id)
     return [record[0] for record in records]
 
 

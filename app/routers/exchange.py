@@ -34,7 +34,7 @@ async def cmd_exchange(message: Message, state: FSMContext) -> None:
 
 @router.message(ExchangeCurrency.choosing_category, CategoryNameFilter(GROUP_ALL))
 async def ask_value_out(message: Message, state: FSMContext) -> None:
-    category_id = await get_category_id_from_name(message.text)
+    category_id = await get_category_id_from_name(message.chat.id, message.text)
     await state.update_data(category=category_id)
     await message.answer("Сколько отдал(а)?", reply_markup=types.ReplyKeyboardRemove())
     await state.set_state(ExchangeCurrency.value_out)

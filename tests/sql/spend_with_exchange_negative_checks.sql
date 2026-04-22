@@ -1,8 +1,10 @@
--- negative checks for insert_spend_with_exchange preconditions
+-- negative checks for insert_spend_with_exchange_v2 preconditions
 -- Run with: psql -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_negative_checks.sql
 
 BEGIN;
 
+DELETE FROM allocation_postings WHERE user_id = 903001;
+DELETE FROM allocation_nodes WHERE user_id = 903001 OR legacy_category_id IN (903011, 903012);
 DELETE FROM cash_flow WHERE users_id = 903001;
 DELETE FROM categories_category_groups WHERE users_id = 903001;
 DELETE FROM users_groups WHERE users_id = 903001;
@@ -26,7 +28,7 @@ DO $$
 BEGIN
     -- 1) Missing rates should fail
     BEGIN
-        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg1');
+        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg1');
         RAISE EXCEPTION 'Expected failure for missing rates';
     EXCEPTION
         WHEN OTHERS THEN
@@ -49,11 +51,11 @@ BEGIN
     VALUES (903012, 14, 903001);
 
     BEGIN
-        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg2');
+        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg2');
         RAISE EXCEPTION 'Expected failure for missing reserve category';
     EXCEPTION
         WHEN OTHERS THEN
-            IF POSITION('Reserve category' IN SQLERRM) = 0 THEN
+            IF POSITION('Reserve allocation category node' IN SQLERRM) = 0 THEN
                 RAISE;
             END IF;
     END;
@@ -61,20 +63,24 @@ BEGIN
     -- 3) Missing spend category in group 14 should fail
     INSERT INTO categories_category_groups(categories_id, category_groyps_id, users_id)
     VALUES (903011, 9, 903001);
+    INSERT INTO allocation_nodes(id, user_id, slug, "name", description, node_kind, legacy_category_id, visible, include_in_report, active)
+    VALUES (903021, 903001, 'reserve_neg', 'ReserveNeg', 'test reserve node', 'expense', 903011, true, true, true);
+    INSERT INTO allocation_node_groups(node_id, legacy_group_id, active)
+    VALUES (903021, 9, true);
 
     BEGIN
-        PERFORM public.insert_spend_with_exchange(903001, 'UnknownCategory', 10::numeric, 'USDT', 'neg3');
+        PERFORM public.insert_spend_with_exchange_v2(903001, 'UnknownCategory', 10::numeric, 'USDT', 'neg3');
         RAISE EXCEPTION 'Expected failure for missing category in group 14';
     EXCEPTION
         WHEN OTHERS THEN
-            IF POSITION('not found in group 14' IN SQLERRM) = 0 THEN
+            IF POSITION('in group 14 not found' IN SQLERRM) = 0 THEN
                 RAISE;
             END IF;
     END;
 
     -- 4) Non-positive value should fail
     BEGIN
-        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 0::numeric, 'USDT', 'neg4');
+        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 0::numeric, 'USDT', 'neg4');
         RAISE EXCEPTION 'Expected failure for non-positive spend value';
     EXCEPTION
         WHEN OTHERS THEN
@@ -82,6 +88,14 @@ BEGIN
                 RAISE;
             END IF;
     END;
+
+    IF (SELECT count(*) FROM allocation_postings WHERE user_id = 903001) <> 0 THEN
+        RAISE EXCEPTION 'Failed auto exchange spend should not create ledger rows';
+    END IF;
+
+    IF (SELECT count(*) FROM cash_flow WHERE users_id = 903001) <> 0 THEN
+        RAISE EXCEPTION 'Failed auto exchange spend should not create cash_flow rows';
+    END IF;
 END $$;
 
 ROLLBACK;

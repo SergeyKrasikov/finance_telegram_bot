@@ -4,6 +4,8 @@
 BEGIN;
 
 -- Minimal fixture
+DELETE FROM allocation_postings WHERE user_id = 905001;
+DELETE FROM allocation_nodes WHERE user_id = 905001 OR legacy_category_id = 905011;
 DELETE FROM cash_flow WHERE users_id = 905001;
 DELETE FROM categories_category_groups WHERE users_id = 905001;
 DELETE FROM users_groups WHERE users_id = 905001;
@@ -19,6 +21,28 @@ INSERT INTO users(id, nickname) VALUES (905001, 'lenchk');
 INSERT INTO categories(id, "name", "percent") VALUES (905011, 'LenCheck', 1.00);
 INSERT INTO categories_category_groups(categories_id, category_groyps_id, users_id)
 VALUES (905011, 14, 905001);
+INSERT INTO allocation_nodes(
+    user_id,
+    slug,
+    "name",
+    description,
+    node_kind,
+    legacy_category_id,
+    visible,
+    include_in_report,
+    active
+)
+VALUES (
+    905001,
+    'lencheck_wallet',
+    'LenCheck',
+    'currency length exchange wallet fixture',
+    'both',
+    905011,
+    true,
+    true,
+    true
+);
 
 DO $$
 DECLARE
@@ -46,22 +70,31 @@ BEGIN
 
     INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
-    msg := public.exchange(905001, 905011, 100::numeric, 'USD', 99::numeric, 'USDT');
+    msg := public.exchange_v2(905001, 905011, 100::numeric, 'USD', 99::numeric, 'USDT');
     IF msg NOT LIKE 'Курс:%USDT%' THEN
         RAISE EXCEPTION 'Unexpected exchange message for USDT: %', msg;
     END IF;
 
-    msg := public.exchange(905001, 905011, 100::numeric, 'USD', 98::numeric, 'FDUSD');
+    msg := public.exchange_v2(905001, 905011, 100::numeric, 'USD', 98::numeric, 'FDUSD');
     IF msg NOT LIKE 'Курс:%FDUSD%' THEN
         RAISE EXCEPTION 'Unexpected exchange message for FDUSD: %', msg;
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM cash_flow
-        WHERE users_id = 905001
+    IF (
+        SELECT count(DISTINCT currency)
+        FROM allocation_postings
+        WHERE user_id = 905001
           AND currency IN ('USDT', 'FDUSD')
-    ) THEN
-        RAISE EXCEPTION 'Expected cash_flow rows with long currency codes';
+    ) <> 2 THEN
+        RAISE EXCEPTION 'Expected ledger rows with long currency codes';
+    END IF;
+
+    IF (
+        SELECT count(DISTINCT transact)
+        FROM public.get_currency_v2()
+        WHERE transact IN ('USDT', 'FDUSD')
+    ) <> 2 THEN
+        RAISE EXCEPTION 'Expected ledger-backed currency list to include long currency codes';
     END IF;
 END $$;
 
