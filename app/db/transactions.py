@@ -59,9 +59,3 @@ async def get_daily_allocation_transactions(user_id: int) -> list[str]:
 
 async def monthly_summary():
     return await db_function("monthly")
-
-
-get_last_transaction = get_last_transaction_v2
-insert_revenue = insert_revenue_v2
-insert_spend = insert_spend_v2
-insert_spend_with_exchange = insert_spend_with_exchange_v2
