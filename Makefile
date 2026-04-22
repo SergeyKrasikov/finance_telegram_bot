@@ -49,7 +49,6 @@ test-sql:
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/monthly_distribute_cascade_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/monthly_entrypoint_metadata_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/monthly_business_checks.sql
-	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/monthly_distribute_golden.sql
 
 test-server-validate:
 	@bash scripts/run_test_server_validation.sh

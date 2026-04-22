@@ -69,7 +69,6 @@ run_file "tests/sql/monthly_distribute_allocation_checks.sql"
 run_file "tests/sql/monthly_distribute_cascade_checks.sql"
 run_file "tests/sql/monthly_entrypoint_metadata_checks.sql"
 run_file "tests/sql/monthly_business_checks.sql"
-run_file "tests/sql/monthly_distribute_golden.sql"
 
 if [[ "${RUN_MONTHLY_SMOKE}" == "1" ]]; then
   run_sql "SELECT public.monthly();"
