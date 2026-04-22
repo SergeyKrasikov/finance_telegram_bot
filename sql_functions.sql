@@ -81,6 +81,10 @@ CREATE OR REPLACE FUNCTION public.get_users_id(_user_id bigint)
 AS $function$
     SELECT DISTINCT member_id AS user_id
     FROM (
+        SELECT _user_id::bigint AS member_id
+
+        UNION ALL
+
         SELECT ugm2.user_id AS member_id
         FROM public.user_group_memberships ugm1
         JOIN public.user_group_memberships ugm2

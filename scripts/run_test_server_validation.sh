@@ -55,6 +55,7 @@ run_sql "SELECT count(*) AS backfilled_rows FROM public.allocation_postings WHER
 run_file "tests/sql/predeploy_business_checks.sql"
 run_file "tests/sql/currency_code_length_checks.sql"
 run_file "tests/sql/technical_cashflow_description_checks.sql"
+run_file "tests/sql/user_membership_helper_checks.sql"
 run_file "tests/sql/exchange_negative_checks.sql"
 run_file "tests/sql/exchange_edge_case_checks.sql"
 run_file "tests/sql/spend_with_exchange_checks.sql"
