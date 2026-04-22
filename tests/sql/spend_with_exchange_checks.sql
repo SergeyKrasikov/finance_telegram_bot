@@ -5,17 +5,30 @@ BEGIN;
 
 -- Clean and fixture setup
 DELETE FROM allocation_postings WHERE user_id = 900201;
+DELETE FROM allocation_node_groups
+WHERE node_id IN (
+    SELECT id
+    FROM allocation_nodes
+    WHERE user_id = 900201 OR legacy_category_id IN (900211, 900212)
+);
 DELETE FROM allocation_nodes WHERE user_id = 900201 OR legacy_category_id IN (900211, 900212);
 DELETE FROM cash_flow WHERE users_id = 900201;
-DELETE FROM categories_category_groups WHERE users_id = 900201;
-DELETE FROM users_groups WHERE users_id = 900201;
+DELETE FROM user_group_memberships WHERE user_id = 900201;
+DELETE FROM user_groups WHERE slug = 'spend_fx_group';
 DELETE FROM users WHERE id = 900201;
 DELETE FROM categories WHERE id IN (900211, 900212);
 DELETE FROM category_groups WHERE id IN (9, 14);
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
 
 INSERT INTO users(id, nickname) VALUES (900201, 'spend_fx');
-INSERT INTO users_groups(users_id, users_groups) VALUES (900201, 8201);
+
+INSERT INTO user_groups(slug, "name", description)
+VALUES ('spend_fx_group', 'spend fx group', 'fixture');
+
+INSERT INTO user_group_memberships(user_id, user_group_id)
+SELECT 900201, id
+FROM user_groups
+WHERE slug = 'spend_fx_group';
 
 INSERT INTO category_groups(id, "name", description)
 VALUES (9, 'reserve_group', ''), (14, 'all_group', '');
@@ -24,12 +37,6 @@ INSERT INTO categories(id, "name", "percent")
 VALUES
   (900211, 'Reserve FX', 0.00),
   (900212, 'Travel', 0.00);
-
-INSERT INTO categories_category_groups(categories_id, category_groyps_id, users_id)
-VALUES
-  (900211, 9, 900201),
-  (900211, 14, 900201),
-  (900212, 14, 900201);
 
 INSERT INTO allocation_nodes(id, user_id, slug, "name", description, node_kind, legacy_category_id, visible, include_in_report, active)
 VALUES
@@ -61,7 +68,7 @@ DECLARE
     spend_rows int;
     auto_rows int;
     rub_spend numeric;
-    travel_remains numeric;
+    travel_balance numeric;
 BEGIN
     SELECT count(*) INTO flow_rows
     FROM cash_flow
@@ -125,9 +132,9 @@ BEGIN
         RAISE EXCEPTION 'Expected RUB conversion value 8000, got %', rub_spend;
     END IF;
 
-    SELECT public.get_remains_v2(900201, 'Travel') INTO travel_remains;
-    IF travel_remains IS NULL OR abs(travel_remains + 8000) > 1e-9 THEN
-        RAISE EXCEPTION 'Expected Travel remains = -8000, got %', travel_remains;
+    SELECT public.get_category_balance_v2(900201, 900212, 'RUB') INTO travel_balance;
+    IF travel_balance IS NULL OR abs(travel_balance + 8000) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected Travel ledger balance = -8000, got %', travel_balance;
     END IF;
 END $$;
 

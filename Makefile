@@ -35,6 +35,7 @@ test-sql:
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/predeploy_business_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/currency_code_length_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/technical_cashflow_description_checks.sql
+	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/user_membership_helper_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/exchange_negative_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/exchange_edge_case_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_checks.sql
@@ -49,7 +50,6 @@ test-sql:
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/monthly_distribute_cascade_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/monthly_entrypoint_metadata_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/monthly_business_checks.sql
-	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/monthly_distribute_golden.sql
 
 test-server-validate:
 	@bash scripts/run_test_server_validation.sh

@@ -1,29 +1,70 @@
--- History function checks (format + return type)
+-- History function checks (format + return type) against ledger-backed helper.
 -- Run with: psql -v ON_ERROR_STOP=1 -f tests/sql/history_function_checks.sql
 
 BEGIN;
 
-DELETE FROM cash_flow WHERE users_id = 910001;
-DELETE FROM categories WHERE id IN (910001, 910002);
+DELETE FROM allocation_postings WHERE user_id = 910001;
+DELETE FROM allocation_nodes WHERE user_id = 910001;
 DELETE FROM users WHERE id = 910001;
 
 INSERT INTO users(id, nickname) VALUES (910001, 'histuser');
-INSERT INTO categories(id, "name", "percent") VALUES
-    (910001, 'CatFrom', 0.00),
-    (910002, 'CatTo', 0.00);
 
-INSERT INTO cash_flow(users_id, "datetime", category_id_from, category_id_to, value, currency, description)
+INSERT INTO allocation_nodes(
+    id,
+    user_id,
+    slug,
+    "name",
+    description,
+    node_kind,
+    legacy_category_id,
+    visible,
+    include_in_report,
+    active
+)
 VALUES
-    (910001, now(), 910001, 910002, 123.456::numeric, 'USD', 'history test large'),
-    (910001, now() + interval '1 second', 910001, 910002, 0.0001234500::numeric, 'USD', 'history test small');
+    (9100011, 910001, 'hist_from', 'CatFrom', 'history source node', 'expense', NULL, true, true, true),
+    (9100012, 910001, 'hist_to', 'CatTo', 'history target node', 'income', NULL, true, true, true);
+
+INSERT INTO allocation_postings(
+    user_id,
+    "datetime",
+    from_node_id,
+    to_node_id,
+    value,
+    currency,
+    description,
+    metadata
+)
+VALUES
+    (
+        910001,
+        now(),
+        9100011,
+        9100012,
+        123.456::numeric,
+        'USD',
+        'history test large',
+        jsonb_build_object('kind', 'fixture', 'origin', 'history_test')
+    ),
+    (
+        910001,
+        now() + interval '1 second',
+        9100011,
+        9100012,
+        0.0001234500::numeric,
+        'USD',
+        'history test small',
+        jsonb_build_object('kind', 'fixture', 'origin', 'history_test')
+    );
 
 DO $$
-DECLARE v text;
-DECLARE t text;
+DECLARE
+    v text;
+    t text;
 BEGIN
     SELECT value, pg_typeof(value)::text
     INTO v, t
-    FROM get_last_transaction(910001, 1)
+    FROM get_last_transaction_v2(910001, 1)
     LIMIT 1;
 
     IF t <> 'character varying' THEN
@@ -36,7 +77,7 @@ BEGIN
 
     SELECT value, pg_typeof(value)::text
     INTO v, t
-    FROM get_last_transaction(910001, 2)
+    FROM get_last_transaction_v2(910001, 2)
     LIMIT 1;
 
     IF t <> 'character varying' THEN

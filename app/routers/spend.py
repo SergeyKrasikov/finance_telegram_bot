@@ -5,9 +5,9 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_SPEND
-from app.db.categories import get_categories_name
-from app.db.balances import get_remains
-from app.db.transactions import insert_spend, insert_spend_with_exchange
+from app.db.categories import get_categories_name_v2
+from app.db.balances import get_remains_v2
+from app.db.transactions import insert_spend_v2, insert_spend_with_exchange_v2
 from app.parsers.input import is_amount_input, parse_amount_with_defaults
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import WriteSold
@@ -20,7 +20,7 @@ router = Router()
 @router.message(lambda x: is_amount_input(x.text), StateFilter(None))
 async def choose_spend_category(message: Message, state: FSMContext) -> None:
     await state.update_data(value=message.text)
-    categories = await get_categories_name(message.chat.id, GROUP_SPEND)
+    categories = await get_categories_name_v2(message.chat.id, GROUP_SPEND)
     kb = [
         [
             types.KeyboardButton(text=f"{categories[j]}")
@@ -46,13 +46,13 @@ async def write_spend(message: Message, state: FSMContext) -> None:
         amount, currency, comment = parse_amount_with_defaults(data.get("value"))
 
         if currency != "RUB":
-            await insert_spend_with_exchange(
+            await insert_spend_with_exchange_v2(
                 message.chat.id, category, amount, currency, comment
             )
         else:
-            await insert_spend(message.chat.id, category, amount, currency, comment)
+            await insert_spend_v2(message.chat.id, category, amount, currency, comment)
 
-        balance = await get_remains(message.chat.id, category)
+        balance = await get_remains_v2(message.chat.id, category)
         await message.answer(
             f"Остаток в {category}: {format_amount(balance)}₽",
             reply_markup=create_default_keyboard(),

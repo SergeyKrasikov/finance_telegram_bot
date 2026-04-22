@@ -4,17 +4,20 @@
 BEGIN;
 
 DELETE FROM allocation_postings WHERE user_id = 903001;
+DELETE FROM allocation_node_groups
+WHERE node_id IN (
+    SELECT id
+    FROM allocation_nodes
+    WHERE user_id = 903001 OR legacy_category_id IN (903011, 903012)
+);
 DELETE FROM allocation_nodes WHERE user_id = 903001 OR legacy_category_id IN (903011, 903012);
 DELETE FROM cash_flow WHERE users_id = 903001;
-DELETE FROM categories_category_groups WHERE users_id = 903001;
-DELETE FROM users_groups WHERE users_id = 903001;
 DELETE FROM users WHERE id = 903001;
 DELETE FROM categories WHERE id IN (903011, 903012);
 DELETE FROM category_groups WHERE id IN (9, 14);
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
 
 INSERT INTO users(id, nickname) VALUES (903001, 'neg_fx');
-INSERT INTO users_groups(users_id, users_groups) VALUES (903001, 9301);
 
 INSERT INTO category_groups(id, "name", description) VALUES
   (9, 'reserve_group', ''),
@@ -47,8 +50,33 @@ BEGIN
     SELECT t, 'USDT', 1 FROM ts;
 
     -- 2) Missing reserve category (group 9) should fail
-    INSERT INTO categories_category_groups(categories_id, category_groyps_id, users_id)
-    VALUES (903012, 14, 903001);
+    INSERT INTO allocation_nodes(
+        id,
+        user_id,
+        slug,
+        "name",
+        description,
+        node_kind,
+        legacy_category_id,
+        visible,
+        include_in_report,
+        active
+    )
+    VALUES (
+        903022,
+        903001,
+        'spend_neg',
+        'SpendNeg',
+        'test spend node',
+        'expense',
+        903012,
+        true,
+        true,
+        true
+    );
+
+    INSERT INTO allocation_node_groups(node_id, legacy_group_id, active)
+    VALUES (903022, 14, true);
 
     BEGIN
         PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg2');
@@ -61,12 +89,14 @@ BEGIN
     END;
 
     -- 3) Missing spend category in group 14 should fail
-    INSERT INTO categories_category_groups(categories_id, category_groyps_id, users_id)
-    VALUES (903011, 9, 903001);
     INSERT INTO allocation_nodes(id, user_id, slug, "name", description, node_kind, legacy_category_id, visible, include_in_report, active)
     VALUES (903021, 903001, 'reserve_neg', 'ReserveNeg', 'test reserve node', 'expense', 903011, true, true, true);
     INSERT INTO allocation_node_groups(node_id, legacy_group_id, active)
     VALUES (903021, 9, true);
+
+    DELETE FROM allocation_node_groups
+    WHERE node_id = 903022
+      AND legacy_group_id = 14;
 
     BEGIN
         PERFORM public.insert_spend_with_exchange_v2(903001, 'UnknownCategory', 10::numeric, 'USDT', 'neg3');

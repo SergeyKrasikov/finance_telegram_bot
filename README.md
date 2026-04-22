@@ -134,6 +134,7 @@ bash scripts/apply_db_schema.sh finance_telegram_bot_postgres_1 my_finance_bot m
   - `tests/sql/predeploy_business_checks.sql`
   - `tests/sql/currency_code_length_checks.sql`
   - `tests/sql/technical_cashflow_description_checks.sql`
+  - `tests/sql/user_membership_helper_checks.sql`
   - `tests/sql/exchange_negative_checks.sql`
   - `tests/sql/exchange_edge_case_checks.sql`
   - `tests/sql/spend_with_exchange_checks.sql`
@@ -142,8 +143,8 @@ bash scripts/apply_db_schema.sh finance_telegram_bot_postgres_1 my_finance_bot m
   - `tests/sql/ledger_write_path_checks.sql`
   - `tests/sql/balance_functions_checks.sql`
   - `tests/sql/monthly_business_checks.sql`
+  - `tests/sql/monthly_distribute_allocation_checks.sql`
   - `tests/sql/monthly_distribute_cascade_checks.sql`
-  - `tests/sql/monthly_distribute_golden.sql`
 
 ## Переменные окружения
 Файл: `.env` (располагается рядом с `app.py`). Пример: `.env.example`.

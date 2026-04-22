@@ -3,10 +3,6 @@ from decimal import Decimal
 from app.db.connection import db_function
 
 
-async def get_last_transaction(user_id: int, num: int):
-    return await db_function("get_last_transaction_v2", user_id, num)
-
-
 async def get_last_transaction_v2(user_id: int, num: int):
     return await db_function("get_last_transaction_v2", user_id, num)
 
@@ -19,16 +15,6 @@ async def delete_transactions(transaction_ids: list[int]) -> None:
     await db_function("delete_transaction", transaction_ids)
 
 
-async def insert_revenue(
-    user_id: int,
-    category: str,
-    amount: Decimal,
-    currency: str,
-    comment: str | None = None,
-) -> None:
-    await db_function("insert_revenue_v2", user_id, category, amount, currency, comment)
-
-
 async def insert_revenue_v2(
     user_id: int,
     category: str,
@@ -39,16 +25,6 @@ async def insert_revenue_v2(
     await db_function("insert_revenue_v2", user_id, category, amount, currency, comment)
 
 
-async def insert_spend(
-    user_id: int,
-    category: str,
-    amount: Decimal,
-    currency: str,
-    comment: str | None = None,
-) -> None:
-    await db_function("insert_spend_v2", user_id, category, amount, currency, comment)
-
-
 async def insert_spend_v2(
     user_id: int,
     category: str,
@@ -57,18 +33,6 @@ async def insert_spend_v2(
     comment: str | None = None,
 ) -> None:
     await db_function("insert_spend_v2", user_id, category, amount, currency, comment)
-
-
-async def insert_spend_with_exchange(
-    user_id: int,
-    category: str,
-    amount: Decimal,
-    currency: str,
-    comment: str | None = None,
-) -> None:
-    await db_function(
-        "insert_spend_with_exchange_v2", user_id, category, amount, currency, comment
-    )
 
 
 async def insert_spend_with_exchange_v2(
@@ -95,3 +59,9 @@ async def get_daily_allocation_transactions(user_id: int) -> list[str]:
 
 async def monthly_summary():
     return await db_function("monthly")
+
+
+get_last_transaction = get_last_transaction_v2
+insert_revenue = insert_revenue_v2
+insert_spend = insert_spend_v2
+insert_spend_with_exchange = insert_spend_with_exchange_v2

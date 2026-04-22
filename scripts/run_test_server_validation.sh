@@ -55,6 +55,7 @@ run_sql "SELECT count(*) AS backfilled_rows FROM public.allocation_postings WHER
 run_file "tests/sql/predeploy_business_checks.sql"
 run_file "tests/sql/currency_code_length_checks.sql"
 run_file "tests/sql/technical_cashflow_description_checks.sql"
+run_file "tests/sql/user_membership_helper_checks.sql"
 run_file "tests/sql/exchange_negative_checks.sql"
 run_file "tests/sql/exchange_edge_case_checks.sql"
 run_file "tests/sql/spend_with_exchange_checks.sql"
@@ -69,7 +70,6 @@ run_file "tests/sql/monthly_distribute_allocation_checks.sql"
 run_file "tests/sql/monthly_distribute_cascade_checks.sql"
 run_file "tests/sql/monthly_entrypoint_metadata_checks.sql"
 run_file "tests/sql/monthly_business_checks.sql"
-run_file "tests/sql/monthly_distribute_golden.sql"
 
 if [[ "${RUN_MONTHLY_SMOKE}" == "1" ]]; then
   run_sql "SELECT public.monthly();"
