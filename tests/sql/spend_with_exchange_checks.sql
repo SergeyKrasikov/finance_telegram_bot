@@ -13,12 +13,22 @@ WHERE node_id IN (
 );
 DELETE FROM allocation_nodes WHERE user_id = 900201 OR legacy_category_id IN (900211, 900212);
 DELETE FROM cash_flow WHERE users_id = 900201;
+DELETE FROM user_group_memberships WHERE user_id = 900201;
+DELETE FROM user_groups WHERE slug = 'spend_fx_group';
 DELETE FROM users WHERE id = 900201;
 DELETE FROM categories WHERE id IN (900211, 900212);
 DELETE FROM category_groups WHERE id IN (9, 14);
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
 
 INSERT INTO users(id, nickname) VALUES (900201, 'spend_fx');
+
+INSERT INTO user_groups(slug, "name", description)
+VALUES ('spend_fx_group', 'spend fx group', 'fixture');
+
+INSERT INTO user_group_memberships(user_id, user_group_id)
+SELECT 900201, id
+FROM user_groups
+WHERE slug = 'spend_fx_group';
 
 INSERT INTO category_groups(id, "name", description)
 VALUES (9, 'reserve_group', ''), (14, 'all_group', '');
