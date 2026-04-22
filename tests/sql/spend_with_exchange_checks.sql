@@ -58,7 +58,7 @@ DECLARE
     spend_rows int;
     auto_rows int;
     rub_spend numeric;
-    travel_remains numeric;
+    travel_balance numeric;
 BEGIN
     SELECT count(*) INTO flow_rows
     FROM cash_flow
@@ -122,9 +122,9 @@ BEGIN
         RAISE EXCEPTION 'Expected RUB conversion value 8000, got %', rub_spend;
     END IF;
 
-    SELECT public.get_remains_v2(900201, 'Travel') INTO travel_remains;
-    IF travel_remains IS NULL OR abs(travel_remains + 8000) > 1e-9 THEN
-        RAISE EXCEPTION 'Expected Travel remains = -8000, got %', travel_remains;
+    SELECT public.get_category_balance_v2(900201, 900212, 'RUB') INTO travel_balance;
+    IF travel_balance IS NULL OR abs(travel_balance + 8000) > 1e-9 THEN
+        RAISE EXCEPTION 'Expected Travel ledger balance = -8000, got %', travel_balance;
     END IF;
 END $$;
 
