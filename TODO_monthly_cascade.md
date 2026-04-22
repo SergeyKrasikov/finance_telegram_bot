@@ -99,12 +99,10 @@
     `get_category_balance_v2`, `get_group_balance_v2`, `get_remains_v2`,
     `get_all_balances_v2`, `get_category_balance_with_currency_v2`
   - `/balance` и spend balance checks уже используют v2 balance helpers
-  - legacy cash_flow-backed balance helpers оставлены в SQL, но убраны из app allowlist
-  - legacy cash_flow-backed `get_last_transaction(...)` оставлен в SQL, но убран из app allowlist
+  - legacy cash_flow-backed balance/history/category/currency helpers уже удалены из SQL app API
   - category UI lookup уже использует allocation-backed `get_categories_name_v2` и `get_category_id_from_name_v2`
-  - legacy `categories_category_groups` lookup helpers оставлены в SQL, но убраны из app allowlist
   - manual spend/revenue app write-paths уже используют allocation-primary `insert_spend_v2` / `insert_revenue_v2`
-  - legacy `insert_spend(...)` / `insert_revenue(...)` оставлены в SQL как reference/compare/rollback
+  - legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)` уже удалены из SQL app API
 
 ## Порядок безопасной миграции
 

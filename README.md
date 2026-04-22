@@ -426,14 +426,6 @@ graph TD
 - Category UI lookup уже использует allocation-backed helpers:
   - `public.get_categories_name_v2(user_id, group_id)`
   - `public.get_category_id_from_name_v2(user_id, category_name)`
-- Legacy cash_flow-backed balance helpers remain in SQL for reference/compare/rollback,
-  but are no longer exposed through the app DB allowlist.
-- Legacy cash_flow-backed `get_last_transaction(...)` remains in SQL for reference/compare/rollback,
-  but is no longer exposed through the app DB allowlist.
-- Legacy `categories_category_groups` category lookup helpers remain in SQL for reference/compare/rollback,
-  but are no longer exposed through the app DB allowlist.
-- Legacy cash_flow-backed `get_currency(...)` remains in SQL for reference/compare/rollback,
-  but is no longer exposed through the app DB allowlist.
 - Allocation-primary write candidates are available for manual transactions:
   - `public.insert_spend_v2(...)`
   - `public.insert_revenue_v2(...)`
@@ -442,8 +434,14 @@ graph TD
   App write-paths for manual spend/revenue, auto-exchange spend, and manual exchange already use these v2 functions.
   Manual spend/revenue, manual exchange, and auto-exchange spend are ledger-only.
   `exchange_v2(...)` тоже больше не создаёт compatibility bridge-ноду на лету: wallet/category allocation node должна существовать заранее.
-  Legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)`
-  remain in SQL for reference/compare/rollback.
+- Старый app-facing SQL API удалён:
+  `get_last_transaction(...)`, `get_categories_name(...)`, `get_group_balance(...)`,
+  `get_remains(...)`, `get_all_balances(...)`, `get_category_id_from_name(...)`,
+  `get_category_balance_with_currency(...)`, `get_currency()`,
+  `insert_spend(...)`, `insert_revenue(...)`, `insert_spend_with_exchange(...)`, `exchange(...)`.
+- В SQL пока ещё остаётся отдельный legacy monthly/reference cluster, не используемый app runtime:
+  `monthly_distribute(...)`, `distribute_to_group(...)`, `transact_from_group_to_category(...)`,
+  `get_category_balance(...)`, `get_categories_id(...)`.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
 - Canonical SQL entrypoint для этого шага: `public.bootstrap_allocation_ledger_from_legacy()`.
   Скрипт backfill теперь только вызывает эту функцию, чтобы prod-bootstrap оставался в одном месте и не дублировался между `.sql` файлами.

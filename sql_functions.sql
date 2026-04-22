@@ -2427,60 +2427,6 @@ $function$
 
 
 
--- LEGACY cash_flow-backed history helper.
--- App read-paths use get_last_transaction_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION get_last_transaction(_user_id bigint, _num int)
-RETURNS TABLE (
-    id bigint,
-    datetime timestamp,
-    "from" varchar(100),
-    "to" varchar(100),
-    value varchar,  -- Изменён тип на varchar для представления форматированного значения
-    currency varchar(16),
-    description text
-)
-LANGUAGE plpgsql
-AS $function$
-BEGIN
-    RETURN QUERY (
-        SELECT 
-            cf.id,
-            cf.datetime,
-            c."name" AS "from",
-            c2."name" AS "to",
-            CAST(
-                CASE
-                    WHEN ABS(cf.value) >= 1 THEN REPLACE(TO_CHAR(cf.value, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
-                    WHEN cf.value::text LIKE '%.%' THEN RTRIM(TRIM(TRAILING '0' FROM cf.value::text), '.')
-                    ELSE cf.value::text
-                END
-            AS varchar) AS value,
-            cf.currency,
-            cf.description
-        FROM (
-            SELECT 
-                cf_sub.id,
-                cf_sub.datetime,
-                cf_sub.category_id_from,
-                cf_sub.category_id_to,
-                cf_sub.value,
-                cf_sub.currency,
-                cf_sub.description,
-                dense_rank() OVER (ORDER BY cf_sub.datetime DESC) AS "rank"
-            FROM 
-                cash_flow cf_sub 
-            WHERE 
-                users_id = _user_id
-        ) cf 
-        LEFT JOIN categories c ON cf.category_id_from = c.id 
-        LEFT JOIN categories c2 ON cf.category_id_to = c2.id 
-        WHERE 
-            "rank" = _num
-    );
-END;
-$function$;
-
-
 -- Ledger-backed candidate for /history. Kept separate until delete flow is migrated.
 CREATE OR REPLACE FUNCTION public.get_last_transaction_v2(_user_id bigint, _num int)
 RETURNS TABLE (
@@ -2580,64 +2526,6 @@ BEGIN
 END;
 $function$;
 
--- Принимает поля транзакции и записывает в таблицу cash_flow, обязательным полем является users_id
-CREATE OR REPLACE FUNCTION public.insert_in_cash_flow(_users_id bigint,
-													  _datetime timestamp default now(),
-													  _category_id_from integer default null, 
-													  _category_id_to integer default null,
-													  _value integer default 0, 
-													  _currency varchar default 'RUB',
-													  _description text default null)
-RETURNS text
-LANGUAGE plpgsql
-AS $function$
-declare
-    _cash_flow_id bigint;
-begin 
-	insert into cash_flow(users_id, datetime, category_id_from, category_id_to, value, currency, description)
-		   values(_users_id, _datetime, _category_id_from, _category_id_to, _value, _currency, _description)
-        returning id into _cash_flow_id;
-
-    perform public.mirror_cash_flow_row_to_allocation_postings(
-        _cash_flow_id,
-        'cash_flow_insert',
-        'generic',
-        'app'
-    );
-    return 'OK';
-end
-$function$
-;
-
-
--- LEGACY cash_flow-primary spend write helper.
--- App write-paths use insert_spend_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.insert_spend(_users_id bigint, _category_name_from character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
- RETURNS text
- LANGUAGE plpgsql
-AS $function$
-declare
-    _cash_flow_id bigint;
-begin 
-	insert into cash_flow (users_id, category_id_from, value, currency, description) 
-                select _users_id, c.id, _value, _currency as currency, _description
-                from categories c
-                join categories_category_groups ccg on c.id = ccg.categories_id
-                where ccg.category_groyps_id = 14 and ccg.users_id = _users_id
-                and c."name"=_category_name_from
-        returning id into _cash_flow_id;
-
-    perform public.mirror_cash_flow_row_to_allocation_postings(
-        _cash_flow_id,
-        'transaction',
-        'spend',
-        'app'
-    );
-    return 'OK';
-end
-$function$
-;
-
 -- Allocation-primary spend write helper.
 -- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
 CREATE OR REPLACE FUNCTION public.insert_spend_v2(_users_id bigint, _category_name_from character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
@@ -2691,34 +2579,6 @@ BEGIN
 
     RETURN 'OK';
 END
-$function$
-;
-
--- LEGACY cash_flow-primary revenue write helper.
--- App write-paths use insert_revenue_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.insert_revenue(_users_id bigint, _category_to character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
- RETURNS text
- LANGUAGE plpgsql
-AS $function$
-declare
-    _cash_flow_id bigint;
-begin 
-	insert into cash_flow (users_id, category_id_to, value, currency, description) 
-                select _users_id, c.id, _value, _currency, _description
-                from categories c
-                join categories_category_groups ccg on c.id = ccg.categories_id
-                where ccg.category_groyps_id = 14 and ccg.users_id = _users_id
-                and c."name"=_category_to
-        returning id into _cash_flow_id;
-
-    perform public.mirror_cash_flow_row_to_allocation_postings(
-        _cash_flow_id,
-        'transaction',
-        'revenue',
-        'app'
-    );
-    return 'OK';
-end
 $function$
 ;
 
@@ -2779,18 +2639,6 @@ $function$
 ;
 
 
-
--- LEGACY categories_category_groups-backed category lookup.
--- App read-paths use get_categories_name_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.get_categories_name(_user_id bigint, _groyps_id integer)
- RETURNS TABLE("name" varchar)
- LANGUAGE plpgsql
-AS $function$
-begin
-return query (select c."name" from public.categories c where c.id in (select public.get_categories_id(_user_id, _groyps_id)));
-		end
-$function$
-;
 
 -- Allocation-backed category lookup for UI category lists.
 CREATE OR REPLACE FUNCTION public.get_categories_name_v2(_user_id bigint, _groyps_id integer)
@@ -2900,21 +2748,6 @@ return query (SELECT u.id FROM users u );
 $function$
 ;	
 
--- LEGACY cash_flow-backed group balance helper.
--- App read-paths use get_group_balance_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.get_group_balance(_user_id bigint, _groyps_id integer)
- RETURNS TABLE(balance NUMERIC)
- LANGUAGE plpgsql
-AS $function$
-begin
-return query (SELECT 
-				sum(get_category_balance) AS balance
-			  FROM (SELECT  
-						get_category_balance(_user_id, get_categories_id(_user_id, _groyps_id))) sub);
-end
-$function$
-;
-
 -- Ledger-backed candidate for get_group_balance(...).
 CREATE OR REPLACE FUNCTION public.get_group_balance_v2(_user_id bigint, _groyps_id integer)
  RETURNS TABLE(balance NUMERIC)
@@ -2944,21 +2777,6 @@ AS $function$
     FROM grouped_categories gc;
 $function$
 ;
-
--- LEGACY cash_flow-backed category remains helper.
--- App read-paths use get_remains_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.get_remains(_user_id bigint, _category CHARACTER)
- RETURNS numeric
- LANGUAGE plpgsql
-AS $function$
-begin
-return (select COALESCE (get_category_balance(_user_id,(select c.id from categories c join categories_category_groups ccg on c.id = ccg.categories_id
-                    where ccg.category_groyps_id = 14 and ccg.users_id = _user_id
-                    and c."name"=_category)), 0))
-			  ;
-		end
-$function$
-;   
 
 -- Ledger-backed candidate for get_remains(...).
 CREATE OR REPLACE FUNCTION public.get_remains_v2(_user_id bigint, _category CHARACTER)
@@ -2995,24 +2813,6 @@ AS $function$
     );
 $function$
 ;
-
--- LEGACY cash_flow-backed all balances helper.
--- App read-paths use get_all_balances_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.get_all_balances(_user_id bigint, _group_id integer)
-RETURNS TABLE(category_name varchar, balance numeric(20, 2))
-LANGUAGE plpgsql
-AS $function$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        c."name" AS category_name,
-        COALESCE(get_category_balance(_user_id, c.id, 'RUB'), 0) AS balance
-    FROM 
-        public.categories c
-    WHERE 
-        c.id IN (SELECT public.get_categories_id(_user_id, _group_id));
-END;
-$function$;
 
 -- Ledger-backed candidate for get_all_balances(...).
 CREATE OR REPLACE FUNCTION public.get_all_balances_v2(_user_id bigint, _group_id integer)
@@ -3065,147 +2865,6 @@ BEGIN
 end
 $function$
 ;  
-
--- LEGACY cash_flow-primary manual exchange.
--- App write-paths use exchange_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.exchange(_users_id bigint, _category_id int, _value_out numeric, _currency_out character VARYING, _value_in numeric, _currency_in character varying)
- RETURNS text
- LANGUAGE plpgsql
-AS $function$
-declare
-    _rate_out numeric;
-    _rate_in numeric;
-    _rate_out_current numeric;
-    _rate_in_current numeric;
-    _rate_out_text text;
-    _rate_in_text text;
-    _cash_flow_id_out bigint;
-    _cash_flow_id_in bigint;
-    _stable_currencies text[] := array[
-        'USDT','USDC','DAI','BUSD','TUSD','USDP','GUSD','USDN','FRAX','USDD','FDUSD','USDE','SUSD','PYUSD'
-    ];
-    _is_stable_out boolean;
-    _is_stable_in boolean;
-    _ts timestamp := now();
-begin 
-    if _value_out <= 0 or _value_in <= 0 then
-        raise exception 'Exchange values must be greater than zero';
-    end if;
-
-    select rate into _rate_out
-    from exchange_rates
-    where currency = _currency_out
-    order by datetime desc
-    limit 1;
-
-    select rate into _rate_in
-    from exchange_rates
-    where currency = _currency_in
-    order by datetime desc
-    limit 1;
-
-    if _currency_out = 'USD' then
-        _rate_out := 1;
-    end if;
-    if _currency_in = 'USD' then
-        _rate_in := 1;
-    end if;
-
-    _is_stable_out := _currency_out = ANY(_stable_currencies);
-    _is_stable_in := _currency_in = ANY(_stable_currencies);
-
-    if _rate_out is null and _rate_in is null then
-        raise exception 'Rates for % and % are unknown. Exchange via USD first', _currency_out, _currency_in;
-    end if;
-
-    -- USD is anchor: update the other currency
-    if _currency_out = 'USD' then
-        _rate_out := 1;
-        _rate_in := _rate_out * (_value_in / _value_out);
-        insert into exchange_rates(datetime, currency, rate)
-        values(_ts, _currency_in, _rate_in);
-    elsif _currency_in = 'USD' then
-        _rate_in := 1;
-        _rate_out := _rate_in * (_value_out / _value_in);
-        insert into exchange_rates(datetime, currency, rate)
-        values(_ts, _currency_out, _rate_out);
-    -- Stablecoin updates only when exchanged with USD
-    elsif _is_stable_out then
-        if _rate_out is null then
-            raise exception 'Stablecoin rate is unknown. Exchange stablecoin with USD first';
-        end if;
-        _rate_in := _rate_out * (_value_in / _value_out);
-        insert into exchange_rates(datetime, currency, rate)
-        values(_ts, _currency_in, _rate_in);
-    elsif _is_stable_in then
-        if _rate_in is null then
-            raise exception 'Stablecoin rate is unknown. Exchange stablecoin with USD first';
-        end if;
-        _rate_out := _rate_in * (_value_out / _value_in);
-        insert into exchange_rates(datetime, currency, rate)
-        values(_ts, _currency_out, _rate_out);
-    else
-        if _rate_out is null then
-            raise exception 'Rate for % is unknown. Exchange via USD or stablecoin first', _currency_out;
-        end if;
-        _rate_in := _rate_out * (_value_in / _value_out);
-        insert into exchange_rates(datetime, currency, rate)
-        values(_ts, _currency_in, _rate_in);
-    end if;
-
-    insert into cash_flow(users_id, category_id_from, value, currency, description)
-           values(_users_id, _category_id, _value_out, _currency_out, concat('exchange to ', _value_in, ' ',  _currency_in))
-    returning id into _cash_flow_id_out;
-
-    perform public.mirror_cash_flow_row_to_allocation_postings(
-        _cash_flow_id_out,
-        'exchange',
-        'manual',
-        'app',
-        jsonb_build_object('direction', 'out')
-    );
-
-    insert into cash_flow(users_id, category_id_to, value, currency, description)
-           values(_users_id, _category_id, _value_in, _currency_in, concat('exchange from ', _value_out, ' ',  _currency_out))
-    returning id into _cash_flow_id_in;
-
-    perform public.mirror_cash_flow_row_to_allocation_postings(
-        _cash_flow_id_in,
-        'exchange',
-        'manual',
-        'app',
-        jsonb_build_object('direction', 'in')
-    );
-
-    if _currency_out = 'USD' then
-        _rate_out_current := 1;
-    else
-        _rate_out_current := coalesce(_rate_out, (select rate from exchange_rates where currency = _currency_out order by datetime desc limit 1));
-    end if;
-
-    if _currency_in = 'USD' then
-        _rate_in_current := 1;
-    else
-        _rate_in_current := coalesce(_rate_in, (select rate from exchange_rates where currency = _currency_in order by datetime desc limit 1));
-    end if;
-
-    _rate_out_text := case
-        when abs(_rate_out_current) >= 1 then replace(to_char(_rate_out_current, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
-        when _rate_out_current::text like '%.%' then rtrim(trim(trailing '0' from _rate_out_current::text), '.')
-        else _rate_out_current::text
-    end;
-    _rate_in_text := case
-        when abs(_rate_in_current) >= 1 then replace(to_char(_rate_in_current, 'FM999,999,999,999,999,999,990.00'), ',', ' ')
-        when _rate_in_current::text like '%.%' then rtrim(trim(trailing '0' from _rate_in_current::text), '.')
-        else _rate_in_current::text
-    end;
-
-return format('Курс: %s=%s, %s=%s (за 1 USD)',
-              _currency_out, _rate_out_text,
-              _currency_in, _rate_in_text);
-		end
-$function$
-;
 
 -- Allocation-primary manual exchange.
 -- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
@@ -3411,19 +3070,6 @@ return format('Курс: %s=%s, %s=%s (за 1 USD)',
 $function$
 ;
 
--- LEGACY global category lookup by name.
--- App read-paths use get_category_id_from_name_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.get_category_id_from_name( _category_name varchar)
- RETURNS int
- LANGUAGE plpgsql
-AS $function$
-begin
-return (SELECT id FROM categories WHERE "name" = _category_name)
-			  ;
-		end
-$function$
-;
-
 -- Allocation-backed user-aware category lookup by display name.
 CREATE OR REPLACE FUNCTION public.get_category_id_from_name_v2(_user_id bigint, _category_name varchar)
  RETURNS int
@@ -3478,43 +3124,6 @@ AS $function$
 $function$
 ;
 
--- LEGACY cash_flow-backed category balance split by currency.
--- App read-paths use get_category_balance_with_currency_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency(_user_id bigint, _category_id integer)
- RETURNS TABLE (value numeric, currency varchar)
- LANGUAGE sql
-AS $function$
-SELECT
-    sum(cf.value) AS value,
-    cf.currency
-FROM
-    (
-    SELECT
-        cash_flow.value,
-        cash_flow.currency
-    FROM
-        cash_flow
-    WHERE
-        category_id_to = _category_id
-        AND users_id IN (
-        SELECT
-            get_users_id(_user_id))
-UNION ALL
-SELECT
-        -cash_flow.value,
-        cash_flow.currency
-    FROM
-        cash_flow
-    WHERE
-        category_id_from = _category_id
-        AND users_id IN (
-        SELECT
-            get_users_id(_user_id))
-              ) cf
-GROUP BY cf.currency;
-$function$
-;
-
 -- Ledger-backed candidate for get_category_balance_with_currency(...).
 CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency_v2(_user_id bigint, _category_id integer)
  RETURNS TABLE (value numeric, currency varchar)
@@ -3545,19 +3154,6 @@ GROUP BY p.currency;
 $function$
 ;
 
--- LEGACY cash_flow-backed currency list.
--- App read-paths use get_currency_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.get_currency()
- RETURNS TABLE(transact varchar)
- LANGUAGE plpgsql
-AS $function$
-begin
-return query (
-SELECT DISTINCT currency FROM cash_flow);
-	end
-$function$
-;
-
 -- Ledger-backed currency list.
 CREATE OR REPLACE FUNCTION public.get_currency_v2()
  RETURNS TABLE(transact varchar)
@@ -3567,111 +3163,6 @@ AS $function$
     SELECT DISTINCT ap.currency AS transact
     FROM public.allocation_postings ap
     ORDER BY ap.currency;
-$function$
-;
-
--- LEGACY cash_flow-primary spend with automatic exchange.
--- App write-paths use insert_spend_with_exchange_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange(_users_id bigint, _category_name_from character varying, _value numeric, _currency character varying, _description text DEFAULT NULL::text)
- RETURNS text
- LANGUAGE plpgsql
-AS $function$
-DECLARE
-    _value_RUB NUMERIC(10,2);
-    _reserv_id int;
-    _category_id_from int;
-    _rate_src numeric;
-    _rate_rub numeric;
-    _cash_flow_exchange_out_id bigint;
-    _cash_flow_exchange_in_id bigint;
-    _cash_flow_spend_id bigint;
-    _currency_norm character varying := upper(_currency);
-BEGIN
-    IF _value <= 0 THEN
-        RAISE EXCEPTION 'Spend value must be greater than zero';
-    END IF;
-
-    IF _currency_norm = 'RUB' THEN
-        _value_RUB := _value;
-    ELSE
-        SELECT rate INTO _rate_src
-        FROM exchange_rates
-        WHERE currency = _currency_norm
-        ORDER BY datetime DESC
-        LIMIT 1;
-
-        SELECT rate INTO _rate_rub
-        FROM exchange_rates
-        WHERE currency = 'RUB'
-        ORDER BY datetime DESC
-        LIMIT 1;
-
-        IF _rate_src IS NULL OR _rate_rub IS NULL THEN
-            RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency_norm;
-        END IF;
-
-        _value_RUB := _value / (_rate_src / _rate_rub);
-    END IF;
-
-    IF _value_RUB IS NULL THEN
-        RAISE EXCEPTION 'Exchange rates for % and RUB are required', _currency_norm;
-    END IF;
-
-    _reserv_id := (SELECT get_categories_id(_users_id, 9));
-    IF _reserv_id IS NULL THEN
-        RAISE EXCEPTION 'Reserve category (group 9) not found for user %', _users_id;
-    END IF;
-
-    _category_id_from := (SELECT c.id
-			                from categories c
-			                join categories_category_groups ccg on c.id = ccg.categories_id
-			                where ccg.category_groyps_id = 14 and ccg.users_id = _users_id
-			                and c."name"=_category_name_from);
-    IF _category_id_from IS NULL THEN
-        RAISE EXCEPTION 'Category % not found in group 14 for user %', _category_name_from, _users_id;
-    END IF;
-
-    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
-    VALUES
-        (_users_id, _reserv_id, _category_id_from, _value, _currency_norm, concat('auto exchange ', _value_RUB, ' RUB to ', _value, ' ', _currency_norm, ' ', _description))
-    RETURNING id INTO _cash_flow_exchange_out_id;
-
-    PERFORM public.mirror_cash_flow_row_to_allocation_postings(
-        _cash_flow_exchange_out_id,
-        'exchange',
-        'auto',
-        'system',
-        jsonb_build_object('direction', 'out')
-    );
-
-    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
-    VALUES
-        (_users_id, _category_id_from, _reserv_id, _value_RUB, 'RUB', concat('auto exchange ', _value, ' ', _currency_norm, ' to ', _value_RUB, ' RUB', ' ', _description))
-    RETURNING id INTO _cash_flow_exchange_in_id;
-
-    PERFORM public.mirror_cash_flow_row_to_allocation_postings(
-        _cash_flow_exchange_in_id,
-        'exchange',
-        'auto',
-        'system',
-        jsonb_build_object('direction', 'in')
-    );
-
-    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
-    VALUES
-        (_users_id, _category_id_from, NULL, _value, _currency_norm, _description)
-    RETURNING id INTO _cash_flow_spend_id;
-
-    PERFORM public.mirror_cash_flow_row_to_allocation_postings(
-        _cash_flow_spend_id,
-        'transaction',
-        'spend',
-        'app',
-        jsonb_build_object('exchange_subkind', 'auto')
-    );
-
-    RETURN 'OK';
-END
 $function$
 ;
 
