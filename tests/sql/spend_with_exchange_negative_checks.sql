@@ -12,16 +12,17 @@ WHERE node_id IN (
 );
 DELETE FROM allocation_nodes WHERE user_id = 903001 OR legacy_category_id IN (903011, 903012);
 DELETE FROM cash_flow WHERE users_id = 903001;
+DELETE FROM categories_category_groups WHERE users_id = 903001;
 DELETE FROM users WHERE id = 903001;
 DELETE FROM categories WHERE id IN (903011, 903012);
-DELETE FROM category_groups WHERE id IN (9, 14);
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
 
 INSERT INTO users(id, nickname) VALUES (903001, 'neg_fx');
 
 INSERT INTO category_groups(id, "name", description) VALUES
   (9, 'reserve_group', ''),
-  (14, 'all_group', '');
+  (14, 'all_group', '')
+ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO categories(id, "name", "percent") VALUES
   (903011, 'ReserveNeg', 0.00),

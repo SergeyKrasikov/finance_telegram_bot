@@ -42,6 +42,7 @@ test-sql:
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_negative_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/allocation_legacy_bootstrap_checks.sql
+	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/delete_transaction_runtime_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/ledger_write_path_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/balance_functions_checks.sql
 	@$(PSQL) -h "$(PGHOST)" -p "$(PGPORT)" -U "$(PGUSER)" -d "$(PGDATABASE)" -v ON_ERROR_STOP=1 -f tests/sql/allocation_cascade_checks.sql

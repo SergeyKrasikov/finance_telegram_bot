@@ -141,6 +141,13 @@ constraint allocation_postings_direction_check
     check (from_node_id is not null or to_node_id is not null)
 );
 
+create table if not exists public.allocation_backfill_tombstones (
+legacy_cash_flow_id bigint primary key references public.cash_flow(id) on delete cascade,
+deleted_at timestamptz not null default now(),
+source varchar(64) not null default 'delete_transaction',
+metadata jsonb not null default '{}'::jsonb
+);
+
 create table if not exists public.allocation_scenarios (
 id bigserial primary key,
 owner_user_id bigint references users(id),
@@ -256,31 +263,64 @@ constraint allocation_seed_profile_root_params_value_check
     check (length(trim(param_value)) > 0)
 );
 
--- Compatibility upgrade for existing databases with varchar(3) currency columns
+-- Compatibility upgrade for existing databases with short currency columns
 DO $$
+DECLARE
+    needs_cash_flow_upgrade boolean;
+    needs_exchange_rates_upgrade boolean;
+    all_data_h_definition text;
 BEGIN
-    IF EXISTS (
+    SELECT EXISTS (
         SELECT 1
         FROM information_schema.columns
         WHERE table_schema = 'public'
           AND table_name = 'cash_flow'
           AND column_name = 'currency'
-          AND character_maximum_length = 3
-    ) THEN
-        ALTER TABLE public.cash_flow
-            ALTER COLUMN currency TYPE varchar(16);
-    END IF;
+          AND character_maximum_length IS NOT NULL
+          AND character_maximum_length < 16
+    )
+    INTO needs_cash_flow_upgrade;
 
-    IF EXISTS (
+    SELECT EXISTS (
         SELECT 1
         FROM information_schema.columns
         WHERE table_schema = 'public'
           AND table_name = 'exchange_rates'
           AND column_name = 'currency'
-          AND character_maximum_length = 3
-    ) THEN
+          AND character_maximum_length IS NOT NULL
+          AND character_maximum_length < 16
+    )
+    INTO needs_exchange_rates_upgrade;
+
+    IF needs_cash_flow_upgrade OR needs_exchange_rates_upgrade THEN
+        IF EXISTS (
+            SELECT 1
+            FROM pg_views
+            WHERE schemaname = 'public'
+              AND viewname = 'all_data_h'
+        ) THEN
+            SELECT pg_get_viewdef('public.all_data_h'::regclass, true)
+            INTO all_data_h_definition;
+
+            EXECUTE 'DROP VIEW public.all_data_h';
+        END IF;
+    END IF;
+
+    IF needs_cash_flow_upgrade THEN
+        ALTER TABLE public.cash_flow
+            ALTER COLUMN currency TYPE varchar(16);
+    END IF;
+
+    IF needs_exchange_rates_upgrade THEN
         ALTER TABLE public.exchange_rates
             ALTER COLUMN currency TYPE varchar(16);
+    END IF;
+
+    IF all_data_h_definition IS NOT NULL THEN
+        EXECUTE format(
+            'CREATE VIEW public.all_data_h AS %s',
+            all_data_h_definition
+        );
     END IF;
 END $$;
 
@@ -324,6 +364,8 @@ CREATE INDEX IF NOT EXISTS idx_allocation_postings_to_node ON public.allocation_
 CREATE UNIQUE INDEX IF NOT EXISTS uq_allocation_postings_legacy_cash_flow_id
     ON public.allocation_postings ((metadata->>'legacy_cash_flow_id'))
     WHERE metadata ? 'legacy_cash_flow_id';
+CREATE INDEX IF NOT EXISTS idx_allocation_backfill_tombstones_deleted_at
+    ON public.allocation_backfill_tombstones (deleted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_allocation_scenarios_owner_user
     ON public.allocation_scenarios (owner_user_id, scenario_kind, active)
     WHERE owner_user_id IS NOT NULL;

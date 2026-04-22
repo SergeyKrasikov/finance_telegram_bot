@@ -768,6 +768,11 @@ BEGIN
       AND COALESCE(cf.value, 0) > 0
       AND NOT EXISTS (
           SELECT 1
+          FROM public.allocation_backfill_tombstones tomb
+          WHERE tomb.legacy_cash_flow_id = cf.id
+      )
+      AND NOT EXISTS (
+          SELECT 1
           FROM public.allocation_postings ap
           WHERE ap.metadata->>'legacy_cash_flow_id' = cf.id::text
              OR (
@@ -864,6 +869,14 @@ BEGIN
         SELECT 1
         FROM public.allocation_postings ap
         WHERE ap.metadata->>'legacy_cash_flow_id' = _cash_flow_id::text
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM public.allocation_backfill_tombstones tomb
+        WHERE tomb.legacy_cash_flow_id = _cash_flow_id
     ) THEN
         RETURN;
     END IF;
@@ -2802,7 +2815,7 @@ $function$
 
 -- Ledger-aware delete helper used by /history.
 -- Input ids are allocation_postings.id values. If a ledger row mirrors legacy cash_flow,
--- the linked cash_flow row is deleted as well to prevent future backfill resurrection.
+-- the legacy id is tombstoned so future backfill does not resurrect the posting.
 CREATE OR REPLACE FUNCTION public.delete_transaction(_transactions_id bigint[])
  RETURNS text
  LANGUAGE plpgsql
@@ -2826,8 +2839,23 @@ BEGIN
     WHERE id = ANY(_transactions_id);
 
     IF COALESCE(array_length(_legacy_cash_flow_ids, 1), 0) > 0 THEN
-        DELETE FROM public.cash_flow
-        WHERE id = ANY(_legacy_cash_flow_ids);
+        INSERT INTO public.allocation_backfill_tombstones (
+            legacy_cash_flow_id,
+            source,
+            metadata
+        )
+        SELECT
+            legacy_id,
+            'delete_transaction',
+            jsonb_build_object(
+                'transaction_ids', to_jsonb(_transactions_id)
+            )
+        FROM unnest(_legacy_cash_flow_ids) AS legacy_id
+        ON CONFLICT (legacy_cash_flow_id)
+        DO UPDATE SET
+            deleted_at = now(),
+            source = EXCLUDED.source,
+            metadata = EXCLUDED.metadata;
     END IF;
 
     RETURN 'OK';

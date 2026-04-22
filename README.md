@@ -420,7 +420,7 @@ graph TD
   - `public.get_category_balance_with_currency_v2(user_id, category_id)`
   - `public.get_currency_v2()`
   - `/history` читает ledger-backed `get_last_transaction_v2()`
-  - delete-flow в `/history` удаляет `allocation_postings` и linked legacy `cash_flow`, если он есть в metadata
+  - delete-flow в `/history` удаляет `allocation_postings` и tombstone'ит `legacy_cash_flow_id`, чтобы backfill не воскрешал удалённую историю
 - daily scheduler уже использует ledger-backed `get_daily_transactions()`
 - `/balance` и spend balance checks уже используют ledger-backed v2 balance helpers.
 - Category UI lookup уже использует allocation-backed helpers:
