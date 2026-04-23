@@ -64,7 +64,7 @@ DECLARE
 BEGIN
     SELECT value, pg_typeof(value)::text
     INTO v, t
-    FROM get_last_transaction_v2(910001, 1)
+    FROM get_last_transaction(910001, 1)
     LIMIT 1;
 
     IF t <> 'character varying' THEN
@@ -77,7 +77,7 @@ BEGIN
 
     SELECT value, pg_typeof(value)::text
     INTO v, t
-    FROM get_last_transaction_v2(910001, 2)
+    FROM get_last_transaction(910001, 2)
     LIMIT 1;
 
     IF t <> 'character varying' THEN

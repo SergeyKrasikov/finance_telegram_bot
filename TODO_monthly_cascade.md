@@ -1,14 +1,13 @@
-# TODO: Monthly Cascade Migration
+# Monthly Cascade Migration
 
-Цель: перевести месячное распределение со старой `monthly_distribute()` на граф `allocation_nodes` / `allocation_routes`, не ломая текущий контракт Telegram-отчёта.
+Статус: full allocation cutover для test-ветки выполнен. Runtime использует `allocation_nodes` / `allocation_routes` / `allocation_postings`; legacy tables остаются только источником для restore/backfill старых бэкапов.
 
 ## Текущее состояние
 
-- Legacy reference/rollback функция: `public.monthly_distribute(_user_id, _income_category)`.
-- Переходная функция: `public.monthly_distribute_cascade(_user_id)`.
-  Legacy `_income_category` сохранён только ради совместимости сигнатуры; runtime source resolution уже не зависит от него.
+- Legacy reference/rollback функция `public.monthly_distribute(_user_id, _income_category)` удалена из runtime schema.
+- Runtime function: `public.monthly_distribute_cascade(_user_id)`.
 - Новая функция сохраняет форму Telegram JSON, но использует clean monthly semantics вместо полного повторения грязных legacy percent/group formulas.
-- Compare SQL остаётся справочным инструментом для понимания расхождений со старой функцией.
+- Restore/backfill старых бэкапов идёт через `public.bootstrap_allocation_ledger_from_legacy()`.
 
 ## Что уже переведено
 
@@ -28,12 +27,11 @@
   - `allocation_seed_profile_root_params`
   Monthly seed уже читает pair-config через эти таблицы, а не из локальных `VALUES` по всему телу скрипта,
   и materialize'ит все активные monthly profiles.
-- Добавлены transition/helper-функции:
+- Helper-функции runtime:
   - `find_allocation_node_id(...)`
-  - `get_group_percent_sum(...)`
 - Каскадные шаги групп `1`, `2`, `3`, `6` в `monthly_distribute_cascade()` уже идут через allocation-граф.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `monthly_distribute_cascade()` и требуют готовые allocation roots.
-- Старые функции и legacy-группы не удалены.
+- Старые monthly/reference функции удалены; legacy group ids используются только как restore/config bridge.
 
 ## Текущий граф
 
@@ -65,15 +63,11 @@
   - `group 1`, `2`, `3`, `6`, `7`, `9`, `13`
 - single-target roots во время тестовой миграции:
   - используют явные канонические leaf-категории для `249716305` и `943915310`, а не весь legacy group mapping
-## Инварианты до полного переключения
+## Инварианты после переключения
 
-- `monthly_distribute()` остаётся legacy reference/rollback функцией.
 - `monthly_distribute_cascade()` должна сохранять Telegram JSON contract, но не обязана повторять старые странности вроде эффективного распределения `group 2` от `60%` income.
 - Любое изменение новой логики проверяется SQL checks; compare со старой функцией используется только как диагностический срез.
-- До полного переноса нельзя убирать legacy helper'ы:
-  - `distribute_to_group(...)`
-  - `transact_from_group_to_category(...)`
-  - `get_categories_id(...)`
+- Legacy helper'ы `distribute_to_group(...)`, `transact_from_group_to_category(...)`, `get_categories_id(...)` удалены из runtime schema.
 - Read-path migration started:
   - monthly allocation helpers уже считают source balance, `month_earnings` / `month_spend` из `allocation_postings`
   - `monthly_distribute_cascade()` уже читает source balances через graph-native `get_allocation_node_balance(...)` по source node id
@@ -82,7 +76,7 @@
   - `monthly_distribute_cascade()` уже передаёт явный source allocation node в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и `salary_primary`
   - `monthly_distribute_cascade()` больше не передаёт legacy source category id в `allocation_distribute(...)`; lower-level функция выводит его из source node только для compatibility metadata
 - `allocation_distribute(...)` больше не создаёт compatibility node на лету; отсутствие source allocation node теперь считается ошибкой runtime config
-- `exchange_v2(...)` больше не создаёт compatibility node на лету; runtime ожидает уже существующую allocation category node для wallet/category
+- `exchange(...)` больше не создаёт compatibility node на лету; runtime ожидает уже существующую allocation category node для wallet/category
   - `monthly()` уже вызывает `monthly_distribute_cascade(user_id)` по активным user-owned `salary_primary` roots, без hard-coded monthly users и legacy income category id; `salary_primary` требует source leaf через scenario binding `branch_source`, без fallback на явный legacy income category id
   - prep/reserve roots уже хранят legacy group bridge в metadata, а `monthly_distribute_cascade()` больше не hard-code'ит group ids `11/12/8/15`
   - single-target monthly roots и `family_contribution_out` уже seed'ятся через `allocation_scenario_node_bindings`, а не через hard-coded target/source leaf в route insert logic
@@ -91,18 +85,18 @@
   - graph-native leaf-ноды уже могут писать `allocation_postings` без `legacy_category_id`
   - `get_users_id(...)` уже читает только `user_group_memberships`
   - добавлен read-only helper `get_last_allocation_postings(user_id, num)` для наблюдения за новым ledger
-  - `/history` читает ledger-backed `get_last_transaction_v2(user_id, num)`
+  - `/history` читает ledger-backed `get_last_transaction(user_id, num)`
   - delete-flow удаляет `allocation_postings` и tombstone'ит `legacy_cash_flow_id`, чтобы bootstrap/backfill не возвращал удалённую историю
   - daily scheduler уже читает `get_daily_transactions()` из `allocation_postings`
   - `get_daily_allocation_transactions(user_id)` оставлен как явный alias на ledger-read
-  - добавлены balance candidate helpers:
-    `get_category_balance_v2`, `get_group_balance_v2`, `get_remains_v2`,
-    `get_all_balances_v2`, `get_category_balance_with_currency_v2`
-  - `/balance` и spend balance checks уже используют v2 balance helpers
+  - добавлены canonical balance helpers:
+    `get_category_balance`, `get_group_balance`, `get_remains`,
+    `get_all_balances`, `get_category_balance_with_currency`
+  - `/balance` и spend balance checks используют canonical balance helpers
   - legacy cash_flow-backed balance/history/category/currency helpers уже удалены из SQL app API
-  - category UI lookup уже использует allocation-backed `get_categories_name_v2` и `get_category_id_from_name_v2`
-  - manual spend/revenue app write-paths уже используют allocation-primary `insert_spend_v2` / `insert_revenue_v2`
-  - legacy `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)` уже удалены из SQL app API
+  - category UI lookup уже использует allocation-backed `get_categories_name` и `get_category_id_from_name`
+  - manual spend/revenue app write-paths уже используют allocation-primary `insert_spend` / `insert_revenue`
+  - transitional `*_v2` app-facing SQL API удалён; canonical `insert_spend(...)` / `insert_revenue(...)` / `insert_spend_with_exchange(...)` / `exchange(...)` являются allocation-backed runtime API
 
 ## Порядок безопасной миграции
 
@@ -155,11 +149,11 @@
 7. Переключение entrypoint
 - `monthly()` переведён на `monthly_distribute_cascade()`.
 - Список monthly users берётся из активных user-owned `salary_primary` roots.
-- `monthly_distribute()` остаётся в базе как legacy reference/rollback и пока не удаляется.
+- `monthly_distribute()` удалён из runtime schema.
 
 ## Что ещё нужно сделать в схеме
 
-- Финально убрать зависимость движка от legacy category/group функций.
+- Зависимость runtime-движка от legacy category/group функций убрана.
 - Free-balance для `free_to_gifts` уже определяется через allocation remainder leaf node, а не через legacy category balance.
 - Legacy share для `free_to_gifts` перенесён из orchestrator в allocation route.
 - В схему добавлена `allocation_postings`; leaf-проводки allocation-движка уже пишутся туда ledger-only, без новых rows в `cash_flow`.
@@ -168,18 +162,18 @@
 - Определить финальную модель источника для monthly run:
   Текущий переходный вариант: orchestrator запускает несколько roots, `salary_primary` и `family_contribution_out` уже полностью сидят на scenario bindings; prep/reserve ветки находят source nodes по `allocation_node_groups`, а legacy group ids уже берут из `allocation_scenario_root_params`.
 - `allocation_routes.metadata` уже используется для route-level graph config, например source leaf partner bridge.
-- Финально решить, остаётся ли `cash_flow` на legacy category ids или переводится на `allocation_nodes.id`.
+- `cash_flow` остаётся legacy restore table; runtime ledger source of truth is `allocation_postings`.
 
-## Что нельзя делать пока рано
+## Что нельзя делать после cutover
 
-- Удалять `monthly_distribute()`.
-- Удалять SQL/compare checks.
+- Возвращать `monthly_distribute()` / `distribute_to_group()` / `transact_from_group_to_category()` как runtime/reference fallback.
+- Добавлять новые runtime writes в `cash_flow`.
 - Переводить сразу несколько веток без промежуточной проверки.
 - Менять Telegram-формат отчёта до завершения миграции бизнес-логики.
 
 ## Finalization Checklist
 
-Этот checklist определяет момент, когда `monthly_distribute_cascade()` можно считать полной заменой legacy `monthly_distribute()`.
+Этот checklist определяет guardrails после того, как `monthly_distribute_cascade()` стал полной заменой legacy `monthly_distribute()`.
 
 ### 1. Allocation-only monthly path
 
@@ -242,18 +236,15 @@
 - Тесты не зависят от продового `cash_flow`.
 - При необходимости отдельно зафиксирован и test bridge для legacy category ids.
 
-### 6. Убран временный compatibility bridge
+### 6. Restore bridge ограничен
 
-- Если `cash_flow` остаётся на `categories(id)`, это решение зафиксировано как официальная совместимость.
-- Если `cash_flow` переводится на `allocation_nodes.id`, удалены:
-  - временная bridge-логика
-  - test override для `allocation_distribute_recursive(...)`
+- `cash_flow` остаётся на legacy `categories(id)` только как формат старого бэкапа.
+- Runtime не читает `cash_flow` и не пишет в него.
 - В прод-коде не осталось скрытых тестовых обходов схемы.
 
 ### 7. Переключён entrypoint
 
 - `monthly()` использует `monthly_distribute_cascade()`.
-- Старая `monthly_distribute()` оставлена как legacy reference/rollback.
 - Переходные helper'ы переименованы или удалены.
 - TODO migration можно закрыть только после зелёных SQL checks на финальной реализации.
 
@@ -261,7 +252,7 @@
 
 Миграция считается завершённой, когда одновременно выполнено всё ниже:
 
-- Legacy `monthly_distribute()` либо удалена, либо отдельно помечена как reference-only.
+- Legacy `monthly_distribute()` удалена.
 - Compare-тест на фиксированном fixture зелёный.
 - Итоговый JSON строится из allocation-report, а не из legacy-формул.
 - В monthly-коде нет fallback-логики.

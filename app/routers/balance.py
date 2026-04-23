@@ -6,12 +6,12 @@ from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_ALL, GROUP_COMMON, GROUP_PERSONAL, GROUP_SPEND
 from app.db.balances import (
-    get_all_balances_v2,
-    get_category_balance_with_currency_v2,
-    get_group_balance_v2,
-    get_remains_v2,
+    get_all_balances,
+    get_category_balance_with_currency,
+    get_group_balance,
+    get_remains,
 )
-from app.db.categories import get_categories_name_v2, get_category_id_from_name_v2
+from app.db.categories import get_categories_name, get_category_id_from_name
 from app.states.finance import GettingBalance
 from app.utils.formatting import format_amount
 from app.utils.keyboards import create_default_keyboard
@@ -41,14 +41,14 @@ async def cmd_balance(message: Message, state: FSMContext) -> None:
 )
 async def getting_balance(message: Message, state: FSMContext) -> None:
     if message.text == "Личные":
-        balance = await get_group_balance_v2(message.chat.id, GROUP_PERSONAL)
+        balance = await get_group_balance(message.chat.id, GROUP_PERSONAL)
         await message.answer(
             f"Остаток: {format_amount(balance)}₽",
             reply_markup=create_default_keyboard(),
         )
         await state.clear()
     elif message.text == "Общие":
-        balance = await get_group_balance_v2(message.chat.id, GROUP_COMMON)
+        balance = await get_group_balance(message.chat.id, GROUP_COMMON)
         await message.answer(
             f"Остаток: {format_amount(balance)}₽",
             reply_markup=create_default_keyboard(),
@@ -56,8 +56,8 @@ async def getting_balance(message: Message, state: FSMContext) -> None:
         await state.clear()
     elif message.text == "По категориям":
         balances = []
-        for category in await get_categories_name_v2(message.chat.id, GROUP_ALL):
-            balance = await get_remains_v2(message.chat.id, category)
+        for category in await get_categories_name(message.chat.id, GROUP_ALL):
+            balance = await get_remains(message.chat.id, category)
             balances.append(f"{category:<10}: {format_amount(balance)}₽\n")
         await message.answer(
             "Остаток: \n" + "\n".join(balances), reply_markup=create_default_keyboard()
@@ -65,9 +65,9 @@ async def getting_balance(message: Message, state: FSMContext) -> None:
         await state.clear()
     elif message.text == "По категориям c валютами":
         balances = []
-        for category in await get_categories_name_v2(message.chat.id, GROUP_ALL):
-            category_id = await get_category_id_from_name_v2(message.chat.id, category)
-            balance = await get_category_balance_with_currency_v2(
+        for category in await get_categories_name(message.chat.id, GROUP_ALL):
+            category_id = await get_category_id_from_name(message.chat.id, category)
+            balance = await get_category_balance_with_currency(
                 message.chat.id, category_id
             )
             balance = [("\n" + format_amount(i[0]) + " " + str(i[1])) for i in balance]
@@ -77,7 +77,7 @@ async def getting_balance(message: Message, state: FSMContext) -> None:
         )
         await state.clear()
     else:
-        balance = await get_group_balance_v2(message.chat.id, GROUP_ALL)
+        balance = await get_group_balance(message.chat.id, GROUP_ALL)
         await message.answer(
             f"Остаток: {format_amount(balance)}₽",
             reply_markup=create_default_keyboard(),
@@ -88,7 +88,7 @@ async def getting_balance(message: Message, state: FSMContext) -> None:
 @router.message(F.text == "Остаток", StateFilter(None))
 async def get_balances(message: Message) -> None:
     try:
-        balances = await get_all_balances_v2(message.chat.id, GROUP_SPEND)
+        balances = await get_all_balances(message.chat.id, GROUP_SPEND)
         logging.info(f"Полученные данные balances: {balances}")
         balances_text = "\n\n".join(
             [

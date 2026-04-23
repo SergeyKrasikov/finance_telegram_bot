@@ -3,8 +3,8 @@ from decimal import Decimal
 from app.db.connection import db_function
 
 
-async def get_last_transaction_v2(user_id: int, num: int):
-    return await db_function("get_last_transaction_v2", user_id, num)
+async def get_last_transaction(user_id: int, num: int):
+    return await db_function("get_last_transaction", user_id, num)
 
 
 async def get_last_allocation_postings(user_id: int, num: int):
@@ -15,27 +15,27 @@ async def delete_transactions(transaction_ids: list[int]) -> None:
     await db_function("delete_transaction", transaction_ids)
 
 
-async def insert_revenue_v2(
+async def insert_revenue(
     user_id: int,
     category: str,
     amount: Decimal,
     currency: str,
     comment: str | None = None,
 ) -> None:
-    await db_function("insert_revenue_v2", user_id, category, amount, currency, comment)
+    await db_function("insert_revenue", user_id, category, amount, currency, comment)
 
 
-async def insert_spend_v2(
+async def insert_spend(
     user_id: int,
     category: str,
     amount: Decimal,
     currency: str,
     comment: str | None = None,
 ) -> None:
-    await db_function("insert_spend_v2", user_id, category, amount, currency, comment)
+    await db_function("insert_spend", user_id, category, amount, currency, comment)
 
 
-async def insert_spend_with_exchange_v2(
+async def insert_spend_with_exchange(
     user_id: int,
     category: str,
     amount: Decimal,
@@ -43,7 +43,7 @@ async def insert_spend_with_exchange_v2(
     comment: str | None = None,
 ) -> None:
     await db_function(
-        "insert_spend_with_exchange_v2", user_id, category, amount, currency, comment
+        "insert_spend_with_exchange", user_id, category, amount, currency, comment
     )
 
 

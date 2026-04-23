@@ -113,7 +113,7 @@
 - `monthly()` сам находит активные `salary_primary` roots
 
 Важно:
-- не удалять legacy `monthly_distribute()`
+- legacy `monthly_distribute()` больше не является rollback path после full cutover
 - `branch_source` и `bridge_source` уже обязательны; перед продовым включением нужно подтвердить, что bindings существуют для всех monthly users
 
 ## Пост-deploy проверки
@@ -135,7 +135,7 @@
   - duplicate remainder route
   - missing bridge source
 
-## Условия для удаления fallback и legacy
+## Условия full cutover
 
 `branch_source` и `bridge_source` уже должны быть подтверждены на проде:
 - все monthly users покрыты `allocation_scenarios`
@@ -149,11 +149,13 @@
 - `source_legacy_group_id` найден для всех `monthly_income_sources` и `extra_income_sources`
 - `spend_legacy_group_id` и `personal_legacy_group_id` найдены для всех `debt_reserve`
 
-Убирать legacy `cash_flow` monthly dependence можно только после того, как подтверждено:
+Legacy `cash_flow` monthly dependence считается убранной только после того, как подтверждено:
 - balances читаются из ledger
 - history читается из ledger
 - delete-flow работает по ledger
 - monthly и exchange не создают новых критичных записей, которые читаются только из `cash_flow`
+- legacy monthly/reference SQL cluster удалён из runtime schema
+- transitional `*_v2` app-facing SQL API удалён из runtime schema
 
 ## План отката
 
@@ -161,7 +163,7 @@
 
 1. Остановить scheduler monthly job.
 2. Вернуть предыдущую версию application/sql deploy.
-3. Использовать legacy `monthly_distribute()` как reference/rollback path.
+3. Не вызывать legacy `monthly_distribute()` в новой schema; rollback только через возврат предыдущего deploy.
 4. Не удалять `allocation_postings`; rollback должен быть логическим, а не destructive.
 5. Разобрать:
    - missing bindings

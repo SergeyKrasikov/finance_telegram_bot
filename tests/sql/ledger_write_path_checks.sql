@@ -29,8 +29,8 @@ VALUES
     (907001, 'ledger_spend', 'Ledger Spend', 'test spend node', 'expense', 907011, true, true, true),
     (907001, 'ledger_revenue', 'Ledger Revenue', 'test revenue node', 'income', 907012, true, true, true);
 
-SELECT public.insert_spend_v2(907001, 'Ledger Spend', 10::numeric, 'RUB', 'ledger spend test');
-SELECT public.insert_revenue_v2(907001, 'Ledger Revenue', 20::numeric, 'RUB', 'ledger revenue test');
+SELECT public.insert_spend(907001, 'Ledger Spend', 10::numeric, 'RUB', 'ledger spend test');
+SELECT public.insert_revenue(907001, 'Ledger Revenue', 20::numeric, 'RUB', 'ledger revenue test');
 
 DO $$
 DECLARE

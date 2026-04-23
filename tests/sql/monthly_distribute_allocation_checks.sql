@@ -322,7 +322,7 @@ BEGIN
         RAISE EXCEPTION 'Expected posted common amount 80, got %', posted_common;
     END IF;
 
-    SELECT public.get_category_balance_v2(906011, 906299, 'RUB')
+    SELECT public.get_category_balance(906011, 906299, 'RUB')
     INTO source_balance;
 
     IF abs(source_balance) > 1e-9 THEN

@@ -1,4 +1,4 @@
--- negative checks for insert_spend_with_exchange_v2 preconditions
+-- negative checks for insert_spend_with_exchange preconditions
 -- Run with: psql -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_negative_checks.sql
 
 BEGIN;
@@ -32,7 +32,7 @@ DO $$
 BEGIN
     -- 1) Missing rates should fail
     BEGIN
-        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg1');
+        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg1');
         RAISE EXCEPTION 'Expected failure for missing rates';
     EXCEPTION
         WHEN OTHERS THEN
@@ -80,7 +80,7 @@ BEGIN
     VALUES (903022, 14, true);
 
     BEGIN
-        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg2');
+        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg2');
         RAISE EXCEPTION 'Expected failure for missing reserve category';
     EXCEPTION
         WHEN OTHERS THEN
@@ -100,7 +100,7 @@ BEGIN
       AND legacy_group_id = 14;
 
     BEGIN
-        PERFORM public.insert_spend_with_exchange_v2(903001, 'UnknownCategory', 10::numeric, 'USDT', 'neg3');
+        PERFORM public.insert_spend_with_exchange(903001, 'UnknownCategory', 10::numeric, 'USDT', 'neg3');
         RAISE EXCEPTION 'Expected failure for missing category in group 14';
     EXCEPTION
         WHEN OTHERS THEN
@@ -111,7 +111,7 @@ BEGIN
 
     -- 4) Non-positive value should fail
     BEGIN
-        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 0::numeric, 'USDT', 'neg4');
+        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 0::numeric, 'USDT', 'neg4');
         RAISE EXCEPTION 'Expected failure for non-positive spend value';
     EXCEPTION
         WHEN OTHERS THEN

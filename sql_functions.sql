@@ -23,7 +23,9 @@ DROP FUNCTION IF EXISTS public.get_group_balance_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_all_balances(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_all_balances_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_remains(bigint, character);
+DROP FUNCTION IF EXISTS public.get_remains(bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_remains_v2(bigint, character);
+DROP FUNCTION IF EXISTS public.get_remains_v2(bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_category_balance_with_currency(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_balance_with_currency_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_balance(bigint, integer, varchar);
@@ -40,6 +42,7 @@ DROP FUNCTION IF EXISTS public.mirror_cash_flow_row_to_allocation_postings(bigin
 DROP FUNCTION IF EXISTS public.get_categories_name(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_categories_name_v2(bigint, integer);
 DROP FUNCTION IF EXISTS public.get_category_id_from_name(varchar);
+DROP FUNCTION IF EXISTS public.get_category_id_from_name(bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_category_id_from_name_v2(bigint, varchar);
 DROP FUNCTION IF EXISTS public.find_allocation_category_node_id_by_name(bigint, varchar);
 DROP FUNCTION IF EXISTS public.get_categories_id(bigint, integer);
@@ -99,58 +102,8 @@ AS $function$
 $function$;
 
 
--- LEGACY cash_flow-backed category balance helper.
--- App read-paths use get_category_balance_v2(...); keep this for reference/compare/rollback.
-CREATE OR REPLACE FUNCTION public.get_category_balance(
-    _user_id bigint,
-    _category_id integer,
-    _currency CHARACTER VARYING DEFAULT 'RUB'::CHARACTER VARYING
-) RETURNS NUMERIC
-LANGUAGE plpgsql
-AS $function$
-DECLARE
-    result NUMERIC;
-BEGIN
-    WITH _exchange_rates AS (
-        SELECT DISTINCT ON (currency)
-            currency,
-            rate
-        FROM
-            exchange_rates
-        ORDER BY
-            currency, datetime DESC
-    ),
-    cash_flow_data AS (
-        SELECT
-            CASE
-                WHEN category_id_to = _category_id THEN value
-                ELSE -value
-            END AS value,
-            currency
-        FROM
-            cash_flow
-        WHERE
-            (_category_id IN (category_id_to, category_id_from))
-            AND users_id IN (SELECT get_users_id(_user_id))
-    )
-    SELECT
-        SUM(cf.value / (src_rate.rate / target_rate.rate))
-    INTO result
-    FROM
-        cash_flow_data cf
-    JOIN _exchange_rates src_rate
-        ON src_rate.currency = cf.currency
-    JOIN _exchange_rates target_rate
-        ON target_rate.currency = _currency;
-
-    RETURN result;
-END;
-$function$;
-
-
 -- Ledger-backed category balance helper.
--- Mirrors get_category_balance(...) semantics while reading allocation_postings.
-CREATE OR REPLACE FUNCTION public.get_category_balance_v2(
+CREATE OR REPLACE FUNCTION public.get_category_balance(
     _user_id bigint,
     _category_id integer,
     _currency CHARACTER VARYING DEFAULT 'RUB'::CHARACTER VARYING
@@ -199,8 +152,7 @@ END;
 $function$;
 
 
--- Возвращает баланс allocation-ноды по новому graph-native ledger.
--- Используется как read-helper во время перехода с cash_flow на allocation_postings.
+-- Возвращает баланс allocation-ноды по graph-native ledger.
 CREATE OR REPLACE FUNCTION public.get_allocation_node_balances(
     _user_id bigint,
     _node_ids bigint[],
@@ -267,8 +219,7 @@ AS $function$
 $function$;
 
 
--- Возвращает баланс allocation-ноды по новому graph-native ledger.
--- Используется как read-helper во время перехода с cash_flow на allocation_postings.
+-- Возвращает баланс allocation-ноды по graph-native ledger.
 CREATE OR REPLACE FUNCTION public.get_allocation_node_balance(
     _user_id bigint,
     _node_id bigint,
@@ -841,143 +792,8 @@ END;
 $function$;
 
 
--- Mirror one legacy cash_flow row into allocation_postings when matching allocation nodes exist.
--- Used by manual runtime write-paths while cash_flow remains the compatibility ledger.
-CREATE OR REPLACE FUNCTION public.mirror_cash_flow_row_to_allocation_postings(
-    _cash_flow_id bigint,
-    _kind text,
-    _subkind text,
-    _origin text,
-    _extra_metadata jsonb DEFAULT '{}'::jsonb
-) RETURNS void
-LANGUAGE plpgsql
-AS $function$
-DECLARE
-    _cf public.cash_flow%ROWTYPE;
-    _from_node_id bigint;
-    _to_node_id bigint;
-BEGIN
-    SELECT *
-    INTO _cf
-    FROM public.cash_flow
-    WHERE id = _cash_flow_id;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'cash_flow row % not found', _cash_flow_id;
-    END IF;
-
-    IF EXISTS (
-        SELECT 1
-        FROM public.allocation_postings ap
-        WHERE ap.metadata->>'legacy_cash_flow_id' = _cash_flow_id::text
-    ) THEN
-        RETURN;
-    END IF;
-
-    IF EXISTS (
-        SELECT 1
-        FROM public.allocation_backfill_tombstones tomb
-        WHERE tomb.legacy_cash_flow_id = _cash_flow_id
-    ) THEN
-        RETURN;
-    END IF;
-
-    IF COALESCE(_cf.value, 0) <= 0 THEN
-        RETURN;
-    END IF;
-
-    SELECT an.id
-    INTO _from_node_id
-    FROM public.allocation_nodes an
-    WHERE an.active
-      AND an.legacy_category_id = _cf.category_id_from
-      AND (
-          an.user_id = _cf.users_id
-          OR an.user_group_id IN (
-              SELECT ugm.user_group_id
-              FROM public.user_group_memberships ugm
-              WHERE ugm.user_id = _cf.users_id
-                AND ugm.active
-          )
-      )
-    ORDER BY
-        CASE WHEN an.user_id = _cf.users_id THEN 0 ELSE 1 END,
-        an.id
-    LIMIT 1;
-
-    IF _from_node_id IS NULL THEN
-        _from_node_id := public.ensure_allocation_compatibility_node(
-            _cf.users_id,
-            _cf.category_id_from
-        );
-    END IF;
-
-    SELECT an.id
-    INTO _to_node_id
-    FROM public.allocation_nodes an
-    WHERE an.active
-      AND an.legacy_category_id = _cf.category_id_to
-      AND (
-          an.user_id = _cf.users_id
-          OR an.user_group_id IN (
-              SELECT ugm.user_group_id
-              FROM public.user_group_memberships ugm
-              WHERE ugm.user_id = _cf.users_id
-                AND ugm.active
-          )
-      )
-    ORDER BY
-        CASE WHEN an.user_id = _cf.users_id THEN 0 ELSE 1 END,
-        an.id
-    LIMIT 1;
-
-    IF _to_node_id IS NULL THEN
-        _to_node_id := public.ensure_allocation_compatibility_node(
-            _cf.users_id,
-            _cf.category_id_to
-        );
-    END IF;
-
-    IF _from_node_id IS NULL AND _to_node_id IS NULL THEN
-        RETURN;
-    END IF;
-
-    INSERT INTO public.allocation_postings(
-        "datetime",
-        user_id,
-        from_node_id,
-        to_node_id,
-        value,
-        currency,
-        description,
-        metadata
-    )
-    VALUES (
-        _cf.datetime,
-        _cf.users_id,
-        _from_node_id,
-        _to_node_id,
-        _cf.value,
-        _cf.currency,
-        _cf.description,
-        jsonb_strip_nulls(
-            jsonb_build_object(
-                'kind', _kind,
-                'subkind', _subkind,
-                'origin', _origin,
-                'legacy_cash_flow_id', _cf.id,
-                'legacy_category_id_from', _cf.category_id_from,
-                'legacy_category_id_to', _cf.category_id_to
-            ) || COALESCE(_extra_metadata, '{}'::jsonb)
-        )
-    );
-END;
-$function$;
-
-
 -- Возвращает id активной allocation-ноды пользователя по slug.
--- Используется только в переходной monthly-логике:
--- по slug ищем новую root-ноду, если она уже собрана для конкретной ветки.
+-- Runtime helper: resolve active allocation node by slug for the current user or household.
 CREATE OR REPLACE FUNCTION public.find_allocation_scenario_binding_node_id(
     _user_id bigint,
     _scenario_kind text,
@@ -1089,152 +905,6 @@ AS $function$
     LIMIT 1;
 $function$;
 
-
--- LEGACY bridge: returns legacy_category_id of the remainder leaf.
--- Keep for reference/compatibility while source metadata still carries legacy ids.
-CREATE OR REPLACE FUNCTION public.find_allocation_remainder_legacy_category_id(_user_id bigint, _source_slug text)
- RETURNS integer
- LANGUAGE sql
- STABLE
-AS $function$
-    SELECT target.legacy_category_id
-    FROM public.allocation_nodes target
-    WHERE target.id = public.find_allocation_remainder_node_id(_user_id, _source_slug)
-    LIMIT 1;
-$function$;
-
-
--- Сумма legacy-процентов внутри старой category_group.
--- Нужна только на переходном этапе, чтобы остаток считался так же,
--- как раньше в distribute_to_group(), даже если сами проводки уже пишет новый каскад.
-CREATE OR REPLACE FUNCTION public.get_group_percent_sum(_user_id bigint, _group_id integer)
- RETURNS numeric
- LANGUAGE sql
- STABLE
-AS $function$
-    SELECT COALESCE(SUM(c.percent), 0)
-    FROM public.categories c
-    JOIN public.categories_category_groups ccg
-      ON ccg.categories_id = c.id
-    WHERE ccg.users_id = _user_id
-      AND ccg.category_groyps_id = _group_id;
-$function$;
-
-
--- Legacy compatibility: some local/test mappings historically counted
--- investition_second into the caller's investment leaf as well.
--- Keep this narrow and mapping-driven so normal users are not affected.
-CREATE OR REPLACE FUNCTION public.insert_monthly_compat_investition_second(
-    _user_id bigint,
-    _amount numeric,
-    _currency varchar DEFAULT 'RUB',
-    _description text DEFAULT 'monthly distribute'
-)
- RETURNS void
- LANGUAGE plpgsql
-AS $function$
-DECLARE
-    _investment_category_id integer;
-BEGIN
-    IF _amount IS NULL OR _amount <= 0 THEN
-        RETURN;
-    END IF;
-
-    _investment_category_id := (
-        SELECT get_categories_id(_user_id, 1)
-    );
-
-    IF _investment_category_id IS NULL THEN
-        RETURN;
-    END IF;
-
-    -- Only apply the compatibility posting when the investment leaf is also
-    -- attached to legacy group 15. This matches the known dirty local mapping
-    -- and avoids changing the normal production path.
-    IF NOT EXISTS (
-        SELECT 1
-        FROM public.categories_category_groups ccg
-        WHERE ccg.users_id = _user_id
-          AND ccg.categories_id = _investment_category_id
-          AND ccg.category_groyps_id = 15
-    ) THEN
-        RETURN;
-    END IF;
-
-    INSERT INTO public.cash_flow(
-        users_id,
-        category_id_from,
-        category_id_to,
-        value,
-        currency,
-        description
-    )
-    VALUES (
-        _user_id,
-        15,
-        _investment_category_id,
-        _amount,
-        _currency,
-        COALESCE(_description, 'monthly distribute')
-    );
-END;
-$function$;
-
-
--- принимает user_id, группу категорий по которым распределить и id категории откуда поступили деньги, распределяет деньги по указанной группе и cумму для распределения, возвращает остаток  
-create or replace function distribute_to_group(
-    _user_id bigint, 
-    _group_id int, 
-    _income_category_id int, 
-    _income_value numeric, 
-    _currency varchar default 'RUB'
-) returns numeric
-language plpgsql
-as $function$
-declare 
-    _reminder numeric;
-    _total_percent numeric;
-begin
-    -- Проверка входных параметров
-    if _income_value <= 0 then
-        return 0;
-    end if;
-
-    -- Проверка существования группы для пользователя
-    if not exists (
-        select 1 
-        from categories_category_groups 
-        where category_groyps_id = _group_id and users_id = _user_id
-    ) then
-        raise exception 'Group ID % does not exist for user %', _group_id, _user_id;
-    end if;
-
-    -- Суммарный процент по группе для последующего расчета остатка
-    select coalesce(sum("percent"), 0)
-      into _total_percent
-    from categories c
-    join categories_category_groups ccg on c.id = ccg.categories_id
-    where ccg.category_groyps_id = _group_id and users_id = _user_id;
-
-    -- Вставка распределения
-    insert into cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
-    select ccg.users_id, _income_category_id, c.id, _income_value * c."percent", _currency, 'monthly distribute'
-    from categories c
-    join categories_category_groups ccg on c.id = ccg.categories_id
-    where ccg.category_groyps_id = _group_id and users_id = _user_id and _income_value > 0;
-
-    -- Расчет остатка
-    _reminder := _income_value * (1 - _total_percent);
-    raise notice 'Distributed % to group % for user %', _income_value, _group_id, _user_id;
-
-    return _reminder;
-
-exception
-    when others then
-        raise notice 'Error occurred while distributing income for user %: %', _user_id, sqlerrm;
-        return null;
-end
-$function$;
 
 -- Определяет внутренние тех.операции, которые не должны попадать в month_earnings/month_spend.
 -- Поддерживает как текущие префиксы, так и явный флаг в description: "internal:"
@@ -1560,13 +1230,13 @@ $function$;
 
 
 -- Graph-native monthly distribution.
--- Preserves the Telegram report shape from legacy monthly_distribute(),
+-- Preserves the Telegram report shape from the previous monthly contract,
 -- but intentionally uses clean monthly semantics for new paths:
 -- explicit investment, explicit family contribution, then clean remainder split.
 -- Важно:
 -- 1) не возвращаться к грязным legacy-дублям percent/group formulas;
 -- 2) менять её нужно по одной ветке и после каждого изменения прогонять SQL checks;
--- 3) legacy monthly_distribute() сохраняется ниже как reference/rollback и не должна вызываться из public.monthly().
+-- 3) не добавлять cash_flow/reference fallback в runtime.
 CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(
     _user_id bigint
 )
@@ -2255,7 +1925,6 @@ $function$;
 
 
 -- Внутренний allocation entrypoint для monthly cascade.
--- Legacy monthly_distribute() сохраняется отдельно как reference/rollback.
 -- Runtime requires explicit source allocation node; legacy category id may remain
 -- only as compatibility metadata/validation against that node.
 CREATE OR REPLACE FUNCTION public.monthly_distribute_allocation(
@@ -2459,119 +2128,8 @@ END;
 $function$;
 
 
--- LEGACY: старая monthly-функция.
--- Сохраняется в базе только как reference/rollback для compare и аварийного отката.
--- Новый public.monthly() её больше не вызывает.
--- принимает id пользователя и id категории прихода и распределяет по всем категориям								
-CREATE OR REPLACE FUNCTION public.monthly_distribute(_user_id bigint, _income_category integer)
- RETURNS jsonb
- LANGUAGE plpgsql
-AS $function$
-DECLARE
-    _sum_value numeric(10,2);
-    _sum_value_second numeric(10,2);
-    _value_for_second_member numeric;
-    _free_money numeric(10,2);
-    _second_member_id bigint;
-    _second_member_free_money numeric;
-    _general_categories numeric;
-    _general_categories_second numeric;
-    _sum_earnings NUMERIC;
-    _sum_spend NUMERIC;
-BEGIN
-    PERFORM transact_from_group_to_category(_user_id, 11, (SELECT get_categories_id(_user_id, 13)));    -- Переводим месячные доходы в одну категорию
-    PERFORM transact_from_group_to_category(_user_id, 12, (SELECT get_categories_id(_user_id, 7)));    -- Переводим другие доходы в категорию "подарки себе"
-    _free_money := (SELECT get_category_balance(_user_id, (SELECT get_categories_id(_user_id, 6)), 'RUB'));    -- Получение остатка свободных денег
-    PERFORM distribute_to_group(_user_id, 7, (SELECT get_categories_id(_user_id, 6)), _free_money, 'RUB');    -- Перевод части остатка на подарки себе
-    INSERT INTO cash_flow (users_id, category_id_from, category_id_to, value, currency, description)    -- Увеличение резерва на 1% за счет должников
-    SELECT _user_id, id, 
-           (SELECT get_categories_id(_user_id, 9)), 
-           ABS("sum") * 0.01, 'RUB', 'monthly distribute'
-    FROM (
-        SELECT c.id, get_category_balance(_user_id, c.id, 'RUB') AS "sum"
-        FROM categories c
-        JOIN categories_category_groups ccg ON c.id = ccg.categories_id
-        WHERE ccg.users_id = _user_id AND ccg.category_groyps_id = 8
-    ) debts
-    WHERE "sum" < 0;
-    _sum_value := (SELECT get_category_balance(_user_id, _income_category, 'RUB'));    -- Сумма дохода за месяц
-    _value_for_second_member := _sum_value * (SELECT "percent" FROM categories WHERE id = 15);    -- Расчет семейного взноса
-    _sum_value_second := distribute_to_group(_user_id, 1, _income_category, _sum_value, 'RUB');    -- Перевод денег на НЗ 
-    _free_money := distribute_to_group(_user_id, 2, _income_category, _sum_value - _value_for_second_member, 'RUB');   -- Распределение свободных денег
-    _second_member_id := (SELECT user_id FROM get_users_id(_user_id) WHERE user_id != _user_id);    -- Получение ID второго пользователя
-    _second_member_free_money := distribute_to_group(_second_member_id, 3, 15, _value_for_second_member, 'RUB');    -- Распределение денег для второго пользователя
-    PERFORM distribute_to_group(_user_id, 6, _income_category, _free_money - _sum_value * 0.1, 'RUB');    -- Внесение свободных денег в резерв
-    PERFORM distribute_to_group(_second_member_id, 6, 15, _second_member_free_money, 'RUB');   -- Внесение свободных денег в резерв второго пользователя
-    _general_categories := (SELECT SUM((_sum_value - _value_for_second_member) * c."percent")    -- Подсчет общих категорий
-                            FROM categories c
-                            JOIN categories_category_groups ccg ON c.id = ccg.categories_id
-                            WHERE ccg.category_groyps_id = 4);
-
-    _general_categories_second := (SELECT SUM(_value_for_second_member * c."percent")
-                                   FROM categories c
-                                   JOIN categories_category_groups ccg ON c.id = ccg.categories_id
-                                   WHERE ccg.category_groyps_id = 4);
-    _sum_earnings := (SELECT COALESCE(SUM(value), 0)   -- Подсчет доходов за месяц
-                      FROM cash_flow
-                      WHERE users_id = _user_id
-                      AND category_id_from IS NULL
-                      AND NOT public.is_technical_cashflow_description(description)
-                      AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month');
-	_sum_spend := (SELECT COALESCE(SUM(value), 0)  -- Подсчет расходов за месяц
-                   FROM cash_flow
-                   WHERE users_id = _user_id
-                   AND category_id_to IS NULL
-                   AND NOT public.is_technical_cashflow_description(description)
-                   AND date_trunc('month', datetime) = date_trunc('month', now()) - INTERVAL '1 month');
-    RETURN jsonb_build_object(   -- Возвращение результата
-        'user_id', _user_id,
-        'общие_категории', _general_categories,
-        'second_user_id', _second_member_id,
-        'семейный_взнос', _value_for_second_member,
-        'second_user_pay', _general_categories_second,
-        'investition', _sum_value * 0.1,
-        'investition_second', _value_for_second_member * 0.1,
-        'month_earnings', _sum_earnings,
-        'month_spend', _sum_spend
-    );
-END;
-$function$;
-
--- принимает user_id, id группы и id категории и переводит все деньги с группы на категорию 
-create or replace function transact_from_group_to_category(_user_id bigint, _group_id int, _category_id int)
- returns text
- language plpgsql
-as $function$
-begin
-	insert into cash_flow (users_id, category_id_from, category_id_to, value, currency, description)
-	select users_id, categories_id, _category_id, balance, 'RUB', 'monthly distribute'  
-	from 
-		(select users_id, categories_id, get_category_balance(_user_id, categories_id) as balance 
-		 from categories_category_groups ccg 
-		 where users_id = _user_id and category_groyps_id = _group_id) sub 
-	where balance > 0;
-
-return 'OK';
-		end
-$function$;
-
-
-
--- принимает user_id и id группы и возвращает id всех категорий группы
-CREATE OR REPLACE FUNCTION public.get_categories_id(_user_id bigint, _groyps_id integer)
- RETURNS TABLE(categories_id integer)
- LANGUAGE plpgsql
-AS $function$
-begin
-return query (select ccg.categories_id from categories_category_groups ccg where ccg.users_id = _user_id and ccg.category_groyps_id = _groyps_id);
-		end
-$function$
-;
-
-
-
--- Ledger-backed candidate for /history. Kept separate until delete flow is migrated.
-CREATE OR REPLACE FUNCTION public.get_last_transaction_v2(_user_id bigint, _num int)
+-- Ledger-backed history helper.
+CREATE OR REPLACE FUNCTION public.get_last_transaction(_user_id bigint, _num int)
 RETURNS TABLE (
     id bigint,
     datetime timestamp,
@@ -2670,8 +2228,8 @@ END;
 $function$;
 
 -- Allocation-primary spend write helper.
--- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
-CREATE OR REPLACE FUNCTION public.insert_spend_v2(_users_id bigint, _category_name_from character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
+-- Runtime writes only allocation_postings; legacy cash_flow stays as restore/backfill source.
+CREATE OR REPLACE FUNCTION public.insert_spend(_users_id bigint, _category_name_from character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
@@ -2726,8 +2284,8 @@ $function$
 ;
 
 -- Allocation-primary revenue write helper.
--- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
-CREATE OR REPLACE FUNCTION public.insert_revenue_v2(_users_id bigint, _category_to character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
+-- Runtime writes only allocation_postings; legacy cash_flow stays as restore/backfill source.
+CREATE OR REPLACE FUNCTION public.insert_revenue(_users_id bigint, _category_to character varying, _value numeric DEFAULT 0, _currency character varying DEFAULT 'RUB'::character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
@@ -2784,7 +2342,7 @@ $function$
 
 
 -- Allocation-backed category lookup for UI category lists.
-CREATE OR REPLACE FUNCTION public.get_categories_name_v2(_user_id bigint, _groyps_id integer)
+CREATE OR REPLACE FUNCTION public.get_categories_name(_user_id bigint, _groyps_id integer)
  RETURNS TABLE("name" varchar)
  LANGUAGE sql
  STABLE
@@ -2906,8 +2464,8 @@ return query (SELECT u.id FROM users u );
 $function$
 ;	
 
--- Ledger-backed candidate for get_group_balance(...).
-CREATE OR REPLACE FUNCTION public.get_group_balance_v2(_user_id bigint, _groyps_id integer)
+-- Ledger-backed group balance helper.
+CREATE OR REPLACE FUNCTION public.get_group_balance(_user_id bigint, _groyps_id integer)
  RETURNS TABLE(balance NUMERIC)
  LANGUAGE sql
  STABLE
@@ -2931,19 +2489,19 @@ AS $function$
               )
           )
     )
-    SELECT SUM(public.get_category_balance_v2(_user_id, gc.legacy_category_id, 'RUB')) AS balance
+    SELECT SUM(public.get_category_balance(_user_id, gc.legacy_category_id, 'RUB')) AS balance
     FROM grouped_categories gc;
 $function$
 ;
 
--- Ledger-backed candidate for get_remains(...).
-CREATE OR REPLACE FUNCTION public.get_remains_v2(_user_id bigint, _category CHARACTER)
+-- Ledger-backed category-name balance helper.
+CREATE OR REPLACE FUNCTION public.get_remains(_user_id bigint, _category varchar)
  RETURNS numeric
  LANGUAGE sql
  STABLE
 AS $function$
     SELECT COALESCE(
-        public.get_category_balance_v2(
+        public.get_category_balance(
             _user_id,
             (
                 SELECT an.legacy_category_id
@@ -2972,8 +2530,8 @@ AS $function$
 $function$
 ;
 
--- Ledger-backed candidate for get_all_balances(...).
-CREATE OR REPLACE FUNCTION public.get_all_balances_v2(_user_id bigint, _group_id integer)
+-- Ledger-backed grouped balances helper.
+CREATE OR REPLACE FUNCTION public.get_all_balances(_user_id bigint, _group_id integer)
 RETURNS TABLE(category_name varchar, balance numeric(20, 2))
 LANGUAGE sql
 STABLE
@@ -3002,7 +2560,7 @@ AS $function$
     )
     SELECT
         gc.category_name::varchar,
-        COALESCE(public.get_category_balance_v2(_user_id, gc.legacy_category_id, 'RUB'), 0)::numeric(20, 2) AS balance
+        COALESCE(public.get_category_balance(_user_id, gc.legacy_category_id, 'RUB'), 0)::numeric(20, 2) AS balance
     FROM grouped_categories gc
     ORDER BY gc.category_name;
 $function$;
@@ -3025,8 +2583,8 @@ $function$
 ;  
 
 -- Allocation-primary manual exchange.
--- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
-CREATE OR REPLACE FUNCTION public.exchange_v2(_users_id bigint, _category_id int, _value_out numeric, _currency_out character VARYING, _value_in numeric, _currency_in character varying)
+-- Runtime writes only allocation_postings; legacy cash_flow stays as restore/backfill source.
+CREATE OR REPLACE FUNCTION public.exchange(_users_id bigint, _category_id int, _value_out numeric, _currency_out character VARYING, _value_in numeric, _currency_in character varying)
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
@@ -3229,7 +2787,7 @@ $function$
 ;
 
 -- Allocation-backed user-aware category lookup by display name.
-CREATE OR REPLACE FUNCTION public.get_category_id_from_name_v2(_user_id bigint, _category_name varchar)
+CREATE OR REPLACE FUNCTION public.get_category_id_from_name(_user_id bigint, _category_name varchar)
  RETURNS int
  LANGUAGE sql
  STABLE
@@ -3282,8 +2840,8 @@ AS $function$
 $function$
 ;
 
--- Ledger-backed candidate for get_category_balance_with_currency(...).
-CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency_v2(_user_id bigint, _category_id integer)
+-- Ledger-backed multi-currency category balance helper.
+CREATE OR REPLACE FUNCTION public.get_category_balance_with_currency(_user_id bigint, _category_id integer)
  RETURNS TABLE (value numeric, currency varchar)
  LANGUAGE sql
 AS $function$
@@ -3313,7 +2871,7 @@ $function$
 ;
 
 -- Ledger-backed currency list.
-CREATE OR REPLACE FUNCTION public.get_currency_v2()
+CREATE OR REPLACE FUNCTION public.get_currency()
  RETURNS TABLE(transact varchar)
  LANGUAGE sql
  STABLE
@@ -3325,8 +2883,8 @@ $function$
 ;
 
 -- Allocation-primary spend write helper that requires an automatic exchange.
--- Runtime writes only allocation_postings; legacy cash_flow stays as historical/backfill source.
-CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange_v2(_users_id bigint, _category_name_from character varying, _value numeric, _currency character varying, _description text DEFAULT NULL::text)
+-- Runtime writes only allocation_postings; legacy cash_flow stays as restore/backfill source.
+CREATE OR REPLACE FUNCTION public.insert_spend_with_exchange(_users_id bigint, _category_name_from character varying, _value numeric, _currency character varying, _description text DEFAULT NULL::text)
  RETURNS text
  LANGUAGE plpgsql
 AS $function$

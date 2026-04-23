@@ -244,7 +244,7 @@ Scheduler:
 
 ## Monthly Migration
 - Для поэтапного перевода месячной логики используется `public.monthly_distribute_cascade(user_id)`.
-- Legacy `public.monthly_distribute(...)` сохранена в базе как reference/rollback функция и больше не используется из `public.monthly()`.
+- Legacy `public.monthly_distribute(...)` удалена из runtime schema; откат делается возвратом предыдущего application/sql deploy, а не вызовом старой функции.
 - `public.monthly_distribute_cascade(user_id)` сохраняет форму Telegram JSON, но использует clean monthly semantics: investment и family contribution отделяются явно, дальше распределяется clean remainder.
 - Каскадные ветки и подготовительные шаги переводятся по одной, с SQL checks после каждого изменения.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `public.monthly_distribute_cascade(...)`; monthly-path больше не зависит от переходных helper-вызовов.
@@ -255,7 +255,7 @@ Scheduler:
   - `get_allocation_node_balance(...)`
   - `get_allocation_node_balance_by_slug(...)`
 - App runtime manual transactions уже читают и пишут через `allocation_postings`.
-- Финальные критерии замены legacy monthly-функции зафиксированы в `TODO_monthly_cascade.md`, секция `Finalization Checklist`.
+- Runtime-контракт после cutover: новые операции пишутся только в `allocation_postings`; старый `cash_flow` используется только как restore/backfill input.
 
 ### Monthly Allocation Graph
 
@@ -388,14 +388,14 @@ graph TD
   - `currency`
   - `description`
   - `metadata`
-- Leaf-проводки нового allocation-движка пишутся только в `allocation_postings`; legacy `cash_flow` остаётся historical/backfill source.
-- Простые manual spend/revenue write-paths уже ledger-only и больше не создают новые `cash_flow` rows.
-- Monthly allocation helpers уже читают source balance, `month_earnings` и `month_spend` из `allocation_postings`, а не из `cash_flow`.
+- Leaf-проводки allocation-движка пишутся только в `allocation_postings`; legacy `cash_flow` остаётся historical restore/backfill source.
+- Manual spend/revenue/exchange write-paths ledger-only и больше не создают новые `cash_flow` rows.
+- Monthly allocation helpers читают source balance, `month_earnings` и `month_spend` из `allocation_postings`, а не из `cash_flow`.
 - `monthly_distribute_cascade()` уже читает source balances через graph-native `get_allocation_node_balance(...)` по source node id.
 - `monthly_distribute_cascade()` уже берёт source category membership из `allocation_node_groups`, а не напрямую из `categories_category_groups`.
 - `free_to_gifts` уже берёт free balance через `get_allocation_node_balance(...)` по remainder node id.
 - `monthly_distribute_cascade()` уже передаёт source category node id в `allocation_distribute(...)` для prep-веток, reserve, `free_to_gifts` и основного `salary_primary` split.
-  `legacy_category_id` пока остаётся compatibility-полем для балансов, metadata и bridge/backfill, но больше не является единственным способом выбрать debit-node внутри monthly runtime.
+  `legacy_category_id` остаётся compatibility-полем для metadata/restore bridge, но не является runtime source of truth.
 - Вызовы `allocation_distribute(...)` из `monthly_distribute_cascade()` больше не передают legacy source category id; он выводится из source node только как compatibility metadata.
 - Low-level `allocation_distribute(...)` больше не создаёт compatibility bridge-ноду на лету, если source node не найден по legacy category id.
   Runtime должен либо передать явный `source_category_node_id`, либо иметь уже существующую allocation-ноду для этой legacy category.
@@ -409,39 +409,35 @@ graph TD
 - Partner bridge `family_contribution_out -> family_contribution_in` резолвит source leaf через `allocation_scenario_node_bindings`, без metadata fallback.
 - Graph-native leaf-ноды больше не обязаны иметь `legacy_category_id`; он пишется в metadata только если присутствует на source/target node.
 - Household membership helper `get_users_id(...)` читает только `user_group_memberships`.
-- Для безопасного наблюдения за новым ledger добавлен read-only helper:
+- Canonical allocation-backed SQL API:
   - `public.get_last_allocation_postings(user_id, num)`
-  - `public.get_last_transaction_v2(user_id, num)` как ledger-backed candidate для `/history`
+  - `public.get_last_transaction(user_id, num)`
   - `public.get_daily_allocation_transactions(user_id)`
-  - `public.get_category_balance_v2(user_id, category_id, currency)`
-  - `public.get_group_balance_v2(user_id, group_id)`
-  - `public.get_remains_v2(user_id, category_name)`
-  - `public.get_all_balances_v2(user_id, group_id)`
-  - `public.get_category_balance_with_currency_v2(user_id, category_id)`
-  - `public.get_currency_v2()`
-  - `/history` читает ledger-backed `get_last_transaction_v2()`
-  - delete-flow в `/history` удаляет `allocation_postings` и tombstone'ит `legacy_cash_flow_id`, чтобы backfill не воскрешал удалённую историю
-- daily scheduler уже использует ledger-backed `get_daily_transactions()`
-- `/balance` и spend balance checks уже используют ledger-backed v2 balance helpers.
-- Category UI lookup уже использует allocation-backed helpers:
-  - `public.get_categories_name_v2(user_id, group_id)`
-  - `public.get_category_id_from_name_v2(user_id, category_name)`
-- Allocation-primary write candidates are available for manual transactions:
-  - `public.insert_spend_v2(...)`
-  - `public.insert_revenue_v2(...)`
-  - `public.insert_spend_with_exchange_v2(...)`
-  - `public.exchange_v2(...)`
-  App write-paths for manual spend/revenue, auto-exchange spend, and manual exchange already use these v2 functions.
+  - `public.get_category_balance(user_id, category_id, currency)`
+  - `public.get_group_balance(user_id, group_id)`
+  - `public.get_remains(user_id, category_name)`
+  - `public.get_all_balances(user_id, group_id)`
+  - `public.get_category_balance_with_currency(user_id, category_id)`
+  - `public.get_currency()`
+  - `/history` читает ledger-backed `get_last_transaction()`
+  - delete-flow в `/history` удаляет `allocation_postings` и tombstone'ит `legacy_cash_flow_id`, чтобы restore/backfill не воскрешал удалённую историю
+- daily scheduler использует ledger-backed `get_daily_transactions()`
+- `/balance` и spend balance checks используют canonical ledger-backed balance helpers.
+- Category UI lookup использует allocation-backed helpers:
+  - `public.get_categories_name(user_id, group_id)`
+  - `public.get_category_id_from_name(user_id, category_name)`
+- Allocation-primary write helpers for manual transactions:
+  - `public.insert_spend(...)`
+  - `public.insert_revenue(...)`
+  - `public.insert_spend_with_exchange(...)`
+  - `public.exchange(...)`
+  App write-paths for manual spend/revenue, auto-exchange spend, and manual exchange use these canonical functions.
   Manual spend/revenue, manual exchange, and auto-exchange spend are ledger-only.
-  `exchange_v2(...)` тоже больше не создаёт compatibility bridge-ноду на лету: wallet/category allocation node должна существовать заранее.
-- Старый app-facing SQL API удалён:
-  `get_last_transaction(...)`, `get_categories_name(...)`, `get_group_balance(...)`,
-  `get_remains(...)`, `get_all_balances(...)`, `get_category_id_from_name(...)`,
-  `get_category_balance_with_currency(...)`, `get_currency()`,
-  `insert_spend(...)`, `insert_revenue(...)`, `insert_spend_with_exchange(...)`, `exchange(...)`.
-- В SQL пока ещё остаётся отдельный legacy monthly/reference cluster, не используемый app runtime:
+  `exchange(...)` тоже больше не создаёт compatibility bridge-ноду на лету: wallet/category allocation node должна существовать заранее.
+- Transitional `*_v2` app-facing SQL API удалён; в базе остаются только canonical allocation-backed names.
+- Legacy monthly/reference cluster удалён из runtime schema:
   `monthly_distribute(...)`, `distribute_to_group(...)`, `transact_from_group_to_category(...)`,
-  `get_category_balance(...)`, `get_categories_id(...)`.
+  `get_categories_id(...)` и cash_flow-backed balance helper.
 - При развёртывании выполняется idempotent backfill `cash_flow -> allocation_postings` через [scripts/backfill_cash_flow_to_allocation_postings.sql](/Users/kras/Documents/My Python progects/finance_telegram_bot/scripts/backfill_cash_flow_to_allocation_postings.sql).
 - Canonical SQL entrypoint для этого шага: `public.bootstrap_allocation_ledger_from_legacy()`.
   Скрипт backfill теперь только вызывает эту функцию, чтобы prod-bootstrap оставался в одном месте и не дублировался между `.sql` файлами.

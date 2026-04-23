@@ -1,4 +1,4 @@
--- checks for get_group_balance_v2 / get_all_balances_v2 / get_category_balance_with_currency_v2
+-- checks for get_group_balance / get_all_balances / get_category_balance_with_currency
 -- Run with: psql -v ON_ERROR_STOP=1 -f tests/sql/balance_functions_checks.sql
 
 BEGIN;
@@ -34,7 +34,7 @@ SELECT 902101, id FROM user_groups WHERE slug = 'balance_test_group';
 INSERT INTO user_group_memberships(user_id, user_group_id)
 SELECT 902102, id FROM user_groups WHERE slug = 'balance_test_group';
 
--- category groups now map through allocation_node_groups for *_v2 balance helpers
+-- category groups now map through allocation_node_groups for canonical balance helpers
 INSERT INTO category_groups(id, "name", description) VALUES
   (9808, 'test_spend_group', ''),
   (9814, 'test_all_group', '');
@@ -100,8 +100,8 @@ DECLARE
     food_rub numeric;
 BEGIN
     -- single category balances in RUB
-    SELECT public.get_category_balance_v2(902101, 902211, 'RUB') INTO food_balance;
-    SELECT public.get_category_balance_v2(902101, 902212, 'RUB') INTO crypto_balance;
+    SELECT public.get_category_balance(902101, 902211, 'RUB') INTO food_balance;
+    SELECT public.get_category_balance(902101, 902212, 'RUB') INTO crypto_balance;
 
     IF food_balance IS NULL OR abs(food_balance - 8000) > 1e-9 THEN
         RAISE EXCEPTION 'Expected FoodTest RUB balance 8000, got %', food_balance;
@@ -111,32 +111,32 @@ BEGIN
         RAISE EXCEPTION 'Expected CryptoTest RUB balance 3500, got %', crypto_balance;
     END IF;
 
-    SELECT public.get_remains_v2(902101, 'FoodTest') INTO food_remains;
+    SELECT public.get_remains(902101, 'FoodTest') INTO food_remains;
     IF food_remains IS NULL OR abs(food_remains - 8000) > 1e-9 THEN
         RAISE EXCEPTION 'Expected FoodTest remains 8000, got %', food_remains;
     END IF;
 
     -- group balance should equal sum of categories
-    SELECT balance INTO group_balance FROM public.get_group_balance_v2(902101, 9808) LIMIT 1;
+    SELECT balance INTO group_balance FROM public.get_group_balance(902101, 9808) LIMIT 1;
     IF group_balance IS NULL OR abs(group_balance - 11500) > 1e-9 THEN
         RAISE EXCEPTION 'Expected group balance 11500, got %', group_balance;
     END IF;
 
     SELECT COALESCE(SUM(balance), 0) INTO all_sum
-    FROM public.get_all_balances_v2(902101, 9808);
+    FROM public.get_all_balances(902101, 9808);
 
     IF abs(all_sum - 11500) > 1e-9 THEN
-        RAISE EXCEPTION 'Expected sum(get_all_balances_v2)=11500, got %', all_sum;
+        RAISE EXCEPTION 'Expected sum(get_all_balances)=11500, got %', all_sum;
     END IF;
 
     -- currency split for FoodTest
     SELECT value INTO food_usd
-    FROM public.get_category_balance_with_currency_v2(902101, 902211)
+    FROM public.get_category_balance_with_currency(902101, 902211)
     WHERE currency = 'USD'
     LIMIT 1;
 
     SELECT value INTO food_rub
-    FROM public.get_category_balance_with_currency_v2(902101, 902211)
+    FROM public.get_category_balance_with_currency(902101, 902211)
     WHERE currency = 'RUB'
     LIMIT 1;
 
