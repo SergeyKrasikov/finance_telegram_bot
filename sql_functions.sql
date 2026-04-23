@@ -72,6 +72,7 @@ DROP FUNCTION IF EXISTS public.monthly_distribute_allocation(bigint, bigint, int
 DROP FUNCTION IF EXISTS public.build_allocation_report_json(bigint, bigint, numeric, varchar, integer, text, bigint);
 DROP FUNCTION IF EXISTS public.monthly_allocation_report_metrics(bigint, bigint, jsonb);
 DROP FUNCTION IF EXISTS public.monthly_distribute_cascade(bigint, integer);
+DROP FUNCTION IF EXISTS public.monthly_distribute_cascade(bigint);
 
 -- Returns active household members for a user.
 -- Runtime membership is graph-native via user_group_memberships.
@@ -1566,11 +1567,8 @@ $function$;
 -- 1) не возвращаться к грязным legacy-дублям percent/group formulas;
 -- 2) менять её нужно по одной ветке и после каждого изменения прогонять SQL checks;
 -- 3) legacy monthly_distribute() сохраняется ниже как reference/rollback и не должна вызываться из public.monthly().
--- Legacy _income_category is kept only for SQL signature compatibility during migration;
--- runtime source resolution is branch_source-only.
 CREATE OR REPLACE FUNCTION public.monthly_distribute_cascade(
-    _user_id bigint,
-    _income_category integer DEFAULT NULL
+    _user_id bigint
 )
  RETURNS jsonb
  LANGUAGE plpgsql

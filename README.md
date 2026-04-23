@@ -243,9 +243,9 @@ Scheduler:
 Источник: `app/config.py`
 
 ## Monthly Migration
-- Для поэтапного перевода месячной логики используется `public.monthly_distribute_cascade(...)`.
+- Для поэтапного перевода месячной логики используется `public.monthly_distribute_cascade(user_id)`.
 - Legacy `public.monthly_distribute(...)` сохранена в базе как reference/rollback функция и больше не используется из `public.monthly()`.
-- `public.monthly_distribute_cascade(...)` сохраняет форму Telegram JSON, но использует clean monthly semantics: investment и family contribution отделяются явно, дальше распределяется clean remainder.
+- `public.monthly_distribute_cascade(user_id)` сохраняет форму Telegram JSON, но использует clean monthly semantics: investment и family contribution отделяются явно, дальше распределяется clean remainder.
 - Каскадные ветки и подготовительные шаги переводятся по одной, с SQL checks после каждого изменения.
 - Подготовительные шаги `11 -> 13`, `12 -> 7` и reserve уже встроены прямо в `public.monthly_distribute_cascade(...)`; monthly-path больше не зависит от переходных helper-вызовов.
 - `monthly_allocation_report_metrics(...)` уже определяет shared leaves и investment leaves через `allocation_nodes` / `allocation_routes`, а не через legacy `group 4` / `group 1`.
@@ -403,7 +403,7 @@ graph TD
   `salary_primary` требует source leaf через `allocation_scenario_node_bindings` (`binding_kind = branch_source`).
   Prep/reserve roots требуют scenario root params (`source_legacy_group_id`, `spend_legacy_group_id`, `personal_legacy_group_id`) через `allocation_scenario_root_params`, а не из root metadata и не из hard-coded условий в function body.
   `family_contribution_out` требует partner source leaf через `allocation_scenario_node_bindings` (`binding_kind = bridge_source`).
-  Legacy-параметр `_income_category` в `monthly_distribute_cascade()` сохранён только ради SQL-совместимости сигнатуры и больше не участвует в source resolution.
+  `monthly_distribute_cascade()` больше не принимает legacy income category argument; source resolution теперь полностью branch_source-only.
 - Internal helper `monthly_distribute_allocation(...)` теперь требует явный `source_category_node_id`;
   legacy category id остаётся там только как compatibility metadata/validation against the provided node.
 - Partner bridge `family_contribution_out -> family_contribution_in` резолвит source leaf через `allocation_scenario_node_bindings`, без metadata fallback.

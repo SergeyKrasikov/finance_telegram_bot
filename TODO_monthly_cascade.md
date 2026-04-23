@@ -5,7 +5,7 @@
 ## Текущее состояние
 
 - Legacy reference/rollback функция: `public.monthly_distribute(_user_id, _income_category)`.
-- Переходная функция: `public.monthly_distribute_cascade(_user_id, _income_category DEFAULT NULL)`.
+- Переходная функция: `public.monthly_distribute_cascade(_user_id)`.
   Legacy `_income_category` сохранён только ради совместимости сигнатуры; runtime source resolution уже не зависит от него.
 - Новая функция сохраняет форму Telegram JSON, но использует clean monthly semantics вместо полного повторения грязных legacy percent/group formulas.
 - Compare SQL остаётся справочным инструментом для понимания расхождений со старой функцией.

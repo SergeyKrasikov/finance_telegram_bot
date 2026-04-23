@@ -47,7 +47,7 @@ BEGIN
         RAISE EXCEPTION 'monthly() still hard-codes monthly users or legacy income category ids';
     END IF;
 
-    SELECT pg_get_functiondef('public.monthly_distribute_cascade(bigint,integer)'::regprocedure)
+    SELECT pg_get_functiondef('public.monthly_distribute_cascade(bigint)'::regprocedure)
     INTO cascade_def;
 
     SELECT pg_get_functiondef('public.find_allocation_scenario_binding_node_id(bigint,text,bigint,text)'::regprocedure)
@@ -146,9 +146,8 @@ BEGIN
         RAISE EXCEPTION 'resolve_monthly_salary_source() still depends on explicit income category argument';
     END IF;
 
-    IF POSITION('_income_category' IN cascade_def) > 0
-       AND POSITION('SQL signature compatibility' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'monthly_distribute_cascade() still uses legacy income category outside compatibility comment';
+    IF POSITION('_income_category' IN cascade_def) > 0 THEN
+        RAISE EXCEPTION 'monthly_distribute_cascade() still depends on legacy income category argument';
     END IF;
 
     IF POSITION('ensure_allocation_compatibility_node' IN distribute_def) > 0 THEN
