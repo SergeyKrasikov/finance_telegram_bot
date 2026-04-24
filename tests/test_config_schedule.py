@@ -9,7 +9,7 @@ CONFIG_PATH = Path("app/config.py")
 
 
 class ConfigScheduleTests(unittest.TestCase):
-    def test_monthly_report_runs_daily_at_midnight_utc(self) -> None:
+    def test_monthly_report_runs_daily_at_8_utc(self) -> None:
         tree = ast.parse(CONFIG_PATH.read_text(encoding="utf-8"))
         monthly_cron = None
         for node in tree.body:
@@ -25,7 +25,7 @@ class ConfigScheduleTests(unittest.TestCase):
         self.assertIsNotNone(monthly_cron)
         self.assertEqual(
             monthly_cron,
-            {"hour": 0, "minute": 0, "timezone": "UTC"},
+            {"hour": 8, "minute": 0, "timezone": "UTC"},
         )
 
 

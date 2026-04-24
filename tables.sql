@@ -90,6 +90,9 @@ constraint allocation_nodes_node_kind_check
 );
 
 alter table public.allocation_nodes
+    add column if not exists legacy_category_id int references categories(id);
+
+alter table public.allocation_nodes
     add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 alter table public.allocation_nodes

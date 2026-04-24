@@ -6,6 +6,8 @@ BEGIN;
 DO $$
 DECLARE
     has_node_metadata boolean;
+    has_node_legacy_category boolean;
+    cascade_callable_count integer;
     monthly_def text;
     cascade_def text;
     recursive_def text;
@@ -30,6 +32,32 @@ BEGIN
 
     IF NOT has_node_metadata THEN
         RAISE EXCEPTION 'Expected allocation_nodes.metadata jsonb column';
+    END IF;
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'allocation_nodes'
+          AND column_name = 'legacy_category_id'
+    )
+    INTO has_node_legacy_category;
+
+    IF NOT has_node_legacy_category THEN
+        RAISE EXCEPTION 'Expected allocation_nodes.legacy_category_id column';
+    END IF;
+
+    SELECT count(*)
+    INTO cascade_callable_count
+    FROM pg_proc proc
+    JOIN pg_namespace ns ON ns.oid = proc.pronamespace
+    WHERE ns.nspname = 'public'
+      AND proc.proname = 'monthly_distribute_cascade'
+      AND pg_get_function_arguments(proc.oid) LIKE '_user_id bigint%';
+
+    IF cascade_callable_count != 1 THEN
+        RAISE EXCEPTION 'Expected exactly one callable monthly_distribute_cascade(_user_id bigint...) function, got %',
+            cascade_callable_count;
     END IF;
 
     SELECT pg_get_functiondef('public.monthly()'::regprocedure)
