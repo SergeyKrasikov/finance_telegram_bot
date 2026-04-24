@@ -554,6 +554,7 @@ DECLARE
     _postings_inserted bigint := 0;
     _exchange_rows_reclassified bigint := 0;
     _cash_flow_count bigint;
+    _eligible_cash_flow_count bigint;
     _allocation_postings_count bigint;
 BEGIN
     WITH legacy_categories AS (
@@ -741,12 +742,54 @@ BEGIN
     GET DIAGNOSTICS _postings_inserted = ROW_COUNT;
 
     SELECT count(*) INTO _cash_flow_count FROM public.cash_flow;
+    SELECT count(*)
+    INTO _eligible_cash_flow_count
+    FROM public.cash_flow cf
+    LEFT JOIN LATERAL (
+        SELECT an.id
+        FROM public.allocation_nodes an
+        WHERE an.active
+          AND an.legacy_category_id = cf.category_id_from
+          AND (
+              an.user_id = cf.users_id
+              OR an.user_group_id IN (
+                  SELECT ugm.user_group_id
+                  FROM public.user_group_memberships ugm
+                  WHERE ugm.user_id = cf.users_id
+                    AND ugm.active
+              )
+          )
+        LIMIT 1
+    ) AS from_node ON true
+    LEFT JOIN LATERAL (
+        SELECT an.id
+        FROM public.allocation_nodes an
+        WHERE an.active
+          AND an.legacy_category_id = cf.category_id_to
+          AND (
+              an.user_id = cf.users_id
+              OR an.user_group_id IN (
+                  SELECT ugm.user_group_id
+                  FROM public.user_group_memberships ugm
+                  WHERE ugm.user_id = cf.users_id
+                    AND ugm.active
+              )
+          )
+        LIMIT 1
+    ) AS to_node ON true
+    WHERE (from_node.id IS NOT NULL OR to_node.id IS NOT NULL)
+      AND COALESCE(cf.value, 0) > 0
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.allocation_backfill_tombstones tomb
+          WHERE tomb.legacy_cash_flow_id = cf.id
+      );
     SELECT count(*) INTO _allocation_postings_count FROM public.allocation_postings;
 
-    IF _cash_flow_count > 0 AND _allocation_postings_count = 0 THEN
+    IF _eligible_cash_flow_count > 0 AND _allocation_postings_count = 0 THEN
         RAISE EXCEPTION
-            'allocation_postings backfill produced 0 rows while cash_flow has % rows',
-            _cash_flow_count;
+            'allocation_postings backfill produced 0 rows while cash_flow has % eligible rows',
+            _eligible_cash_flow_count;
     END IF;
 
     UPDATE public.allocation_postings ap

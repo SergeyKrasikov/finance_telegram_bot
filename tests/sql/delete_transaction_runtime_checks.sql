@@ -25,6 +25,10 @@ INSERT INTO public.users(id, nickname) VALUES (909001, 'delu');
 INSERT INTO public.categories(id, "name", "percent") VALUES
     (909011, 'Delete Income', 0.00),
     (909012, 'Delete Spend', 0.00);
+INSERT INTO public.category_groups(id, "name", description) VALUES
+    (6, 'Fixture free group', 'test fixture group'),
+    (13, 'Fixture income group', 'test fixture group')
+ON CONFLICT (id) DO NOTHING;
 SELECT setval(
     pg_get_serial_sequence('public.categories_category_groups', 'id'),
     COALESCE((SELECT max(id) FROM public.categories_category_groups), 1),
