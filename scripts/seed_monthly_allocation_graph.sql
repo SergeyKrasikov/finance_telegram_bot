@@ -1001,7 +1001,7 @@ LEFT JOIN public.allocation_nodes user_dst
  AND user_dst.active
 WHERE leaf.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND leaf.group_id = 2
-  AND leaf.node_user_id = leaf.owner_user_id
+  AND (leaf.node_user_id = leaf.owner_user_id OR leaf.is_shared)
   AND COALESCE(leaf.percent, 0) > 0
   AND COALESCE(leaf.percent, 0) < 1
   AND NOT EXISTS (
@@ -1097,7 +1097,7 @@ LEFT JOIN public.allocation_nodes user_dst
  AND user_dst.active
 WHERE leaf.owner_user_id IN (SELECT user_id FROM tmp_monthly_seed_users)
   AND leaf.group_id = 3
-  AND leaf.node_user_id = leaf.owner_user_id
+  AND (leaf.node_user_id = leaf.owner_user_id OR leaf.is_shared)
   AND COALESCE(leaf.percent, 0) > 0
   AND COALESCE(leaf.percent, 0) < 1
   AND NOT EXISTS (
