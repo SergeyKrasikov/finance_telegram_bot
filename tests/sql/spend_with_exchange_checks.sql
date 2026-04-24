@@ -1,4 +1,4 @@
--- checks for insert_spend_with_exchange_v2 and conversion invariants
+-- checks for insert_spend_with_exchange and conversion invariants
 -- Run with: psql -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_checks.sql
 
 BEGIN;
@@ -13,11 +13,11 @@ WHERE node_id IN (
 );
 DELETE FROM allocation_nodes WHERE user_id = 900201 OR legacy_category_id IN (900211, 900212);
 DELETE FROM cash_flow WHERE users_id = 900201;
+DELETE FROM categories_category_groups WHERE users_id = 900201;
 DELETE FROM user_group_memberships WHERE user_id = 900201;
 DELETE FROM user_groups WHERE slug = 'spend_fx_group';
 DELETE FROM users WHERE id = 900201;
 DELETE FROM categories WHERE id IN (900211, 900212);
-DELETE FROM category_groups WHERE id IN (9, 14);
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
 
 INSERT INTO users(id, nickname) VALUES (900201, 'spend_fx');
@@ -31,7 +31,8 @@ FROM user_groups
 WHERE slug = 'spend_fx_group';
 
 INSERT INTO category_groups(id, "name", description)
-VALUES (9, 'reserve_group', ''), (14, 'all_group', '');
+VALUES (9, 'reserve_group', ''), (14, 'all_group', '')
+ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO categories(id, "name", "percent")
 VALUES
@@ -57,7 +58,7 @@ VALUES
   (now() - interval '10 minutes', 'USDT', 1);
 
 -- action
-SELECT public.insert_spend_with_exchange_v2(900201, 'Travel', 100::numeric, 'usdt', 'fx test');
+SELECT public.insert_spend_with_exchange(900201, 'Travel', 100::numeric, 'usdt', 'fx test');
 
 -- assertions
 DO $$
@@ -132,7 +133,7 @@ BEGIN
         RAISE EXCEPTION 'Expected RUB conversion value 8000, got %', rub_spend;
     END IF;
 
-    SELECT public.get_category_balance_v2(900201, 900212, 'RUB') INTO travel_balance;
+    SELECT public.get_category_balance(900201, 900212, 'RUB') INTO travel_balance;
     IF travel_balance IS NULL OR abs(travel_balance + 8000) > 1e-9 THEN
         RAISE EXCEPTION 'Expected Travel ledger balance = -8000, got %', travel_balance;
     END IF;
@@ -148,7 +149,7 @@ INSERT INTO exchange_rates("datetime", currency, rate) VALUES
   (now() - interval '1 day', 'RUB', 90),
   (now(), 'USDT', 1);
 
-SELECT public.insert_spend_with_exchange_v2(900201, 'Travel', 100::numeric, 'USDT', 'fx test 2');
+SELECT public.insert_spend_with_exchange(900201, 'Travel', 100::numeric, 'USDT', 'fx test 2');
 
 DO $$
 DECLARE

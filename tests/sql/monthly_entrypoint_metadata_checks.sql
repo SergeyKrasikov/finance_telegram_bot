@@ -6,11 +6,13 @@ BEGIN;
 DO $$
 DECLARE
     has_node_metadata boolean;
+    has_node_legacy_category boolean;
+    cascade_callable_count integer;
     monthly_def text;
     cascade_def text;
     recursive_def text;
     distribute_def text;
-    exchange_v2_def text;
+    exchange_def text;
     monthly_allocation_helper_def text;
     binding_helper_def text;
     root_param_helper_def text;
@@ -32,6 +34,32 @@ BEGIN
         RAISE EXCEPTION 'Expected allocation_nodes.metadata jsonb column';
     END IF;
 
+    SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'allocation_nodes'
+          AND column_name = 'legacy_category_id'
+    )
+    INTO has_node_legacy_category;
+
+    IF NOT has_node_legacy_category THEN
+        RAISE EXCEPTION 'Expected allocation_nodes.legacy_category_id column';
+    END IF;
+
+    SELECT count(*)
+    INTO cascade_callable_count
+    FROM pg_proc proc
+    JOIN pg_namespace ns ON ns.oid = proc.pronamespace
+    WHERE ns.nspname = 'public'
+      AND proc.proname = 'monthly_distribute_cascade'
+      AND pg_get_function_arguments(proc.oid) LIKE '_user_id bigint%';
+
+    IF cascade_callable_count != 1 THEN
+        RAISE EXCEPTION 'Expected exactly one callable monthly_distribute_cascade(_user_id bigint...) function, got %',
+            cascade_callable_count;
+    END IF;
+
     SELECT pg_get_functiondef('public.monthly()'::regprocedure)
     INTO monthly_def;
 
@@ -47,7 +75,7 @@ BEGIN
         RAISE EXCEPTION 'monthly() still hard-codes monthly users or legacy income category ids';
     END IF;
 
-    SELECT pg_get_functiondef('public.monthly_distribute_cascade(bigint,integer)'::regprocedure)
+    SELECT pg_get_functiondef('public.monthly_distribute_cascade(bigint)'::regprocedure)
     INTO cascade_def;
 
     SELECT pg_get_functiondef('public.find_allocation_scenario_binding_node_id(bigint,text,bigint,text)'::regprocedure)
@@ -56,8 +84,8 @@ BEGIN
     SELECT pg_get_functiondef('public.allocation_distribute(bigint,bigint,numeric,varchar,integer,text,bigint)'::regprocedure)
     INTO distribute_def;
 
-    SELECT pg_get_functiondef('public.exchange_v2(bigint,integer,numeric,varchar,numeric,varchar)'::regprocedure)
-    INTO exchange_v2_def;
+    SELECT pg_get_functiondef('public.exchange(bigint,integer,numeric,varchar,numeric,varchar)'::regprocedure)
+    INTO exchange_def;
 
     SELECT pg_get_functiondef('public.monthly_distribute_allocation(bigint,bigint,integer,varchar,text,bigint)'::regprocedure)
     INTO monthly_allocation_helper_def;
@@ -146,17 +174,16 @@ BEGIN
         RAISE EXCEPTION 'resolve_monthly_salary_source() still depends on explicit income category argument';
     END IF;
 
-    IF POSITION('_income_category' IN cascade_def) > 0
-       AND POSITION('SQL signature compatibility' IN cascade_def) = 0 THEN
-        RAISE EXCEPTION 'monthly_distribute_cascade() still uses legacy income category outside compatibility comment';
+    IF POSITION('_income_category' IN cascade_def) > 0 THEN
+        RAISE EXCEPTION 'monthly_distribute_cascade() still depends on legacy income category argument';
     END IF;
 
     IF POSITION('ensure_allocation_compatibility_node' IN distribute_def) > 0 THEN
         RAISE EXCEPTION 'allocation_distribute() still auto-creates compatibility nodes at runtime';
     END IF;
 
-    IF POSITION('ensure_allocation_compatibility_node' IN exchange_v2_def) > 0 THEN
-        RAISE EXCEPTION 'exchange_v2() still auto-creates compatibility nodes at runtime';
+    IF POSITION('ensure_allocation_compatibility_node' IN exchange_def) > 0 THEN
+        RAISE EXCEPTION 'exchange() still auto-creates compatibility nodes at runtime';
     END IF;
 
     IF POSITION('find_allocation_category_node_id_by_legacy' IN monthly_allocation_helper_def) > 0 THEN

@@ -9,7 +9,7 @@ CONFIG_PATH = Path("app/config.py")
 
 
 class ConfigScheduleTests(unittest.TestCase):
-    def test_monthly_report_runs_on_first_day_of_month(self) -> None:
+    def test_monthly_report_runs_monthly(self) -> None:
         tree = ast.parse(CONFIG_PATH.read_text(encoding="utf-8"))
         monthly_cron = None
         for node in tree.body:

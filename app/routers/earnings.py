@@ -4,8 +4,8 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from app.config import GROUP_EARNINGS
-from app.db.categories import get_categories_name_v2
-from app.db.transactions import insert_revenue_v2
+from app.db.categories import get_categories_name
+from app.db.transactions import insert_revenue
 from app.parsers.input import is_number_input, parse_amount_with_defaults
 from app.filters.category_name import CategoryNameFilter
 from app.states.finance import WriteEarnings
@@ -16,7 +16,7 @@ router = Router()
 
 @router.message(lambda m: m.text == "Доход", StateFilter(None))
 async def choose_category(message: Message, state: FSMContext) -> None:
-    categories = await get_categories_name_v2(message.chat.id, GROUP_EARNINGS)
+    categories = await get_categories_name(message.chat.id, GROUP_EARNINGS)
     await state.update_data(categorys=categories)
     kb = [
         [
@@ -43,7 +43,7 @@ async def write_value(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     category = data.get("category")
     amount, currency, comment = parse_amount_with_defaults(message.text)
-    await insert_revenue_v2(message.chat.id, category, amount, currency, comment)
+    await insert_revenue(message.chat.id, category, amount, currency, comment)
     await message.answer(
         "OK (валюта по умолчанию RUB)", reply_markup=create_default_keyboard()
     )

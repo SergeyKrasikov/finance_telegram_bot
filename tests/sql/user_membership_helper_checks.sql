@@ -5,7 +5,6 @@ BEGIN;
 
 DELETE FROM user_group_memberships WHERE user_id IN (911001, 911002, 911003);
 DELETE FROM user_groups WHERE slug IN ('test_membership_group_a', 'test_membership_group_b');
-DELETE FROM users_groups WHERE users_id IN (911001, 911002, 911003);
 DELETE FROM users WHERE id IN (911001, 911002, 911003);
 
 INSERT INTO users(id, nickname) VALUES
@@ -51,23 +50,6 @@ BEGIN
 
     IF household_members <> '911002,911003' THEN
         RAISE EXCEPTION 'Expected runtime household helper result 911002,911003, got %', household_members;
-    END IF;
-END $$;
-
-INSERT INTO users_groups(users_id, users_groups) VALUES
-    (911002, 9911),
-    (911003, 9911);
-
-DO $$
-DECLARE
-    legacy_household_members text;
-BEGIN
-    SELECT string_agg(user_id::text, ',' ORDER BY user_id)
-    INTO legacy_household_members
-    FROM public.get_users_id(911002);
-
-    IF legacy_household_members <> '911002,911003' THEN
-        RAISE EXCEPTION 'Expected legacy/runtime helper result 911002,911003, got %', legacy_household_members;
     END IF;
 END $$;
 

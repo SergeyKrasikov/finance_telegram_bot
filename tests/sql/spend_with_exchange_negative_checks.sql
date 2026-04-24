@@ -1,4 +1,4 @@
--- negative checks for insert_spend_with_exchange_v2 preconditions
+-- negative checks for insert_spend_with_exchange preconditions
 -- Run with: psql -v ON_ERROR_STOP=1 -f tests/sql/spend_with_exchange_negative_checks.sql
 
 BEGIN;
@@ -12,16 +12,17 @@ WHERE node_id IN (
 );
 DELETE FROM allocation_nodes WHERE user_id = 903001 OR legacy_category_id IN (903011, 903012);
 DELETE FROM cash_flow WHERE users_id = 903001;
+DELETE FROM categories_category_groups WHERE users_id = 903001;
 DELETE FROM users WHERE id = 903001;
 DELETE FROM categories WHERE id IN (903011, 903012);
-DELETE FROM category_groups WHERE id IN (9, 14);
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'RUB', 'USDT');
 
 INSERT INTO users(id, nickname) VALUES (903001, 'neg_fx');
 
 INSERT INTO category_groups(id, "name", description) VALUES
   (9, 'reserve_group', ''),
-  (14, 'all_group', '');
+  (14, 'all_group', '')
+ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO categories(id, "name", "percent") VALUES
   (903011, 'ReserveNeg', 0.00),
@@ -31,7 +32,7 @@ DO $$
 BEGIN
     -- 1) Missing rates should fail
     BEGIN
-        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg1');
+        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg1');
         RAISE EXCEPTION 'Expected failure for missing rates';
     EXCEPTION
         WHEN OTHERS THEN
@@ -79,7 +80,7 @@ BEGIN
     VALUES (903022, 14, true);
 
     BEGIN
-        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg2');
+        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 10::numeric, 'USDT', 'neg2');
         RAISE EXCEPTION 'Expected failure for missing reserve category';
     EXCEPTION
         WHEN OTHERS THEN
@@ -99,7 +100,7 @@ BEGIN
       AND legacy_group_id = 14;
 
     BEGIN
-        PERFORM public.insert_spend_with_exchange_v2(903001, 'UnknownCategory', 10::numeric, 'USDT', 'neg3');
+        PERFORM public.insert_spend_with_exchange(903001, 'UnknownCategory', 10::numeric, 'USDT', 'neg3');
         RAISE EXCEPTION 'Expected failure for missing category in group 14';
     EXCEPTION
         WHEN OTHERS THEN
@@ -110,7 +111,7 @@ BEGIN
 
     -- 4) Non-positive value should fail
     BEGIN
-        PERFORM public.insert_spend_with_exchange_v2(903001, 'SpendNeg', 0::numeric, 'USDT', 'neg4');
+        PERFORM public.insert_spend_with_exchange(903001, 'SpendNeg', 0::numeric, 'USDT', 'neg4');
         RAISE EXCEPTION 'Expected failure for non-positive spend value';
     EXCEPTION
         WHEN OTHERS THEN

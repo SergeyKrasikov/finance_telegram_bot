@@ -99,8 +99,8 @@ DECLARE
     rub_balance numeric;
     usd_balance numeric;
 BEGIN
-    SELECT public.get_category_balance_v2(901101, 901111, 'RUB') INTO rub_balance;
-    SELECT public.get_category_balance_v2(901101, 901111, 'USD') INTO usd_balance;
+    SELECT public.get_category_balance(901101, 901111, 'RUB') INTO rub_balance;
+    SELECT public.get_category_balance(901101, 901111, 'USD') INTO usd_balance;
 
     -- Expected with latest rates (RUB=100, ETH=0.0005):
     -- +0.1 ETH => +20000 RUB
@@ -121,8 +121,8 @@ END $$;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'USDT', 'RUB');
 INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
-SELECT public.exchange_v2(901101, 901111, 1::numeric, 'USD', 99::numeric, 'USDT');
-SELECT public.exchange_v2(901101, 901111, 80::numeric, 'RUB', 1::numeric, 'USDT');
+SELECT public.exchange(901101, 901111, 1::numeric, 'USD', 99::numeric, 'USDT');
+SELECT public.exchange(901101, 901111, 80::numeric, 'RUB', 1::numeric, 'USDT');
 
 DO $$
 DECLARE

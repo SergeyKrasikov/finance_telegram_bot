@@ -8,7 +8,6 @@ DELETE FROM allocation_postings WHERE user_id = 905001;
 DELETE FROM allocation_nodes WHERE user_id = 905001 OR legacy_category_id = 905011;
 DELETE FROM cash_flow WHERE users_id = 905001;
 DELETE FROM categories_category_groups WHERE users_id = 905001;
-DELETE FROM users_groups WHERE users_id = 905001;
 DELETE FROM users WHERE id = 905001;
 DELETE FROM categories WHERE id = 905011;
 DELETE FROM exchange_rates WHERE currency IN ('USD', 'USDT', 'FDUSD');
@@ -70,12 +69,12 @@ BEGIN
 
     INSERT INTO exchange_rates("datetime", currency, rate) VALUES (now(), 'USD', 1);
 
-    msg := public.exchange_v2(905001, 905011, 100::numeric, 'USD', 99::numeric, 'USDT');
+    msg := public.exchange(905001, 905011, 100::numeric, 'USD', 99::numeric, 'USDT');
     IF msg NOT LIKE 'Курс:%USDT%' THEN
         RAISE EXCEPTION 'Unexpected exchange message for USDT: %', msg;
     END IF;
 
-    msg := public.exchange_v2(905001, 905011, 100::numeric, 'USD', 98::numeric, 'FDUSD');
+    msg := public.exchange(905001, 905011, 100::numeric, 'USD', 98::numeric, 'FDUSD');
     IF msg NOT LIKE 'Курс:%FDUSD%' THEN
         RAISE EXCEPTION 'Unexpected exchange message for FDUSD: %', msg;
     END IF;
@@ -91,7 +90,7 @@ BEGIN
 
     IF (
         SELECT count(DISTINCT transact)
-        FROM public.get_currency_v2()
+        FROM public.get_currency()
         WHERE transact IN ('USDT', 'FDUSD')
     ) <> 2 THEN
         RAISE EXCEPTION 'Expected ledger-backed currency list to include long currency codes';
